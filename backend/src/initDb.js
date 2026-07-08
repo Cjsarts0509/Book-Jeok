@@ -71,6 +71,17 @@ ALTER TABLE files ADD COLUMN IF NOT EXISTS note TEXT NOT NULL DEFAULT '';
 ALTER TABLE files ADD COLUMN IF NOT EXISTS note_updated_at TIMESTAMPTZ;
 ALTER TABLE files ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now();
 
+-- 휴지통(소프트 삭제)
+ALTER TABLE files ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
+ALTER TABLE files ADD COLUMN IF NOT EXISTS deleted_with_folder TEXT;   -- 폴더 통째 삭제 시 그 폴더 경로
+CREATE INDEX IF NOT EXISTS idx_files_deleted ON files(deleted_at);
+
+-- folders: 비고 및 소프트 삭제
+ALTER TABLE folders ADD COLUMN IF NOT EXISTS note TEXT NOT NULL DEFAULT '';
+ALTER TABLE folders ADD COLUMN IF NOT EXISTS note_updated_at TIMESTAMPTZ;
+ALTER TABLE folders ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
+CREATE INDEX IF NOT EXISTS idx_folders_deleted ON folders(deleted_at);
+
 -- users.role: 'manager'(담당자) 허용하도록 제약 갱신
 ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check;
 ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN ('user','manager','admin'));

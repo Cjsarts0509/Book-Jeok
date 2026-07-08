@@ -134,7 +134,7 @@ textarea.input { resize: vertical; }
 .empty .big { font-size: 46px; margin-bottom: 8px; }
 
 /* ── 선택 일괄작업 바 ── */
-.selbar { display: flex; align-items: center; gap: 8px; padding: 10px 14px; margin-bottom: 12px; background: #FFF3CF; border: 1px solid var(--primary); border-radius: var(--radius-sm); position: sticky; top: 0; z-index: 5; }
+.selbar { display: flex; align-items: center; gap: 8px; padding: 10px 14px; margin-bottom: 12px; background: #FFF3CF; border: 1px solid var(--primary); border-radius: var(--radius-sm); position: sticky; top: 0; z-index: 5; animation: slideDown .2s ease; }
 
 /* ── 그리드 뷰 ── */
 .file-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 14px; }
@@ -168,11 +168,20 @@ th { background: var(--bg); font-weight: 700; color: var(--text-muted); font-siz
 .badge.on { background: #D8F8EE; color: #05835f; }
 .badge.off { background: #F1F3F5; color: var(--text-muted); }
 
-/* ── 모달 ── */
-.modal-backdrop { position: fixed; inset: 0; background: rgba(52,58,64,.45); display: grid; place-items: center; z-index: 500; padding: 20px; animation: fade .15s; }
-@keyframes fade { from { opacity: 0; } to { opacity: 1; } }
-.modal { width: 100%; max-width: 440px; background: var(--surface); border-radius: var(--radius-lg); box-shadow: var(--shadow-lg); padding: 24px; max-height: 90vh; overflow-y: auto; }
-.modal h3 { font-size: 18px; margin-bottom: 16px; }
+/* ── 모달 (부드러운 등장, 바깥클릭 닫힘 없음) ── */
+.modal-backdrop { position: fixed; inset: 0; background: rgba(52,58,64,.45); display: grid; place-items: center; z-index: 500; padding: 20px; opacity: 0; transition: opacity .2s ease; backdrop-filter: blur(1px); }
+.modal-backdrop.open { opacity: 1; }
+.modal { position: relative; width: 100%; max-width: 440px; background: var(--surface); border-radius: var(--radius-lg); box-shadow: var(--shadow-lg); padding: 26px 24px 24px; max-height: 90vh; overflow-y: auto; opacity: 0; transform: translateY(18px) scale(.96); transition: transform .24s cubic-bezier(.2,.9,.25,1), opacity .2s ease; }
+.modal-backdrop.open .modal { opacity: 1; transform: none; }
+.modal-x { position: absolute; top: 12px; right: 12px; width: 30px; height: 30px; border: none; background: transparent; color: var(--text-muted); font-size: 15px; border-radius: 8px; cursor: pointer; display: grid; place-items: center; transition: background .15s, color .15s, transform .15s; }
+.modal-x:hover { background: var(--bg); color: var(--text); transform: rotate(90deg); }
+.modal h3 { font-size: 18px; margin-bottom: 16px; padding-right: 28px; }
+
+/* ── 공통 등장 애니메이션 ── */
+@keyframes fadeInUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+.fade-in { animation: fadeInUp .28s ease both; }
+@keyframes slideDown { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { *, .modal, .fade-in { animation: none !important; transition: none !important; } }
 .modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px; }
 .secret-box { background: var(--bg); border: 1px dashed var(--primary-dark); border-radius: var(--radius-sm); padding: 14px; font-family: var(--font-num); font-size: 16px; text-align: center; letter-spacing: 1px; user-select: all; }
 
@@ -211,7 +220,8 @@ th { background: var(--bg); font-weight: 700; color: var(--text-muted); font-siz
   .file-ico { font-size: 32px; }
   .file-actions { opacity: 1; }
   .filetable .note-cell { max-width: 120px; }
-  .modal { max-width: 100%; border-radius: var(--radius-lg) var(--radius-lg) 0 0; align-self: flex-end; }
+  .modal { max-width: 100%; border-radius: var(--radius-lg) var(--radius-lg) 0 0; align-self: flex-end; transform: translateY(100%); }
   .modal-backdrop { align-items: flex-end; padding: 0; }
+  .modal-backdrop.open .modal { transform: none; }
   .stat-grid { grid-template-columns: 1fr 1fr; }
 }

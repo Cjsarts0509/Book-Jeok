@@ -50,15 +50,44 @@ const UI = (() => {
   }
 
   // 간단 모달
-  function modal(html) {
+  function modal(html, { onClose } = {}) {
     const backdrop = document.createElement('div');
     backdrop.className = 'modal-backdrop';
-    backdrop.innerHTML = `<div class="modal">${html}</div>`;
+    backdrop.innerHTML = `<div class="modal"><button class="modal-x" type="button" aria-label="닫기">✕</button>${html}</div>`;
     document.body.appendChild(backdrop);
-    backdrop.addEventListener('click', (e) => { if (e.target === backdrop) close(); });
-    function close() { backdrop.remove(); }
+    // 부드러운 등장 애니메이션
+    requestAnimationFrame(() => backdrop.classList.add('open'));
+    let closed = false;
+    function close() {
+      if (closed) return; closed = true;
+      backdrop.classList.remove('open');
+      document.removeEventListener('keydown', onKey);
+      setTimeout(() => backdrop.remove(), 200);
+      if (typeof onClose === 'function') onClose();
+    }
+    // 바깥 클릭으로는 닫히지 않음 (요구사항). X 버튼 / 취소·닫기 버튼 / ESC 로만 닫힘.
+    backdrop.querySelector('.modal-x').addEventListener('click', close);
+    const onKey = (e) => { if (e.key === 'Escape') close(); };
+    document.addEventListener('keydown', onKey);
     return { el: backdrop, close, q: (sel) => backdrop.querySelector(sel) };
   }
 
-  return { toast, bytes, date, fileIcon, escapeHtml, modal };
+  // 삭제 등 위험 동작용 확인창 (Promise<boolean>)
+  function confirm({ title = '확인', message = '', confirmText = '확인', danger = false }) {
+    return new Promise((resolve) => {
+      const m = modal(
+        `<h3>${escapeHtml(title)}</h3>
+         <p style="color:var(--text-muted);line-height:1.6;white-space:pre-line">${escapeHtml(message)}</p>
+         <div class="modal-actions">
+           <button class="btn btn-ghost" data-c>취소</button>
+           <button class="btn ${danger ? 'btn-danger' : 'btn-primary'}" data-ok>${escapeHtml(confirmText)}</button>
+         </div>`,
+        { onClose: () => resolve(false) }
+      );
+      m.q('[data-c]').addEventListener('click', m.close);
+      m.q('[data-ok]').addEventListener('click', () => { resolve(true); m.close(); });
+    });
+  }
+
+  return { toast, bytes, date, fileIcon, escapeHtml, modal, confirm };
 })();

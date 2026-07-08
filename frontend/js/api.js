@@ -48,6 +48,7 @@ const API = (() => {
     createFolder: (path, ownerId) => req('POST', '/files/folders', { path, ownerId }),
     deleteFolder: (path, ownerId) => req('DELETE', `/files/folders?path=${encodeURIComponent(path)}${ownerId ? '&ownerId=' + ownerId : ''}`),
     renameFolder: (oldPath, newPath, ownerId) => req('PATCH', '/files/folders', { oldPath, newPath, ownerId }),
+    setFolderNote: (path, note, ownerId) => req('PATCH', '/files/folders/note', { path, note, ownerId }),
     deleteFile: (id) => req('DELETE', `/files/${id}`),
     renameFile: (id, name) => req('PATCH', `/files/${id}/rename`, { name }),
     setNote: (id, note) => req('PATCH', `/files/${id}/note`, { note }),
@@ -64,5 +65,11 @@ const API = (() => {
     deleteUser: (id) => req('DELETE', `/admin/users/${id}`),
     dbStatus: () => req('GET', '/admin/db-status'),
     audit: (limit = 50) => req('GET', `/admin/audit?limit=${limit}`),
+    // trash
+    trash: () => req('GET', '/admin/trash'),
+    restoreFile: (id) => req('POST', `/admin/trash/file/${id}/restore`),
+    restoreFolder: (id) => req('POST', `/admin/trash/folder/${id}/restore`),
+    purgeFile: (id) => req('DELETE', `/admin/trash/file/${id}`),
+    purgeFolder: (id) => req('DELETE', `/admin/trash/folder/${id}`),
   };
 })();

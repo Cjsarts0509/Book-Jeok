@@ -24,6 +24,7 @@ const Admin = (() => {
           <div class="brand"><img src="assets/logo.svg"><span class="brand-name">북적북적</span></div>
           <nav class="appbar-nav">
             ${item('users', '👥', '계정 관리')}
+            ${item('trash', '🗑️', '휴지통')}
             ${item('db', '🗄️', 'DB 상태')}
             ${item('audit', '📜', '감사 로그')}
             <a class="nav-item" href="index.html"><span class="ico">📁</span><span class="t">파일로</span></a>
@@ -43,9 +44,10 @@ const Admin = (() => {
     state.tab = tab;
     renderShell();
     if (tab === 'users') loadUsers();
+    else if (tab === 'trash') loadTrash();
     else if (tab === 'db') loadDb();
     else if (tab === 'audit') loadAudit();
-    const titles = { users: '계정 관리', db: 'DB 상태', audit: '감사 로그' };
+    const titles = { users: '계정 관리', trash: '휴지통', db: 'DB 상태', audit: '감사 로그' };
     document.getElementById('page-title').textContent = titles[tab];
   }
 
@@ -191,8 +193,61 @@ const Admin = (() => {
 
   async function deleteUser(id) {
     const u = state.users.find((x) => String(x.id) === String(id));
-    if (!confirm(`'${u.username}' 계정과 모든 파일을 삭제합니다. 계속할까요?`)) return;
+    const ok = await UI.confirm({ title: '계정 삭제', danger: true, confirmText: '영구 삭제', message: `'${u.username}' 계정과 그 계정의 모든 파일을 영구 삭제합니다.\n이 작업은 되돌릴 수 없습니다. 계속할까요?` });
+    if (!ok) return;
     try { await API.deleteUser(id); UI.toast('삭제되었습니다', 'success'); loadUsers(); }
+    catch (err) { UI.toast(err.message, 'error'); }
+  }
+
+  // ── 휴지통 ──────────────────────────
+  async function loadTrash() {
+    const view = document.getElementById('view');
+    view.innerHTML = '<div class="empty"><div class="big">⏳</div>불러오는 중…</div>';
+    try {
+      const t = await API.trash();
+      const folderRows = t.folders.map((f) => `
+        <tr class="fade-in">
+          <td>📁 <b>${UI.escapeHtml(f.path)}</b><br><span class="muted" style="font-size:12px">폴더 · 파일 ${f.fileCount}개</span></td>
+          <td>${UI.escapeHtml(f.displayName || f.username || '—')}</td>
+          <td class="num muted">${new Date(f.deletedAt).toLocaleString('ko-KR')}</td>
+          <td class="row-actions" style="text-align:right">
+            <button class="btn btn-sm btn-secondary" data-rf="${f.id}">↩️ 복원</button>
+            <button class="btn btn-sm btn-danger" data-pf="${f.id}">🗑️ 영구삭제</button>
+          </td></tr>`).join('');
+      const fileRows = t.files.map((f) => `
+        <tr class="fade-in">
+          <td>${UI.fileIcon(f.name)} <b>${UI.escapeHtml(f.name)}</b><br><span class="muted" style="font-size:12px">${UI.escapeHtml(f.folder)} · ${UI.bytes(f.size)}</span></td>
+          <td>${UI.escapeHtml(f.displayName || f.username || '—')}</td>
+          <td class="num muted">${new Date(f.deletedAt).toLocaleString('ko-KR')}</td>
+          <td class="row-actions" style="text-align:right">
+            <button class="btn btn-sm btn-secondary" data-rfi="${f.id}">↩️ 복원</button>
+            <button class="btn btn-sm btn-danger" data-pfi="${f.id}">🗑️ 영구삭제</button>
+          </td></tr>`).join('');
+      const empty = t.folders.length === 0 && t.files.length === 0;
+      view.innerHTML = `
+        <p class="muted" style="margin-bottom:14px">삭제된 항목은 여기에 보관되며, <b>${t.retentionDays}일(1년) 후 자동으로 영구 삭제</b>됩니다. 복원 시 원래 위치로 돌아가고, 같은 이름이 있으면 자동으로 번호가 붙습니다.</p>
+        ${empty ? '<div class="empty"><div class="big">🗑️</div>휴지통이 비어 있습니다.</div>' : `
+        <div class="table-wrap fade-in"><table><thead><tr><th>항목</th><th>소유 계정</th><th>삭제 시각</th><th></th></tr></thead>
+        <tbody>${folderRows}${fileRows}</tbody></table></div>`}`;
+      view.querySelectorAll('[data-rf]').forEach((el) => el.addEventListener('click', () => restore('folder', el.dataset.rf)));
+      view.querySelectorAll('[data-rfi]').forEach((el) => el.addEventListener('click', () => restore('file', el.dataset.rfi)));
+      view.querySelectorAll('[data-pf]').forEach((el) => el.addEventListener('click', () => purge('folder', el.dataset.pf)));
+      view.querySelectorAll('[data-pfi]').forEach((el) => el.addEventListener('click', () => purge('file', el.dataset.pfi)));
+    } catch (err) { view.innerHTML = `<div class="empty">⚠️ ${UI.escapeHtml(err.message)}</div>`; }
+  }
+
+  async function restore(type, id) {
+    try {
+      const r = type === 'folder' ? await API.restoreFolder(id) : await API.restoreFile(id);
+      UI.toast(`복원되었습니다${r.name ? ' → ' + r.name : (r.path ? ' → ' + r.path : '')}`, 'success');
+      loadTrash();
+    } catch (err) { UI.toast(err.message, 'error'); }
+  }
+
+  async function purge(type, id) {
+    const ok = await UI.confirm({ title: '영구 삭제', danger: true, confirmText: '영구 삭제', message: '이 항목을 완전히 삭제합니다.\n디스크에서도 제거되며 복원할 수 없습니다. 계속할까요?' });
+    if (!ok) return;
+    try { if (type === 'folder') await API.purgeFolder(id); else await API.purgeFile(id); UI.toast('영구 삭제되었습니다', 'success'); loadTrash(); }
     catch (err) { UI.toast(err.message, 'error'); }
   }
 

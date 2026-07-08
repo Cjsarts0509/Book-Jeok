@@ -1,16 +1,37 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
-  <g stroke="#2B2D42" stroke-width="3" stroke-linejoin="round" stroke-linecap="round">
+  <g stroke="#2B2D42" stroke-width="3.2" stroke-linejoin="round" stroke-linecap="round">
     <!-- 폴더 뒷판 -->
-    <path d="M22 52 h30 l8 9 h46 a5 5 0 0 1 5 5 v40 a5 5 0 0 1 -5 5 H22 a5 5 0 0 1 -5 -5 V57 a5 5 0 0 1 5 -5 z" fill="#FDB833"/>
-    <!-- 파란 책 (폴더 안쪽) -->
-    <rect x="40" y="66" width="30" height="40" rx="2" transform="rotate(-6 55 86)" fill="#4C9BE8"/>
+    <path d="M18 54 h26 l8 8 h54 a4 4 0 0 1 4 4 v38 a4 4 0 0 1 -4 4 H22 a4 4 0 0 1 -4 -4 V58 a4 4 0 0 1 4 -4 z" fill="#F2B22E"/>
+
+    <!-- 파란 책 (폴더 안, 앞판 뒤에 반쯤) -->
+    <g transform="rotate(-8 52 84)">
+      <rect x="37" y="60" width="30" height="42" rx="3" fill="#4C9BE8"/>
+      <rect x="37" y="60" width="7" height="42" rx="2" fill="#EAF4FC"/>
+      <rect x="49" y="82" width="14" height="5" rx="2" fill="#BFE0F5"/>
+    </g>
+
     <!-- 빨간 책 -->
-    <g transform="rotate(-20 52 46)"><rect x="38" y="26" width="26" height="40" rx="2.5" fill="#EA4B54"/><rect x="45" y="52" width="12" height="4.5" rx="1.5" fill="#FFD166"/></g>
+    <g transform="rotate(-22 50 46)">
+      <rect x="35" y="24" width="29" height="42" rx="3" fill="#EA4B54"/>
+      <rect x="35" y="24" width="7" height="42" rx="2" fill="#FDE9E6"/>
+      <rect x="47" y="47" width="13" height="5" rx="2" fill="#FBE0A6"/>
+    </g>
+
     <!-- 초록 책 -->
-    <g transform="rotate(-3 92 34)"><rect x="80" y="18" width="23" height="34" rx="2.5" fill="#39B54A"/><rect x="85" y="42" width="11" height="4" rx="1.5" fill="#A7E86A"/></g>
+    <g transform="rotate(-4 90 34)">
+      <rect x="78" y="16" width="24" height="36" rx="3" fill="#37B34A"/>
+      <rect x="78" y="16" width="6" height="36" rx="2" fill="#E7F7E2"/>
+      <rect x="88" y="40" width="10" height="4.5" rx="2" fill="#A8E063"/>
+    </g>
+
     <!-- 보라 책 -->
-    <g transform="rotate(16 100 64)"><rect x="86" y="46" width="26" height="38" rx="2.5" fill="#8460D9"/><path d="M91 70 h13 M91 76 h13" stroke="#C9B6F2" stroke-width="3"/></g>
+    <g transform="rotate(18 100 62)">
+      <rect x="86" y="44" width="27" height="40" rx="3" fill="#8B5CF6"/>
+      <rect x="86" y="44" width="7" height="40" rx="2" fill="#EFE9FD"/>
+      <path d="M98 62 h11 M98 69 h11" stroke="#C9B6F2" stroke-width="3"/>
+    </g>
+
     <!-- 폴더 앞판 -->
-    <path d="M17 70 h94 l-6 40 a5 5 0 0 1 -5 4 H28 a5 5 0 0 1 -5 -4 z" fill="#FFD166"/>
+    <path d="M14 70 h96 l-6 40 a4 4 0 0 1 -4 3 H24 a4 4 0 0 1 -4 -3 z" fill="#FFD166"/>
   </g>
 </svg>

@@ -66,6 +66,7 @@ app.use((err, req, res, next) => {
 
 // ── 시작 ────────────────────────────────────────────
 fs.mkdirSync(config.storageRoot, { recursive: true });
+require('./purge').startPurgeScheduler(); // 휴지통 1년 경과분 자동 영구삭제
 app.listen(config.port, () => {
   console.log(`북적북적 API 서버 실행 중 → http://localhost:${config.port}  (env: ${config.env})`);
   console.log(`파일 저장 경로: ${config.storageRoot}`);
