@@ -17,30 +17,23 @@ const Admin = (() => {
   }
 
   function renderShell() {
+    const item = (tab, ico, label) => `<div class="nav-item ${state.tab === tab ? 'active' : ''}" data-tab="${tab}"><span class="ico">${ico}</span><span class="t">${label}</span></div>`;
     root().innerHTML = `
-      <div class="app">
-        <aside class="sidebar">
+      <div class="layout">
+        <header class="appbar">
           <div class="brand"><img src="assets/logo.svg"><span class="brand-name">북적북적</span></div>
-          <div class="nav-item ${state.tab === 'users' ? 'active' : ''}" data-tab="users"><span class="ico">👥</span> 계정 관리</div>
-          <div class="nav-item ${state.tab === 'db' ? 'active' : ''}" data-tab="db"><span class="ico">🗄️</span> DB 상태</div>
-          <div class="nav-item ${state.tab === 'audit' ? 'active' : ''}" data-tab="audit"><span class="ico">📜</span> 감사 로그</div>
-          <a class="nav-item" href="index.html"><span class="ico">📁</span> 파일로 돌아가기</a>
-          <div class="sidebar-spacer"></div>
-          <div class="user-chip"><b>${UI.escapeHtml(state.user.displayName)}</b><span>관리자</span></div>
-        </aside>
-        <main class="main">
-          <div class="mobile-topbar">
-            <img src="assets/logo.svg"><span class="brand-name">관리자</span>
-            <div class="topbar-spacer"></div>
-            <a class="btn btn-ghost btn-sm" href="index.html">📁</a>
-          </div>
-          <header class="topbar"><h1 id="page-title">계정 관리</h1></header>
-          <div class="content" id="view"></div>
-          <nav class="mobile-nav">
-            <div class="m-item ${state.tab === 'users' ? 'active' : ''}" data-tab="users"><span class="ico">👥</span>계정</div>
-            <div class="m-item ${state.tab === 'db' ? 'active' : ''}" data-tab="db"><span class="ico">🗄️</span>DB</div>
-            <div class="m-item ${state.tab === 'audit' ? 'active' : ''}" data-tab="audit"><span class="ico">📜</span>로그</div>
+          <nav class="appbar-nav">
+            ${item('users', '👥', '계정 관리')}
+            ${item('db', '🗄️', 'DB 상태')}
+            ${item('audit', '📜', '감사 로그')}
+            <a class="nav-item" href="index.html"><span class="ico">📁</span><span class="t">파일로</span></a>
           </nav>
+          <div class="topbar-spacer"></div>
+          <div class="user-chip-sm">${UI.escapeHtml(state.user.displayName)} · 관리자</div>
+        </header>
+        <main class="content admin-content">
+          <h1 class="admin-title" id="page-title">계정 관리</h1>
+          <div id="view"></div>
         </main>
       </div>`;
     root().querySelectorAll('[data-tab]').forEach((el) => el.addEventListener('click', () => switchTab(el.dataset.tab)));
