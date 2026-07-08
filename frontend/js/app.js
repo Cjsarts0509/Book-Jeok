@@ -28,7 +28,7 @@ const App = (() => {
     root().innerHTML = `
       <div class="login-screen">
         <form class="login-card" id="login-form">
-          <img src="assets/logo.svg?v=10" class="login-logo" alt="북적북적">
+          <img src="assets/logo.svg?v=11" class="login-logo" alt="북적북적">
           <div class="login-title">북적북적</div>
           <div class="login-sub">Book-Jeok · 우리끼리 나누는 파일 창고</div>
           <div class="field"><label>아이디</label><input class="input" name="username" autocomplete="username" placeholder="아이디" required></div>
@@ -52,7 +52,7 @@ const App = (() => {
       <div class="layout">
         <header class="appbar">
           <button class="icon-btn appbar-menu" id="menu-toggle" title="폴더">☰</button>
-          <div class="brand" id="brand-home" title="홈으로"><img src="assets/logo.svg?v=10"><span class="brand-name">북적북적</span></div>
+          <div class="brand" id="brand-home" title="홈으로"><img src="assets/logo.svg?v=11"><span class="brand-name">북적북적</span></div>
           ${isPriv() ? `<select class="input account-switcher" id="account-switcher"><option value="">내 파일</option></select>` : ''}
           <div class="topbar-spacer"></div>
           <nav class="appbar-nav">
@@ -175,22 +175,26 @@ const App = (() => {
       const icon = depth === 0 ? '🏠' : (st.icon || '📁');
       const colorStyle = st.color ? `border-left:3px solid ${st.color};` : '';
       const caret = hasKids ? `<span class="tcaret ${isOpen ? 'open' : ''}" data-toggle="${UI.escapeHtml(node.path)}">▸</span>` : '<span class="tcaret-empty"></span>';
-      let html = `<div class="tree-item d${Math.min(depth, 5)}${active}" data-folder="${UI.escapeHtml(node.path)}" style="padding-left:${6 + depth * 14}px;${colorStyle}">${caret}<span class="tico">${icon}</span><span class="tname">${UI.escapeHtml(node.name)}</span></div>`;
+      let html = `<div class="tree-item${active}" data-folder="${UI.escapeHtml(node.path)}" style="padding-left:${6 + depth * 14}px;${colorStyle}">${caret}<span class="tico">${icon}</span><span class="tname">${UI.escapeHtml(node.name)}</span></div>`;
       if (hasKids && isOpen) for (const k of kids) html += render(k, depth + 1);
       return html;
     };
     el.innerHTML = render(rootNode, 0);
-    el.querySelectorAll('[data-toggle]').forEach((c) => c.addEventListener('click', (e) => {
-      e.stopPropagation(); const p = c.dataset.toggle;
-      if (state.expanded.has(p)) state.expanded.delete(p); else state.expanded.add(p);
-      renderTree();
-    }));
-    // 폴더 진입은 더블클릭 (캐럿 버튼은 위에서 한 번 클릭으로 접기/펼치기 유지)
-    el.querySelectorAll('.tree-item[data-folder]').forEach((n) => n.addEventListener('dblclick', () => {
-      state.folder = n.dataset.folder;
-      if (n.dataset.folder !== '/') state.expanded.add(n.dataset.folder); // 이동 시 해당 폴더 펼침
-      loadFiles(); renderTree(); if (window.innerWidth <= 768) toggleTree();
-    }));
+    const toggleExpand = (p) => { if (p === '/') return; if (state.expanded.has(p)) state.expanded.delete(p); else state.expanded.add(p); renderTree(); };
+    // 캐럿 버튼: 한 번 클릭으로 하위트리 열고 닫기
+    el.querySelectorAll('[data-toggle]').forEach((c) => c.addEventListener('click', (e) => { e.stopPropagation(); toggleExpand(c.dataset.toggle); }));
+    el.querySelectorAll('.tree-item[data-folder]').forEach((n) => {
+      // 한 번 클릭: 해당 폴더 조회 (트리 재렌더 없이 active 표시만 갱신 → 더블클릭 인식 유지)
+      n.addEventListener('click', () => {
+        const p = n.dataset.folder;
+        if (state.folder !== p) { state.folder = p; loadFiles(); }
+        el.querySelectorAll('.tree-item.active').forEach((x) => x.classList.remove('active'));
+        n.classList.add('active');
+        if (window.innerWidth <= 768) toggleTree();
+      });
+      // 더블 클릭: 하위트리 열기/닫기
+      n.addEventListener('dblclick', () => toggleExpand(n.dataset.folder));
+    });
   }
   function expandAll() { state.expanded = allTreePaths(); renderTree(); }
   function collapseAll() { state.expanded = new Set(['/']); renderTree(); }
