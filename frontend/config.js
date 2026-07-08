@@ -6,4 +6,4 @@
      예) "https://api.book-jeok.example.com"
    - 프런트+백엔드를 한 서버에서 함께 서빙(SERVE_FRONTEND=1)한다면 "" 로 두세요.
    ───────────────────────────────────────────────────────────── */
-window.BOOKJEOK_API = "";
+window.BOOKJEOK_API = "https://api.cjs0509.xyz";
