@@ -1,0 +1,22 @@
+# Cloudflare Tunnel 설정 예시
+# 오라클 클라우드 VM의 백엔드(127.0.0.1:4000)를 공인 IP·포트 개방 없이
+# Cloudflare 네트워크로 안전하게 노출합니다.
+#
+# 사전 준비:
+#   1) cloudflared 설치 후  `cloudflared tunnel login`
+#   2) `cloudflared tunnel create book-jeok`  → <TUNNEL_ID> 와 자격증명 json 생성
+#   3) DNS:  `cloudflared tunnel route dns book-jeok book-jeok.example.com`
+#   4) 이 파일을 /etc/cloudflared/config.yml 로 배치 후 서비스 등록:
+#        cloudflared service install
+#
+tunnel: <TUNNEL_ID>
+credentials-file: /etc/cloudflared/<TUNNEL_ID>.json
+
+ingress:
+  # 프런트를 API 서버가 함께 서빙(SERVE_FRONTEND=1)하는 경우: 단일 도메인
+  - hostname: book-jeok.example.com
+    service: http://127.0.0.1:4000
+  # 프런트를 Cloudflare Pages 로 분리 배포하는 경우: API 서브도메인만 터널
+  # - hostname: api.book-jeok.example.com
+  #   service: http://127.0.0.1:4000
+  - service: http_status:404

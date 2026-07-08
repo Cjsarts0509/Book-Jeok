@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="120" height="120">
+  <rect width="120" height="120" rx="26" fill="#FFFFFF"/>
+  <!-- 튀어나오는 책들 -->
+  <g stroke="#343A40" stroke-width="2.4" stroke-linejoin="round">
+    <rect x="26" y="34" width="15" height="26" rx="2" transform="rotate(-18 33 47)" fill="#E63946"/>
+    <rect x="52" y="24" width="15" height="26" rx="2" transform="rotate(-4 59 37)" fill="#06D6A0"/>
+    <rect x="74" y="30" width="15" height="26" rx="2" transform="rotate(14 81 43)" fill="#7C5CFC"/>
+  </g>
+  <!-- 활기 표시 -->
+  <g stroke="#343A40" stroke-width="2.4" stroke-linecap="round">
+    <path d="M92 26 l7 -5"/><path d="M95 36 l8 -1"/>
+  </g>
+  <!-- 폴더 -->
+  <path d="M20 58 h26 l7 8 h47 a4 4 0 0 1 4 4 v26 a4 4 0 0 1 -4 4 H20 a4 4 0 0 1 -4 -4 V62 a4 4 0 0 1 4 -4 z"
+        fill="#FFD166" stroke="#343A40" stroke-width="2.6" stroke-linejoin="round"/>
+  <path d="M16 70 h88 v26 a4 4 0 0 1 -4 4 H20 a4 4 0 0 1 -4 -4 z"
+        fill="#FFDE85" stroke="#343A40" stroke-width="2.6" stroke-linejoin="round"/>
+</svg>

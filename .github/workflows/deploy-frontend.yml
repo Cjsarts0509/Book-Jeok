@@ -1,0 +1,32 @@
+name: Deploy Frontend to Cloudflare Pages
+
+# 프런트엔드(frontend/)를 Cloudflare Pages 로 배포합니다.
+# 사전 준비 — 저장소 Secrets 에 다음을 등록:
+#   CLOUDFLARE_API_TOKEN  (Pages 편집 권한 토큰)
+#   CLOUDFLARE_ACCOUNT_ID
+#   BOOKJEOK_API          (백엔드 주소, 예: https://api.book-jeok.example.com)
+
+on:
+  push:
+    branches: [main]
+    paths: ['frontend/**', '.github/workflows/deploy-frontend.yml']
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Inject backend API URL
+        run: |
+          # index/admin html 의 window.BOOKJEOK_API 를 실제 백엔드 주소로 치환
+          sed -i "s#window.BOOKJEOK_API = \"\"#window.BOOKJEOK_API = \"${{ secrets.BOOKJEOK_API }}\"#" \
+            frontend/index.html frontend/admin.html
+
+      - name: Publish to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy frontend --project-name=book-jeok
