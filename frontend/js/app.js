@@ -7,11 +7,17 @@ const App = (() => {
     branches: [],
     allowedExt: ['csv', 'xls', 'xlsx', 'jpg', 'png', 'gif', 'ppt', 'pptx', 'doc', 'docx', 'txt'],
     selected: new Map(), // key -> {type:'file'|'folder', id, path, name}
+    treeStyles: {},      // path -> {icon, color}
+    expanded: new Set(['/']), // 펼쳐진 폴더 경로 (기본: 루트만 = 최상위만 보임)
   };
   const root = () => document.getElementById('app');
   const isPriv = () => state.user && (state.user.role === 'admin' || state.user.role === 'manager');
   const roleLabel = (r) => ({ admin: '관리자', manager: '담당자', user: '일반' }[r] || r);
   const selKey = (i) => (i.type === 'file' ? `file:${i.id}` : `folder:${i.path}`);
+  // 폴더 아이콘(모양)·색상 프리셋
+  const FOLDER_ICONS = ['📁', '📂', '🗂️', '🗃️', '📦', '📚', '⭐', '🏷️', '🎁', '🔖', '💼', '🎨'];
+  const FOLDER_COLORS = ['', '#EA4B54', '#F39C12', '#F0BC3C', '#37B34A', '#118AB2', '#8B5CF6', '#868E96'];
+  const folderStyle = (path) => state.treeStyles[path] || {};
 
   async function boot() {
     if (API.hasToken()) { try { state.user = (await API.me()).user; return renderApp(); } catch { API.setToken(null); } }
@@ -22,7 +28,7 @@ const App = (() => {
     root().innerHTML = `
       <div class="login-screen">
         <form class="login-card" id="login-form">
-          <img src="assets/logo.svg?v=8" class="login-logo" alt="북적북적">
+          <img src="assets/logo.svg?v=9" class="login-logo" alt="북적북적">
           <div class="login-title">북적북적</div>
           <div class="login-sub">Book-Jeok · 우리끼리 나누는 파일 창고</div>
           <div class="field"><label>아이디</label><input class="input" name="username" autocomplete="username" placeholder="아이디" required></div>
@@ -46,7 +52,7 @@ const App = (() => {
       <div class="layout">
         <header class="appbar">
           <button class="icon-btn appbar-menu" id="menu-toggle" title="폴더">☰</button>
-          <div class="brand" id="brand-home" title="홈으로"><img src="assets/logo.svg?v=8"><span class="brand-name">북적북적</span></div>
+          <div class="brand" id="brand-home" title="홈으로"><img src="assets/logo.svg?v=9"><span class="brand-name">북적북적</span></div>
           ${isPriv() ? `<select class="input account-switcher" id="account-switcher"><option value="">내 파일</option></select>` : ''}
           <div class="topbar-spacer"></div>
           <nav class="appbar-nav">
@@ -58,7 +64,10 @@ const App = (() => {
           <div class="user-chip-sm">${UI.escapeHtml(state.user.displayName)} · ${roleLabel(state.user.role)}</div>
         </header>
         <div class="body">
-          <aside class="tree-sidebar" id="tree-sidebar"><div class="tree-head">폴더</div><div id="tree"></div></aside>
+          <aside class="tree-sidebar" id="tree-sidebar">
+            <div class="tree-head"><span>폴더</span><div class="tree-head-btns"><button class="tree-hbtn" id="expand-all" title="전체 펴기">⊞</button><button class="tree-hbtn" id="collapse-all" title="전체 닫기">⊟</button></div></div>
+            <div id="tree"></div>
+          </aside>
           <div class="tree-backdrop" id="tree-backdrop"></div>
           <main class="content" id="view"></main>
         </div>
@@ -70,6 +79,8 @@ const App = (() => {
     document.getElementById('menu-toggle').addEventListener('click', toggleTree);
     document.getElementById('tree-backdrop').addEventListener('click', toggleTree);
     document.getElementById('brand-home').addEventListener('click', () => { state.folder = '/'; loadFiles(); renderTree(); });
+    document.getElementById('expand-all').addEventListener('click', expandAll);
+    document.getElementById('collapse-all').addEventListener('click', collapseAll);
     if (isPriv()) setupAccountSwitcher();
     loadAll();
     loadBranches();
@@ -132,7 +143,7 @@ const App = (() => {
   async function doLogout() { try { await API.logout(); } catch {} API.setToken(null); state.user = null; renderLogin(); }
 
   async function loadAll() { await Promise.all([loadTree(), loadFiles()]); }
-  async function loadTree() { try { state.treeFolders = (await API.tree(state.ownerId)).folders; renderTree(); } catch {} }
+  async function loadTree() { try { const t = await API.tree(state.ownerId); state.treeFolders = t.folders; state.treeStyles = t.styles || {}; renderTree(); } catch {} }
   async function loadFiles() {
     const view = document.getElementById('view');
     view.innerHTML = '<div class="empty"><div class="big">⏳</div>불러오는 중…</div>';
@@ -152,17 +163,36 @@ const App = (() => {
     for (const p of paths) { const parts = p.split('/').filter(Boolean); let node = rootNode, acc = ''; for (const part of parts) { acc += '/' + part; if (!node.children[part]) node.children[part] = { name: part, path: acc, children: {} }; node = node.children[part]; } }
     return rootNode;
   }
+  function allTreePaths() { const s = new Set(['/']); for (const p of state.treeFolders) { const parts = p.split('/').filter(Boolean); let acc = ''; for (const part of parts) { acc += '/' + part; s.add(acc); } } return s; }
   function renderTree() {
     const el = document.getElementById('tree'); const rootNode = buildTreeNodes(state.treeFolders);
     const render = (node, depth) => {
       const kids = Object.values(node.children).sort((a, b) => a.name.localeCompare(b.name, 'ko'));
+      const hasKids = kids.length > 0;
+      const isOpen = state.expanded.has(node.path);
       const active = node.path === state.folder ? ' active' : '';
-      let html = `<div class="tree-item${active}" data-folder="${UI.escapeHtml(node.path)}" style="padding-left:${8 + depth * 16}px"><span class="tico">${depth === 0 ? '🏠' : '📁'}</span><span class="tname">${UI.escapeHtml(node.name)}</span></div>`;
-      for (const k of kids) html += render(k, depth + 1); return html;
+      const st = folderStyle(node.path);
+      const icon = depth === 0 ? '🏠' : (st.icon || '📁');
+      const colorStyle = st.color ? `border-left:3px solid ${st.color};` : '';
+      const caret = hasKids ? `<span class="tcaret ${isOpen ? 'open' : ''}" data-toggle="${UI.escapeHtml(node.path)}">▸</span>` : '<span class="tcaret-empty"></span>';
+      let html = `<div class="tree-item d${Math.min(depth, 5)}${active}" data-folder="${UI.escapeHtml(node.path)}" style="padding-left:${6 + depth * 14}px;${colorStyle}">${caret}<span class="tico">${icon}</span><span class="tname">${UI.escapeHtml(node.name)}</span></div>`;
+      if (hasKids && isOpen) for (const k of kids) html += render(k, depth + 1);
+      return html;
     };
     el.innerHTML = render(rootNode, 0);
-    el.querySelectorAll('[data-folder]').forEach((n) => n.addEventListener('click', () => { state.folder = n.dataset.folder; loadFiles(); renderTree(); if (window.innerWidth <= 768) toggleTree(); }));
+    el.querySelectorAll('[data-toggle]').forEach((c) => c.addEventListener('click', (e) => {
+      e.stopPropagation(); const p = c.dataset.toggle;
+      if (state.expanded.has(p)) state.expanded.delete(p); else state.expanded.add(p);
+      renderTree();
+    }));
+    el.querySelectorAll('.tree-item[data-folder]').forEach((n) => n.addEventListener('click', () => {
+      state.folder = n.dataset.folder;
+      if (n.dataset.folder !== '/') state.expanded.add(n.dataset.folder); // 이동 시 해당 폴더 펼침
+      loadFiles(); renderTree(); if (window.innerWidth <= 768) toggleTree();
+    }));
   }
+  function expandAll() { state.expanded = allTreePaths(); renderTree(); }
+  function collapseAll() { state.expanded = new Set(['/']); renderTree(); }
 
   function renderContent() {
     const u = state.usage; const pct = u.quotaBytes > 0 ? Math.min(100, (u.usedBytes / u.quotaBytes) * 100) : 0;
@@ -205,13 +235,13 @@ const App = (() => {
 
   function gridHTML() {
     const folders = state.folders.map((f) => `
-      <div class="file-card fade-in" data-folder-card="${UI.escapeHtml(f.path)}" title="더블클릭하여 열기">
+      <div class="file-card fade-in" data-folder-card="${UI.escapeHtml(f.path)}" title="더블클릭하여 열기" style="${f.color ? `border-color:${f.color};box-shadow:inset 0 3px 0 ${f.color}` : ''}">
         <div class="file-actions">
+          <button class="icon-btn" data-fedit="${UI.escapeHtml(f.path)}" title="폴더 설정">⚙️</button>
           <button class="icon-btn" data-fnote="${UI.escapeHtml(f.path)}" title="비고">📝</button>
-          <button class="icon-btn" data-frename="${UI.escapeHtml(f.path)}" title="이름변경">✏️</button>
           <button class="icon-btn" data-fdel="${UI.escapeHtml(f.path)}" title="삭제">🗑️</button>
         </div>
-        <div class="file-ico">📁</div>
+        <div class="file-ico">${f.icon || '📁'}</div>
         <div class="file-name">${UI.escapeHtml(f.name)}</div>
         <div class="file-meta num">${UI.bytes(f.size)} · ${f.createdAt ? UI.date(f.createdAt) : '폴더'}</div>
         ${f.note ? `<div class="file-note" title="${UI.escapeHtml(f.note)}">📝 ${UI.escapeHtml(f.note)}</div>` : ''}
@@ -237,14 +267,14 @@ const App = (() => {
     const isSel = (key) => state.selected.has(key);
     const folders = state.folders.map((f) => {
       const key = `folder:${f.path}`;
-      return `<tr data-folder-row="${UI.escapeHtml(f.path)}" class="${isSel(key) ? 'sel' : ''}">
+      return `<tr data-folder-row="${UI.escapeHtml(f.path)}" class="${isSel(key) ? 'sel' : ''}" style="${f.color ? `box-shadow:inset 4px 0 0 ${f.color}` : ''}">
         <td><input type="checkbox" class="rowcheck" data-sel-folder="${UI.escapeHtml(f.path)}" data-name="${UI.escapeHtml(f.name)}" ${isSel(key) ? 'checked' : ''}></td>
-        <td class="open-cell" data-open="${UI.escapeHtml(f.path)}" title="더블클릭하여 열기"><span class="ic">📁</span> ${UI.escapeHtml(f.name)}</td>
+        <td class="open-cell" data-open="${UI.escapeHtml(f.path)}" title="더블클릭하여 열기"><span class="ic">${f.icon || '📁'}</span> ${UI.escapeHtml(f.name)}</td>
         <td class="num muted">${UI.bytes(f.size)}</td>
         <td class="num muted">${f.createdAt ? UI.date(f.createdAt) : '—'}</td>
         <td class="num muted">${f.noteUpdatedAt ? UI.date(f.noteUpdatedAt) : '—'}</td>
         <td class="note-cell" data-fnote="${UI.escapeHtml(f.path)}" title="클릭하여 비고 편집">${f.note ? UI.escapeHtml(f.note) : '<span class="muted">+ 비고</span>'}</td>
-        <td class="row-actions"><button class="icon-btn" data-frename="${UI.escapeHtml(f.path)}" title="이름변경">✏️</button></td>
+        <td class="row-actions"><button class="icon-btn" data-fedit="${UI.escapeHtml(f.path)}" title="폴더 설정">⚙️</button></td>
       </tr>`;
     }).join('');
     const files = state.files.map((f) => {
@@ -291,7 +321,7 @@ const App = (() => {
     box.querySelectorAll('[data-rename]').forEach((el) => el.addEventListener('click', (e) => { e.stopPropagation(); renameFileModal(el.dataset.rename); }));
     // 폴더 액션
     box.querySelectorAll('[data-fnote]').forEach((el) => el.addEventListener('click', (e) => { e.stopPropagation(); folderNoteModal(el.dataset.fnote); }));
-    box.querySelectorAll('[data-frename]').forEach((el) => el.addEventListener('click', (e) => { e.stopPropagation(); renameFolderModal(el.dataset.frename); }));
+    box.querySelectorAll('[data-fedit]').forEach((el) => el.addEventListener('click', (e) => { e.stopPropagation(); folderSettingsModal(el.dataset.fedit); }));
     box.querySelectorAll('[data-fdel]').forEach((el) => el.addEventListener('click', (e) => { e.stopPropagation(); deleteFolder(el.dataset.fdel); }));
     // 체크박스 선택 (리스트 뷰)
     box.querySelectorAll('.rowcheck').forEach((c) => c.addEventListener('change', () => {
@@ -339,7 +369,7 @@ const App = (() => {
     const rn = bar.querySelector('#sel-rename');
     if (!rn.disabled) rn.addEventListener('click', () => {
       const item = [...state.selected.values()][0];
-      if (item.type === 'file') renameFileModal(item.id); else renameFolderModal(item.path);
+      if (item.type === 'file') renameFileModal(item.id); else folderSettingsModal(item.path);
     });
   }
 
@@ -413,7 +443,7 @@ const App = (() => {
     const m = UI.modal(`<h3>새 폴더 (현재 위치: ${UI.escapeHtml(state.folder)})</h3>
       <div class="seg" id="seg"><button class="seg-btn on" data-mode="normal">일반 폴더</button><button class="seg-btn" data-mode="branch">영업점 폴더</button></div>
       <div class="pane-wrap">
-        <div class="pane" id="pane-normal"><div class="field" style="margin-top:14px"><label>폴더 이름</label><input class="input" id="fn" placeholder="예: 2026-보고서"></div></div>
+        <div class="pane" id="pane-normal"><div class="field" style="margin-top:14px"><label>폴더 이름</label><input class="input" id="fn" placeholder="예: 2026-보고서"></div>${stylePickerHTML('📁', '')}</div>
         <div class="pane hidden" id="pane-branch">
           <div style="display:flex;align-items:center;margin:12px 0 10px">
             <span class="muted" style="font-size:13px">현재 폴더 아래에 선택한 영업점 폴더를 생성합니다.</span>
@@ -425,6 +455,7 @@ const App = (() => {
       </div>
       <div class="modal-actions"><button class="btn btn-ghost" id="c">취소</button><button class="btn btn-primary" id="ok">만들기</button></div>`);
     m.el.querySelector('.modal').classList.add('modal-wide');
+    const picker = wireStylePicker(m);
     let mode = 'normal';
     m.el.querySelectorAll('.seg-btn').forEach((b) => b.addEventListener('click', () => {
       if (b.dataset.mode === mode) return;
@@ -444,7 +475,7 @@ const App = (() => {
       try {
         if (mode === 'normal') {
           const name = m.q('#fn').value.trim().replace(/\//g, ''); if (!name) return;
-          await API.createFolder(parent + '/' + name, state.ownerId);
+          await API.createFolder(parent + '/' + name, state.ownerId, picker.icon, picker.color);
         } else {
           const picked = [...m.el.querySelectorAll('#pane-branch input[value]:checked')].map((x) => x.value);
           if (picked.length === 0) return UI.toast('영업점을 하나 이상 선택하세요', 'error');
@@ -480,11 +511,40 @@ const App = (() => {
     setTimeout(() => { const i = m.q('#nm'); i.focus(); const dot = f.name.lastIndexOf('.'); i.setSelectionRange(0, dot > 0 ? dot : f.name.length); }, 50);
   }
 
-  function renameFolderModal(path) {
+  // 아이콘/색상 선택 UI HTML 생성
+  function stylePickerHTML(curIcon, curColor) {
+    const icons = FOLDER_ICONS.map((ic) => `<button type="button" class="ipick ${ic === (curIcon || '📁') ? 'on' : ''}" data-icon="${ic}">${ic}</button>`).join('');
+    const colors = FOLDER_COLORS.map((c) => `<button type="button" class="cpick ${c === (curColor || '') ? 'on' : ''}" data-color="${c}" style="${c ? `background:${c}` : ''}" title="${c || '기본'}">${c ? '' : '✕'}</button>`).join('');
+    return `<div class="field"><label>폴더 모양</label><div class="icon-picker">${icons}</div></div>
+      <div class="field"><label>폴더 색상</label><div class="color-picker">${colors}</div></div>`;
+  }
+  function wireStylePicker(m) {
+    let icon = m.el.querySelector('.ipick.on')?.dataset.icon || '📁';
+    let color = m.el.querySelector('.cpick.on')?.dataset.color || '';
+    m.el.querySelectorAll('.ipick').forEach((b) => b.addEventListener('click', () => { icon = b.dataset.icon; m.el.querySelectorAll('.ipick').forEach((x) => x.classList.toggle('on', x === b)); }));
+    m.el.querySelectorAll('.cpick').forEach((b) => b.addEventListener('click', () => { color = b.dataset.color; m.el.querySelectorAll('.cpick').forEach((x) => x.classList.toggle('on', x === b)); }));
+    return { get icon() { return icon; }, get color() { return color; } };
+  }
+
+  function folderSettingsModal(path) {
     const name = path.split('/').pop(); const parent = path.slice(0, path.lastIndexOf('/'));
-    const m = UI.modal(`<h3>폴더 이름 변경</h3><div class="field"><label>새 폴더 이름</label><input class="input" id="nm" value="${UI.escapeHtml(name)}"></div><div class="modal-actions"><button class="btn btn-ghost" id="c">취소</button><button class="btn btn-primary" id="ok">변경</button></div>`);
+    const f = state.folders.find((x) => x.path === path) || {};
+    const st = f.icon || f.color ? f : folderStyle(path);
+    const m = UI.modal(`<h3>폴더 설정</h3>
+      <div class="field"><label>폴더 이름</label><input class="input" id="nm" value="${UI.escapeHtml(name)}"></div>
+      ${stylePickerHTML(st.icon, st.color)}
+      <div class="modal-actions"><button class="btn btn-ghost" id="c">취소</button><button class="btn btn-primary" id="ok">저장</button></div>`);
+    const picker = wireStylePicker(m);
     m.q('#c').addEventListener('click', m.close);
-    m.q('#ok').addEventListener('click', async () => { const nn = m.q('#nm').value.trim().replace(/\//g, ''); if (!nn) return; try { const r = await API.renameFolder(path, (parent || '') + '/' + nn, state.ownerId); m.close(); UI.toast('폴더 이름 변경됨', 'success'); if (state.folder === path || state.folder.startsWith(path + '/')) state.folder = r.path || (parent || '') + '/' + nn; loadAll(); } catch (err) { UI.toast(err.message, 'error'); } });
+    m.q('#ok').addEventListener('click', async () => {
+      const nn = m.q('#nm').value.trim().replace(/\//g, ''); if (!nn) return;
+      try {
+        let target = path;
+        if (nn !== name) { const r = await API.renameFolder(path, (parent || '') + '/' + nn, state.ownerId); target = r.path || (parent || '') + '/' + nn; if (state.folder === path || state.folder.startsWith(path + '/')) state.folder = target; }
+        await API.setFolderStyle(target, picker.icon, picker.color, state.ownerId);
+        m.close(); UI.toast('폴더 설정 저장됨', 'success'); loadAll();
+      } catch (err) { UI.toast(err.message, 'error'); }
+    });
     setTimeout(() => m.q('#nm').focus(), 50);
   }
 

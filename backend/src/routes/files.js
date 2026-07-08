@@ -113,24 +113,43 @@ router.get('/accounts', authenticate, wrap(async (req, res) => {
 // ── 폴더 트리 ──────────
 router.get('/tree', authenticate, wrap(resolveOwner), wrap(async (req, res) => {
   const [ff, fx] = await Promise.all([
-    query('SELECT path FROM folders WHERE owner_id=$1 AND deleted_at IS NULL', [req.targetOwnerId]),
+    query('SELECT path, icon, color FROM folders WHERE owner_id=$1 AND deleted_at IS NULL', [req.targetOwnerId]),
     query('SELECT DISTINCT folder AS path FROM files WHERE owner_id=$1 AND folder<>$2 AND deleted_at IS NULL', [req.targetOwnerId, '/']),
   ]);
   const set = new Set();
+  const styles = {};
   for (const row of [...ff.rows, ...fx.rows]) {
     const parts = row.path.split('/').filter(Boolean); let acc = '';
     for (const p of parts) { acc += '/' + p; set.add(acc); }
   }
-  res.json({ ownerId: req.targetOwnerId, folders: [...set].sort() });
+  for (const row of ff.rows) { if (row.icon || row.color) styles[row.path] = { icon: row.icon || '', color: row.color || '' }; }
+  res.json({ ownerId: req.targetOwnerId, folders: [...set].sort(), styles });
 }));
 
-// 폴더 생성
+// 폴더 생성 (선택: 아이콘/색상)
 router.post('/folders', authenticate, wrap(resolveOwner), wrap(async (req, res) => {
   const folder = normalizeFolder(req.body.path);
   if (folder === '/') return res.status(400).json({ error: '유효한 폴더 경로가 아닙니다.' });
   await ensureFolder(req.targetOwnerId, folder);
+  const icon = String(req.body.icon || '').slice(0, 8);
+  const color = String(req.body.color || '').slice(0, 16);
+  if (icon || color) {
+    await query('UPDATE folders SET icon=$1, color=$2 WHERE owner_id=$3 AND path=$4', [icon, color, req.targetOwnerId, folder]);
+  }
   await audit(req, 'create_folder', `owner=${req.targetOwnerId} ${folder}`);
   res.status(201).json({ ok: true, path: folder });
+}));
+
+// 폴더 스타일(아이콘/색상) 설정
+router.patch('/folders/style', authenticate, wrap(resolveOwner), wrap(async (req, res) => {
+  const folder = normalizeFolder(req.body.path);
+  if (folder === '/') return res.status(400).json({ error: '루트 폴더는 변경할 수 없습니다.' });
+  const icon = String(req.body.icon || '').slice(0, 8);
+  const color = String(req.body.color || '').slice(0, 16);
+  await ensureFolder(req.targetOwnerId, folder);
+  await query('UPDATE folders SET icon=$1, color=$2 WHERE owner_id=$3 AND path=$4', [icon, color, req.targetOwnerId, folder]);
+  await audit(req, 'folder_style', `${folder}`);
+  res.json({ ok: true });
 }));
 
 // 폴더 비고
@@ -197,7 +216,7 @@ router.get('/', authenticate, wrap(resolveOwner), wrap(async (req, res) => {
   const folders = [];
   for (const p of [...childPaths].sort()) {
     await query('INSERT INTO folders (owner_id, path) VALUES ($1,$2) ON CONFLICT (owner_id, path) DO NOTHING', [req.targetOwnerId, p]);
-    const fr = await query('SELECT id, note, note_updated_at, created_at FROM folders WHERE owner_id=$1 AND path=$2', [req.targetOwnerId, p]);
+    const fr = await query('SELECT id, note, note_updated_at, created_at, icon, color FROM folders WHERE owner_id=$1 AND path=$2', [req.targetOwnerId, p]);
     const agg = await query(
       'SELECT COALESCE(SUM(size_bytes),0) AS s, COUNT(*)::int AS c FROM files WHERE owner_id=$1 AND deleted_at IS NULL AND (folder=$2 OR folder LIKE $3)',
       [req.targetOwnerId, p, p + '/%']
@@ -206,6 +225,7 @@ router.get('/', authenticate, wrap(resolveOwner), wrap(async (req, res) => {
       id: fr.rows[0]?.id, path: p, name: p.split('/').pop(),
       note: fr.rows[0]?.note || '', noteUpdatedAt: fr.rows[0]?.note_updated_at || null,
       createdAt: fr.rows[0]?.created_at || null,
+      icon: fr.rows[0]?.icon || '', color: fr.rows[0]?.color || '',
       size: Number(agg.rows[0].s), fileCount: agg.rows[0].c,
     });
   }

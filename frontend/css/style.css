@@ -97,13 +97,36 @@ textarea.input { resize: vertical; }
 
 /* 폴더 트리 사이드바 */
 .tree-sidebar { background: var(--surface); border-right: 1px solid var(--border); padding: 14px 8px; overflow-y: auto; }
-.tree-head { font-size: 12px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: .5px; padding: 4px 10px 10px; }
-.tree-item { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: var(--radius-sm); cursor: pointer; font-size: 14px; font-weight: 500; transition: background .12s, color .12s; white-space: nowrap; overflow: hidden; }
+.tree-head { display: flex; align-items: center; font-size: 12px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: .5px; padding: 4px 6px 10px 10px; }
+.tree-head-btns { margin-left: auto; display: flex; gap: 2px; }
+.tree-hbtn { width: 24px; height: 22px; border: 1px solid var(--border); background: var(--surface); border-radius: 6px; cursor: pointer; font-size: 13px; color: var(--text-muted); line-height: 1; }
+.tree-hbtn:hover { background: var(--hover); color: var(--text); }
+.tree-item { display: flex; align-items: center; gap: 4px; padding: 7px 8px; border-radius: var(--radius-sm); cursor: pointer; font-size: 14px; font-weight: 500; transition: background .12s, color .12s; white-space: nowrap; overflow: hidden; }
 .tree-item:hover { background: var(--hover); }
 .tree-item.active { background: var(--primary); color: var(--text); font-weight: 700; }
 .tree-item .tico { flex: 0 0 auto; }
 .tree-item .tname { overflow: hidden; text-overflow: ellipsis; }
+.tcaret { flex: 0 0 auto; width: 16px; text-align: center; font-size: 11px; color: var(--text-muted); transition: transform .15s; cursor: pointer; border-radius: 4px; }
+.tcaret:hover { background: rgba(0,0,0,.06); }
+.tcaret.open { transform: rotate(90deg); }
+.tcaret-empty { flex: 0 0 auto; width: 16px; }
+/* 단계별 색 구분 (좌측 얇은 가이드) */
+.tree-item.d1 { border-left: 2px solid transparent; }
+.tree-item.d2 { border-left: 2px solid #FFE1A6; }
+.tree-item.d3 { border-left: 2px solid #BFE3F0; }
+.tree-item.d4 { border-left: 2px solid #CDEBD6; }
+.tree-item.d5 { border-left: 2px solid #E2D6F5; }
 .tree-backdrop { display: none; }
+
+/* 아이콘/색상 선택 */
+.icon-picker { display: flex; flex-wrap: wrap; gap: 6px; }
+.ipick { width: 40px; height: 40px; border: 1.5px solid var(--border); background: var(--surface); border-radius: var(--radius-sm); cursor: pointer; font-size: 20px; transition: border-color .12s, background .12s, transform .12s; }
+.ipick:hover { border-color: var(--primary); transform: translateY(-2px); }
+.ipick.on { border-color: var(--primary); background: var(--hover); }
+.color-picker { display: flex; flex-wrap: wrap; gap: 8px; }
+.cpick { width: 32px; height: 32px; border: 2px solid var(--border); border-radius: 50%; cursor: pointer; display: grid; place-items: center; color: var(--text-muted); font-size: 13px; transition: transform .12s; }
+.cpick:hover { transform: scale(1.12); }
+.cpick.on { border-color: var(--text); box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--text); }
 
 .content { padding: 20px 24px; overflow-y: auto; min-width: 0; }
 
