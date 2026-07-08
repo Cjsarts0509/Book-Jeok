@@ -125,7 +125,7 @@ textarea.input { resize: vertical; }
 .usage-bar { height: 8px; background: var(--border); border-radius: 99px; overflow: hidden; max-width: 300px; }
 .usage-bar > span { display: block; height: 100%; background: linear-gradient(90deg, var(--primary), var(--accent)); border-radius: 99px; }
 
-.dropzone { border: 2.5px dashed var(--border); border-radius: var(--radius); padding: 22px; text-align: center; color: var(--text-muted); transition: border-color .2s, background .2s; margin-bottom: 16px; cursor: pointer; }
+.dropzone { display: flex; flex-direction: column; align-items: center; justify-content: center; border: 2.5px dashed var(--border); border-radius: var(--radius); padding: 22px; text-align: center; color: var(--text-muted); transition: border-color .2s, background .2s; margin-bottom: 16px; cursor: pointer; }
 .dropzone.drag { border-color: var(--primary); background: var(--hover); color: var(--text); }
 .dropzone .big { font-size: 30px; }
 .dropzone .hint { font-size: 12px; margin-top: 4px; opacity: .8; }
