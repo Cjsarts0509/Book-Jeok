@@ -198,6 +198,8 @@ th, td { padding: 11px 14px; text-align: left; border-bottom: 1px solid var(--bo
 th { background: var(--bg); font-weight: 700; color: var(--text-muted); font-size: 12px; text-transform: uppercase; letter-spacing: .4px; }
 .filetable tbody tr:hover { background: var(--hover); }
 .filetable tr.sel { background: #FFF3CF; }
+.filetable td { vertical-align: middle; }
+.filetable td.num { white-space: nowrap; }   /* 크기·날짜 줄바꿈 방지 → 행 높이 통일 */
 .filetable .ic { margin-right: 4px; }
 .filetable .folder-row { cursor: pointer; font-weight: 600; }
 .filetable .note-cell { cursor: pointer; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
