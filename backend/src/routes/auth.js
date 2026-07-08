@@ -12,12 +12,15 @@ const { audit, wrap } = require('../util');
 const router = express.Router();
 
 // 로그인 브루트포스 방어
+// skipSuccessfulRequests: 성공한 로그인은 카운트하지 않음 → 정상 로그인은 절대 안 막힘.
+// 오직 "실패한 시도"만 카운트하여 무차별 대입만 차단합니다.
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 10,
+  max: 30,
+  skipSuccessfulRequests: true,
   standardHeaders: true,
   legacyHeaders: false,
-  message: { error: '로그인 시도가 너무 많습니다. 잠시 후 다시 시도하세요.' },
+  message: { error: '로그인 실패가 너무 많습니다. 15분 후 다시 시도하세요.' },
 });
 
 function issueToken(res, user) {
