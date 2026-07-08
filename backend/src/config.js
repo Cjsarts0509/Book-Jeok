@@ -27,6 +27,9 @@ const config = {
   // 파일이 저장되는 루트 경로 (오라클 독립 블록 볼륨 마운트 지점)
   storageRoot: process.env.STORAGE_ROOT || require('path').join(__dirname, '..', '..', 'storage'),
 
+  // 공유 링크 생성 시 사용할 공개 API 주소 (미지정 시 요청 헤더에서 유추)
+  publicApiUrl: (process.env.PUBLIC_API_URL || '').replace(/\/$/, ''),
+
   // 계정별 기본 할당량 (bytes). 0 = 무제한
   defaultQuota: parseInt(process.env.DEFAULT_QUOTA || '0', 10),
 

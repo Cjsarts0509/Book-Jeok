@@ -1,8 +1,6 @@
 /* 북적북적 API 클라이언트 */
 const API = (() => {
-  // 배포 시 window.BOOKJEOK_API 로 백엔드 주소 주입 (CF Pages → 오라클 백엔드)
   const BASE = (window.BOOKJEOK_API || '').replace(/\/$/, '') || '';
-
   let token = localStorage.getItem('bj_token') || null;
 
   function setToken(t) {
@@ -15,18 +13,9 @@ const API = (() => {
     const headers = {};
     if (token) headers['Authorization'] = 'Bearer ' + token;
     let payload;
-    if (isForm) {
-      payload = body; // FormData
-    } else if (body !== undefined) {
-      headers['Content-Type'] = 'application/json';
-      payload = JSON.stringify(body);
-    }
-    const res = await fetch(BASE + '/api' + path, {
-      method,
-      headers,
-      body: payload,
-      credentials: 'include',
-    });
+    if (isForm) payload = body;
+    else if (body !== undefined) { headers['Content-Type'] = 'application/json'; payload = JSON.stringify(body); }
+    const res = await fetch(BASE + '/api' + path, { method, headers, body: payload, credentials: 'include' });
     if (res.status === 204) return null;
     const ct = res.headers.get('content-type') || '';
     if (!ct.includes('application/json')) {
@@ -38,20 +27,33 @@ const API = (() => {
     return data;
   }
 
+  const own = (ownerId) => (ownerId ? `ownerId=${ownerId}` : '');
+
   return {
     setToken,
     hasToken: () => !!token,
+    getToken: () => token,
     base: BASE,
     // auth
     login: (username, password) => req('POST', '/auth/login', { username, password }),
     logout: () => req('POST', '/auth/logout'),
     me: () => req('GET', '/auth/me'),
     changePassword: (currentPassword, newPassword) => req('POST', '/auth/change-password', { currentPassword, newPassword }),
-    // files
+    // files & folders
     listFiles: (folder, ownerId) => req('GET', `/files?folder=${encodeURIComponent(folder)}${ownerId ? '&ownerId=' + ownerId : ''}`),
+    tree: (ownerId) => req('GET', `/files/tree${ownerId ? '?ownerId=' + ownerId : ''}`),
+    accounts: () => req('GET', '/files/accounts'),
     usage: (ownerId) => req('GET', `/files/usage/summary${ownerId ? '?ownerId=' + ownerId : ''}`),
-    upload: (formData) => req('POST', '/files/upload', formData, true),
+    upload: (formData, ownerId) => req('POST', `/files/upload${ownerId ? '?ownerId=' + ownerId : ''}`, formData, true),
+    createFolder: (path, ownerId) => req('POST', '/files/folders', { path, ownerId }),
+    deleteFolder: (path, ownerId) => req('DELETE', `/files/folders?path=${encodeURIComponent(path)}${ownerId ? '&ownerId=' + ownerId : ''}`),
+    renameFolder: (oldPath, newPath, ownerId) => req('PATCH', '/files/folders', { oldPath, newPath, ownerId }),
     deleteFile: (id) => req('DELETE', `/files/${id}`),
+    renameFile: (id, name) => req('PATCH', `/files/${id}/rename`, { name }),
+    setNote: (id, note) => req('PATCH', `/files/${id}/note`, { note }),
+    share: (id, expiresInDays) => req('POST', `/files/${id}/share`, { expiresInDays: expiresInDays || 0 }),
+    bulkDelete: (ids) => req('POST', '/files/bulk/delete', { ids }),
+    bulkMove: (ids, folder) => req('POST', '/files/bulk/move', { ids, folder }),
     downloadUrl: (id) => `${BASE}/api/files/${id}/download`,
     // admin
     adminUsers: () => req('GET', '/admin/users'),

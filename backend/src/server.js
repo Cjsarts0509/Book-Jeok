@@ -43,6 +43,7 @@ app.get('/api/health', (req, res) => res.json({ ok: true, service: 'book-jeok', 
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api/files', require('./routes/files'));
 app.use('/api/admin', require('./routes/admin'));
+app.use('/api/share', require('./routes/share'));
 
 // (선택) 프런트엔드를 같은 서버에서 서빙하려면 SERVE_FRONTEND=1
 if (process.env.SERVE_FRONTEND === '1') {

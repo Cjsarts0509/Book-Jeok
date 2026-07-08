@@ -72,7 +72,7 @@ const Admin = (() => {
     const rows = state.users.map((u) => `
       <tr>
         <td><b>${UI.escapeHtml(u.username)}</b><br><span style="color:var(--text-muted);font-size:12px">${UI.escapeHtml(u.displayName)}</span></td>
-        <td><span class="badge ${u.role}">${u.role === 'admin' ? '관리자' : '일반'}</span></td>
+        <td><span class="badge ${u.role}">${({admin:'관리자',manager:'담당자',user:'일반'})[u.role] || u.role}</span></td>
         <td><span class="badge ${u.isActive ? 'on' : 'off'}">${u.isActive ? '활성' : '정지'}</span></td>
         <td class="num">${u.fileCount}개 · ${UI.bytes(u.usedBytes)}${u.quotaBytes > 0 ? ' / ' + UI.bytes(u.quotaBytes) : ''}</td>
         <td style="text-align:right">
@@ -110,7 +110,11 @@ const Admin = (() => {
       <div class="field"><label>표시 이름</label><input class="input" id="displayName" placeholder="예: 홍길동"></div>
       <div class="field"><label>초기 비밀번호 (비우면 자동 생성)</label><input class="input" id="password" placeholder="자동 생성"></div>
       <div class="field"><label>권한</label>
-        <select class="input" id="role"><option value="user">일반</option><option value="admin">관리자</option></select>
+        <select class="input" id="role">
+          <option value="user">일반 (본인 파일만)</option>
+          <option value="manager">담당자 (일반 사용자 파일 열람·업로드, 관리기능 제외)</option>
+          <option value="admin">관리자 (전체 + 관리기능)</option>
+        </select>
       </div>
       <div class="field"><label>할당량 (GB, 0=무제한)</label><input class="input num" id="quota" type="number" value="0" min="0"></div>
       <div class="modal-actions">
@@ -166,7 +170,11 @@ const Admin = (() => {
       <h3>계정 수정 — ${UI.escapeHtml(u.username)}</h3>
       <div class="field"><label>표시 이름</label><input class="input" id="dn" value="${UI.escapeHtml(u.displayName)}"></div>
       <div class="field"><label>권한</label>
-        <select class="input" id="role"><option value="user" ${u.role === 'user' ? 'selected' : ''}>일반</option><option value="admin" ${u.role === 'admin' ? 'selected' : ''}>관리자</option></select></div>
+        <select class="input" id="role">
+          <option value="user" ${u.role === 'user' ? 'selected' : ''}>일반</option>
+          <option value="manager" ${u.role === 'manager' ? 'selected' : ''}>담당자</option>
+          <option value="admin" ${u.role === 'admin' ? 'selected' : ''}>관리자</option>
+        </select></div>
       <div class="field"><label>상태</label>
         <select class="input" id="active"><option value="true" ${u.isActive ? 'selected' : ''}>활성</option><option value="false" ${!u.isActive ? 'selected' : ''}>정지</option></select></div>
       <div class="field"><label>할당량 (GB, 0=무제한)</label><input class="input num" id="quota" type="number" min="0" value="${u.quotaBytes > 0 ? (u.quotaBytes / 1024 / 1024 / 1024).toFixed(1) : 0}"></div>

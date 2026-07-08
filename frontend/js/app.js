@@ -1,27 +1,26 @@
-/* 북적북적 메인 앱 — 파일 웹하드 */
+/* 북적북적 메인 앱 — 파일 웹하드 (v2) */
 const App = (() => {
   const state = {
     user: null,
     folder: '/',
-    ownerId: null,        // 관리자가 다른 계정 열람 시 대상 id
+    ownerId: null,        // admin/manager 가 다른 계정 열람 시 대상
     ownerName: null,
     files: [],
-    folders: [],
+    folders: [],          // 현재 폴더 직속 하위 폴더
+    treeFolders: [],      // 전체 폴더 경로 (사이드바 트리)
     usage: null,
+    accounts: [],
+    view: localStorage.getItem('bj_view') || 'grid',
+    selected: new Set(),
   };
 
   const root = () => document.getElementById('app');
+  const isPriv = () => state.user && (state.user.role === 'admin' || state.user.role === 'manager');
 
-  // ── 진입점 ──────────────────────────────
   async function boot() {
     if (API.hasToken()) {
-      try {
-        const { user } = await API.me();
-        state.user = user;
-        return renderApp();
-      } catch {
-        API.setToken(null);
-      }
+      try { state.user = (await API.me()).user; return renderApp(); }
+      catch { API.setToken(null); }
     }
     renderLogin();
   }
@@ -34,322 +33,456 @@ const App = (() => {
           <img src="assets/logo.svg" class="login-logo" alt="북적북적">
           <div class="login-title">북적북적</div>
           <div class="login-sub">Book-Jeok · 우리끼리 나누는 파일 창고</div>
-          <div class="field">
-            <label>아이디</label>
-            <input class="input" name="username" autocomplete="username" placeholder="아이디" required>
-          </div>
-          <div class="field">
-            <label>비밀번호</label>
-            <input class="input" name="password" type="password" autocomplete="current-password" placeholder="비밀번호" required>
-          </div>
+          <div class="field"><label>아이디</label>
+            <input class="input" name="username" autocomplete="username" placeholder="아이디" required></div>
+          <div class="field"><label>비밀번호</label>
+            <input class="input" name="password" type="password" autocomplete="current-password" placeholder="비밀번호" required></div>
           <button class="btn btn-primary" style="width:100%;margin-top:6px" type="submit">로그인</button>
         </form>
       </div>`;
     document.getElementById('login-form').addEventListener('submit', async (e) => {
       e.preventDefault();
-      const f = e.target;
-      const btn = f.querySelector('button');
+      const f = e.target, btn = f.querySelector('button');
       btn.disabled = true; btn.textContent = '로그인 중…';
       try {
         const { token, user } = await API.login(f.username.value.trim(), f.password.value);
-        API.setToken(token);
-        state.user = user;
+        API.setToken(token); state.user = user;
         UI.toast(`${user.displayName}님 환영합니다 🎉`, 'success');
         renderApp();
-      } catch (err) {
-        UI.toast(err.message, 'error');
-        btn.disabled = false; btn.textContent = '로그인';
-      }
+      } catch (err) { UI.toast(err.message, 'error'); btn.disabled = false; btn.textContent = '로그인'; }
     });
   }
 
-  // ── 앱 셸 ──────────────────────────────
+  const roleLabel = (r) => ({ admin: '관리자', manager: '담당자', user: '일반' }[r] || r);
+
+  // ── 앱 셸 (상단바 + 사이드바 + 컨텐츠) ──────
   function renderApp() {
-    const isAdmin = state.user.role === 'admin';
+    const admin = state.user.role === 'admin';
     root().innerHTML = `
-      <div class="app">
-        <aside class="sidebar">
+      <div class="layout">
+        <header class="appbar">
+          <button class="icon-btn appbar-menu" id="menu-toggle" title="폴더">☰</button>
           <div class="brand"><img src="assets/logo.svg"><span class="brand-name">북적북적</span></div>
-          <div class="nav-item active" data-nav="files"><span class="ico">📁</span> 내 파일</div>
-          ${isAdmin ? '<a class="nav-item" href="admin.html"><span class="ico">⚙️</span> 관리자</a>' : ''}
-          <div class="nav-item" data-nav="password"><span class="ico">🔑</span> 비밀번호 변경</div>
-          <div class="sidebar-spacer"></div>
-          <div class="user-chip">
-            <b>${UI.escapeHtml(state.user.displayName)}</b>
-            <span>@${UI.escapeHtml(state.user.username)} · ${isAdmin ? '관리자' : '일반'}</span>
-          </div>
-          <div class="nav-item" data-nav="logout" style="margin-top:6px"><span class="ico">🚪</span> 로그아웃</div>
-        </aside>
-
-        <main class="main">
-          <header class="topbar">
-            <h1>내 파일</h1>
-            <div class="topbar-spacer"></div>
-            <button class="btn btn-ghost btn-sm" data-nav="refresh">🔄 새로고침</button>
-          </header>
-
-          <!-- 모바일 상단바 -->
-          <div class="mobile-topbar">
-            <img src="assets/logo.svg"><span class="brand-name">북적북적</span>
-            <div class="topbar-spacer"></div>
-            <button class="btn btn-ghost btn-sm" data-nav="password">🔑</button>
-            ${isAdmin ? '<a class="btn btn-ghost btn-sm" href="admin.html">⚙️</a>' : ''}
-          </div>
-
-          <div class="content" id="view"></div>
-
-          <!-- 모바일 하단 네비 -->
-          <nav class="mobile-nav">
-            <div class="m-item active" data-nav="files"><span class="ico">📁</span>파일</div>
-            <div class="m-fab" data-nav="upload">＋</div>
-            <div class="m-item" data-nav="logout"><span class="ico">🚪</span>로그아웃</div>
+          ${isPriv() ? `<select class="input account-switcher" id="account-switcher"><option value="">내 파일</option></select>` : ''}
+          <div class="topbar-spacer"></div>
+          <nav class="appbar-nav">
+            <div class="nav-item" data-nav="files"><span class="ico">📁</span><span class="t">내 파일</span></div>
+            ${admin ? '<a class="nav-item" href="admin.html"><span class="ico">⚙️</span><span class="t">관리자</span></a>' : ''}
+            <div class="nav-item" data-nav="password"><span class="ico">🔑</span><span class="t">비밀번호</span></div>
+            <div class="nav-item" data-nav="logout"><span class="ico">🚪</span><span class="t">로그아웃</span></div>
           </nav>
-        </main>
+          <div class="user-chip-sm">${UI.escapeHtml(state.user.displayName)} · ${roleLabel(state.user.role)}</div>
+        </header>
+
+        <div class="body">
+          <aside class="tree-sidebar" id="tree-sidebar">
+            <div class="tree-head">폴더</div>
+            <div id="tree"></div>
+          </aside>
+          <div class="tree-backdrop" id="tree-backdrop"></div>
+          <main class="content" id="view"></main>
+        </div>
       </div>`;
 
-    root().querySelectorAll('[data-nav]').forEach((el) => {
-      el.addEventListener('click', (e) => {
-        const nav = el.dataset.nav;
-        if (nav === 'logout') { doLogout(); }
-        else if (nav === 'password') { changePasswordModal(); }
-        else if (nav === 'refresh' || nav === 'files') { loadFiles(); }
-        else if (nav === 'upload') { document.getElementById('file-input')?.click(); }
-      });
-    });
+    root().querySelectorAll('.appbar-nav [data-nav]').forEach((el) => el.addEventListener('click', () => {
+      const n = el.dataset.nav;
+      if (n === 'logout') doLogout();
+      else if (n === 'password') changePasswordModal();
+      else if (n === 'files') { resetToOwn(); }
+    }));
+    document.getElementById('menu-toggle').addEventListener('click', toggleTree);
+    document.getElementById('tree-backdrop').addEventListener('click', toggleTree);
 
-    loadFiles();
+    if (isPriv()) setupAccountSwitcher();
+    loadAll();
+  }
+
+  function toggleTree() {
+    document.getElementById('tree-sidebar').classList.toggle('open');
+    document.getElementById('tree-backdrop').classList.toggle('show');
+  }
+
+  function resetToOwn() {
+    state.ownerId = null; state.ownerName = null; state.folder = '/'; state.selected.clear();
+    const sw = document.getElementById('account-switcher'); if (sw) sw.value = '';
+    loadAll();
+  }
+
+  async function setupAccountSwitcher() {
+    try {
+      const { accounts } = await API.accounts();
+      state.accounts = accounts.filter((a) => a.id !== state.user.id);
+      const sw = document.getElementById('account-switcher');
+      if (!sw) return;
+      for (const a of state.accounts) {
+        const o = document.createElement('option');
+        o.value = a.id; o.textContent = `${a.displayName} (@${a.username}·${roleLabel(a.role)})`;
+        sw.appendChild(o);
+      }
+      sw.addEventListener('change', () => {
+        if (!sw.value) return resetToOwn();
+        const a = state.accounts.find((x) => String(x.id) === sw.value);
+        state.ownerId = a.id; state.ownerName = a.displayName; state.folder = '/'; state.selected.clear();
+        loadAll();
+      });
+    } catch {}
   }
 
   async function doLogout() {
     try { await API.logout(); } catch {}
-    API.setToken(null);
-    state.user = null;
-    renderLogin();
+    API.setToken(null); state.user = null; renderLogin();
   }
 
-  // ── 파일 뷰 ──────────────────────────────
+  // ── 데이터 로드 ─────────────────────────
+  async function loadAll() {
+    await Promise.all([loadTree(), loadFiles()]);
+  }
+  async function loadTree() {
+    try { state.treeFolders = (await API.tree(state.ownerId)).folders; renderTree(); } catch {}
+  }
   async function loadFiles() {
     const view = document.getElementById('view');
     view.innerHTML = '<div class="empty"><div class="big">⏳</div>불러오는 중…</div>';
     try {
-      const [list, usage] = await Promise.all([
-        API.listFiles(state.folder, state.ownerId),
-        API.usage(state.ownerId),
-      ]);
-      state.files = list.files;
-      state.folders = list.folders;
-      state.usage = usage;
-      renderFiles();
-    } catch (err) {
-      view.innerHTML = `<div class="empty"><div class="big">⚠️</div>${UI.escapeHtml(err.message)}</div>`;
-    }
+      const [list, usage] = await Promise.all([API.listFiles(state.folder, state.ownerId), API.usage(state.ownerId)]);
+      state.files = list.files; state.folders = list.folders; state.usage = usage;
+      state.selected.clear();
+      renderContent();
+    } catch (err) { view.innerHTML = `<div class="empty"><div class="big">⚠️</div>${UI.escapeHtml(err.message)}</div>`; }
   }
 
-  function renderFiles() {
+  // ── 사이드바 폴더 트리 ───────────────────
+  function buildTreeNodes(paths) {
+    const root = { name: '홈', path: '/', children: {} };
+    for (const p of paths) {
+      const parts = p.split('/').filter(Boolean);
+      let node = root, acc = '';
+      for (const part of parts) {
+        acc += '/' + part;
+        if (!node.children[part]) node.children[part] = { name: part, path: acc, children: {} };
+        node = node.children[part];
+      }
+    }
+    return root;
+  }
+  function renderTree() {
+    const el = document.getElementById('tree');
+    const rootNode = buildTreeNodes(state.treeFolders);
+    const render = (node, depth) => {
+      const kids = Object.values(node.children).sort((a, b) => a.name.localeCompare(b.name, 'ko'));
+      const active = node.path === state.folder ? ' active' : '';
+      let html = `<div class="tree-item${active}" data-folder="${UI.escapeHtml(node.path)}" style="padding-left:${8 + depth * 16}px">
+        <span class="tico">${depth === 0 ? '🏠' : '📁'}</span><span class="tname">${UI.escapeHtml(node.name)}</span></div>`;
+      for (const k of kids) html += render(k, depth + 1);
+      return html;
+    };
+    el.innerHTML = render(rootNode, 0);
+    el.querySelectorAll('[data-folder]').forEach((n) => n.addEventListener('click', () => {
+      state.folder = n.dataset.folder; loadFiles(); renderTree();
+      if (window.innerWidth <= 768) toggleTree();
+    }));
+  }
+
+  // ── 메인 컨텐츠 ─────────────────────────
+  function renderContent() {
+    const u = state.usage;
+    const pct = u.quotaBytes > 0 ? Math.min(100, (u.usedBytes / u.quotaBytes) * 100) : 0;
     const view = document.getElementById('view');
-    const usage = state.usage;
-    const pct = usage.quotaBytes > 0 ? Math.min(100, (usage.usedBytes / usage.quotaBytes) * 100) : 0;
-    const crumbs = buildCrumbs();
-
     view.innerHTML = `
-      ${state.ownerId ? `
-        <div class="impersonate-banner">
-          👁️ 관리자 열람: <b>${UI.escapeHtml(state.ownerName || '')}</b> 계정의 파일
-          <div style="flex:1"></div>
-          <button class="btn btn-sm btn-secondary" id="exit-impersonate">내 파일로 돌아가기</button>
-        </div>` : ''}
+      ${state.ownerId ? `<div class="impersonate-banner">👁️ <b>${UI.escapeHtml(state.ownerName || '')}</b> 계정의 파일을 보는 중
+        <div style="flex:1"></div><button class="btn btn-sm btn-secondary" id="exit-imp">내 파일로</button></div>` : ''}
 
-      <div class="card" style="margin-bottom:18px">
-        <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px">
-          <div>
-            <div style="font-size:13px;color:var(--text-muted);font-weight:600">저장 사용량</div>
-            <div style="font-size:20px;font-weight:800" class="num">
-              ${UI.bytes(usage.usedBytes)}
-              <span style="font-size:13px;color:var(--text-muted);font-weight:600">
-                ${usage.quotaBytes > 0 ? '/ ' + UI.bytes(usage.quotaBytes) : '· 무제한'} · ${usage.fileCount}개 파일
-              </span>
-            </div>
-          </div>
-        </div>
-        ${usage.quotaBytes > 0 ? `<div class="usage-bar"><span style="width:${pct}%"></span></div>` : ''}
-      </div>
-
-      <div class="toolbar">
-        <div class="breadcrumb">${crumbs}</div>
+      <div class="content-head">
+        <div class="breadcrumb" id="crumbs"></div>
         <div style="flex:1"></div>
+        <div class="viewtoggle">
+          <button class="vt ${state.view === 'grid' ? 'on' : ''}" data-view="grid" title="미리보기">▦</button>
+          <button class="vt ${state.view === 'list' ? 'on' : ''}" data-view="list" title="리스트">☰</button>
+        </div>
+        <label class="autosort" title="지점_날짜 파일을 연도/지점 폴더로 자동 정리">
+          <input type="checkbox" id="autosort"> 지점파일 자동정리</label>
         <button class="btn btn-secondary btn-sm" id="new-folder">📂 <span class="label">새 폴더</span></button>
         <button class="btn btn-primary btn-sm" id="upload-btn">⬆️ <span class="label">업로드</span></button>
       </div>
 
+      <div class="usage-line">
+        <span class="num">${UI.bytes(u.usedBytes)}</span>
+        <span class="muted">${u.quotaBytes > 0 ? '/ ' + UI.bytes(u.quotaBytes) : '· 무제한'} · ${u.fileCount}개 파일</span>
+        ${u.quotaBytes > 0 ? `<span class="usage-bar" style="flex:1"><span style="width:${pct}%"></span></span>` : ''}
+      </div>
+
       <label class="dropzone" id="dropzone" for="file-input">
         <div class="big">📥</div>
-        <div>여기로 파일을 끌어다 놓거나 클릭해서 업로드</div>
-        <input type="file" id="file-input" multiple hidden>
+        <div>여기로 끌어다 놓거나 클릭해서 업로드</div>
+        <div class="hint">허용: csv · xls · xlsx · jpg · png · gif · ppt · pptx · doc · docx</div>
+        <input type="file" id="file-input" multiple hidden
+          accept=".csv,.xls,.xlsx,.xlsm,.xlsb,.jpg,.jpeg,.png,.gif,.ppt,.pptx,.doc,.docx">
       </label>
 
-      <div id="grid"></div>`;
+      <div id="selbar" class="selbar hidden"></div>
+      <div id="listing"></div>`;
 
-    renderGrid();
-    wireFileEvents();
+    renderCrumbs(); renderListing(); wireContent();
   }
 
-  function buildCrumbs() {
+  function renderCrumbs() {
     const parts = state.folder.split('/').filter(Boolean);
-    let acc = '';
-    let html = `<span data-folder="/">🏠 홈</span>`;
-    for (const p of parts) {
-      acc += '/' + p;
-      html += `<span class="sep">/</span><span data-folder="${acc}">${UI.escapeHtml(p)}</span>`;
-    }
-    return html;
+    let acc = '', html = `<span data-folder="/">🏠 홈</span>`;
+    for (const p of parts) { acc += '/' + p; html += `<span class="sep">/</span><span data-folder="${acc}">${UI.escapeHtml(p)}</span>`; }
+    const el = document.getElementById('crumbs');
+    el.innerHTML = html;
+    el.querySelectorAll('[data-folder]').forEach((s) => s.addEventListener('click', () => { state.folder = s.dataset.folder; loadFiles(); renderTree(); }));
   }
 
-  function renderGrid() {
-    const grid = document.getElementById('grid');
+  function renderListing() {
+    const box = document.getElementById('listing');
     if (state.folders.length === 0 && state.files.length === 0) {
-      grid.innerHTML = `<div class="empty"><div class="big">🗂️</div>아직 파일이 없어요. 첫 파일을 올려보세요!</div>`;
+      box.innerHTML = `<div class="empty"><div class="big">🗂️</div>아직 파일이 없어요. 첫 파일을 올려보세요!</div>`;
       return;
     }
-    const folderCards = state.folders.map((f) => {
+    box.innerHTML = state.view === 'grid' ? gridHTML() : listHTML();
+    wireListing();
+    updateSelbar();
+  }
+
+  function gridHTML() {
+    const folders = state.folders.map((f) => {
       const name = f.split('/').pop();
       return `<div class="file-card" data-open-folder="${UI.escapeHtml(f)}">
-        <div class="file-ico">📁</div>
-        <div class="file-name">${UI.escapeHtml(name)}</div>
-        <div class="file-meta">폴더</div>
-      </div>`;
+        <div class="file-ico">📁</div><div class="file-name">${UI.escapeHtml(name)}</div><div class="file-meta">폴더</div></div>`;
     }).join('');
-    const fileCards = state.files.map((f) => `
-      <div class="file-card">
+    const files = state.files.map((f) => `
+      <div class="file-card" data-file="${f.id}">
         <div class="file-actions">
+          <button class="icon-btn" data-share="${f.id}" title="공유링크">🔗</button>
+          <button class="icon-btn" data-note="${f.id}" title="비고">📝</button>
           <button class="icon-btn" data-dl="${f.id}" title="다운로드">⬇️</button>
           <button class="icon-btn" data-del="${f.id}" title="삭제">🗑️</button>
         </div>
         <div class="file-ico">${UI.fileIcon(f.name)}</div>
         <div class="file-name">${UI.escapeHtml(f.name)}</div>
         <div class="file-meta num">${UI.bytes(f.size)} · ${UI.date(f.createdAt)}</div>
+        ${f.note ? `<div class="file-note" title="${UI.escapeHtml(f.note)}">📝 ${UI.escapeHtml(f.note)}</div>` : ''}
       </div>`).join('');
-    grid.innerHTML = `<div class="file-grid">${folderCards}${fileCards}</div>`;
-
-    grid.querySelectorAll('[data-open-folder]').forEach((el) =>
-      el.addEventListener('click', () => { state.folder = el.dataset.openFolder; loadFiles(); }));
-    grid.querySelectorAll('[data-dl]').forEach((el) =>
-      el.addEventListener('click', () => downloadFile(el.dataset.dl)));
-    grid.querySelectorAll('[data-del]').forEach((el) =>
-      el.addEventListener('click', () => deleteFile(el.dataset.del)));
+    return `<div class="file-grid">${folders}${files}</div>`;
   }
 
-  function wireFileEvents() {
-    document.querySelectorAll('.breadcrumb [data-folder]').forEach((el) =>
-      el.addEventListener('click', () => { state.folder = el.dataset.folder; loadFiles(); }));
+  function listHTML() {
+    const folders = state.folders.map((f) => {
+      const name = f.split('/').pop();
+      return `<tr class="folder-row" data-open-folder="${UI.escapeHtml(f)}">
+        <td></td><td>📁 ${UI.escapeHtml(name)}</td><td>폴더</td><td></td><td></td><td></td></tr>`;
+    }).join('');
+    const files = state.files.map((f) => `
+      <tr data-file="${f.id}" class="${state.selected.has(String(f.id)) ? 'sel' : ''}">
+        <td><input type="checkbox" class="rowcheck" data-id="${f.id}" ${state.selected.has(String(f.id)) ? 'checked' : ''}></td>
+        <td><span class="ic">${UI.fileIcon(f.name)}</span> ${UI.escapeHtml(f.name)}</td>
+        <td class="num muted">${UI.bytes(f.size)}</td>
+        <td class="note-cell" data-note="${f.id}" title="클릭하여 비고 편집">${f.note ? UI.escapeHtml(f.note) : '<span class="muted">+ 비고</span>'}</td>
+        <td class="num muted">${UI.date(f.updatedAt || f.createdAt)}</td>
+        <td class="row-actions">
+          <button class="icon-btn" data-share="${f.id}" title="공유">🔗</button>
+          <button class="icon-btn" data-dl="${f.id}" title="다운로드">⬇️</button>
+        </td>
+      </tr>`).join('');
+    return `<div class="table-wrap"><table class="filetable">
+      <thead><tr>
+        <th style="width:34px"><input type="checkbox" id="check-all"></th>
+        <th>이름</th><th style="width:90px">크기</th><th>비고</th><th style="width:110px">수정일</th><th style="width:90px"></th>
+      </tr></thead><tbody>${folders}${files}</tbody></table></div>`;
+  }
 
-    document.getElementById('exit-impersonate')?.addEventListener('click', () => {
-      state.ownerId = null; state.ownerName = null; state.folder = '/'; loadFiles();
-    });
-
+  function wireContent() {
+    document.getElementById('exit-imp')?.addEventListener('click', resetToOwn);
+    document.querySelectorAll('.viewtoggle .vt').forEach((b) => b.addEventListener('click', () => {
+      state.view = b.dataset.view; localStorage.setItem('bj_view', state.view); renderContent();
+    }));
     const input = document.getElementById('file-input');
     const dz = document.getElementById('dropzone');
     document.getElementById('upload-btn').addEventListener('click', () => input.click());
     input.addEventListener('change', () => { if (input.files.length) uploadFiles(input.files); });
-
     ['dragover', 'dragenter'].forEach((ev) => dz.addEventListener(ev, (e) => { e.preventDefault(); dz.classList.add('drag'); }));
     ['dragleave', 'drop'].forEach((ev) => dz.addEventListener(ev, (e) => { e.preventDefault(); dz.classList.remove('drag'); }));
     dz.addEventListener('drop', (e) => { if (e.dataTransfer.files.length) uploadFiles(e.dataTransfer.files); });
-
     document.getElementById('new-folder').addEventListener('click', newFolderModal);
   }
 
+  function wireListing() {
+    const box = document.getElementById('listing');
+    box.querySelectorAll('[data-open-folder]').forEach((el) => el.addEventListener('click', () => {
+      state.folder = el.dataset.openFolder; loadFiles(); renderTree();
+    }));
+    box.querySelectorAll('[data-dl]').forEach((el) => el.addEventListener('click', (e) => { e.stopPropagation(); downloadFile(el.dataset.dl); }));
+    box.querySelectorAll('[data-del]').forEach((el) => el.addEventListener('click', (e) => { e.stopPropagation(); deleteFile(el.dataset.del); }));
+    box.querySelectorAll('[data-share]').forEach((el) => el.addEventListener('click', (e) => { e.stopPropagation(); shareModal(el.dataset.share); }));
+    box.querySelectorAll('[data-note]').forEach((el) => el.addEventListener('click', (e) => { e.stopPropagation(); noteModal(el.dataset.note); }));
+    box.querySelectorAll('.rowcheck').forEach((c) => c.addEventListener('change', () => {
+      const id = c.dataset.id;
+      if (c.checked) state.selected.add(id); else state.selected.delete(id);
+      c.closest('tr').classList.toggle('sel', c.checked);
+      updateSelbar();
+    }));
+    const all = document.getElementById('check-all');
+    if (all) all.addEventListener('change', () => {
+      state.selected.clear();
+      if (all.checked) state.files.forEach((f) => state.selected.add(String(f.id)));
+      renderListing();
+    });
+  }
+
+  // ── 선택 일괄작업 바 (리스트 뷰) ──────────
+  function updateSelbar() {
+    const bar = document.getElementById('selbar');
+    if (!bar) return;
+    if (state.view !== 'list' || state.selected.size === 0) { bar.classList.add('hidden'); return; }
+    bar.classList.remove('hidden');
+    bar.innerHTML = `<b>${state.selected.size}개 선택</b>
+      <div style="flex:1"></div>
+      <button class="btn btn-sm btn-ghost" id="sel-rename" ${state.selected.size !== 1 ? 'disabled' : ''}>✏️ 이름변경</button>
+      <button class="btn btn-sm btn-secondary" id="sel-move">📂 폴더이동</button>
+      <button class="btn btn-sm btn-danger" id="sel-del">🗑️ 삭제</button>
+      <button class="btn btn-sm btn-ghost" id="sel-clear">선택해제</button>`;
+    bar.querySelector('#sel-clear').addEventListener('click', () => { state.selected.clear(); renderListing(); });
+    bar.querySelector('#sel-del').addEventListener('click', bulkDelete);
+    bar.querySelector('#sel-move').addEventListener('click', bulkMoveModal);
+    const rn = bar.querySelector('#sel-rename');
+    if (!rn.disabled) rn.addEventListener('click', () => renameModal([...state.selected][0]));
+  }
+
+  async function bulkDelete() {
+    const n = state.selected.size;
+    if (!confirm(`선택한 ${n}개 파일을 삭제할까요?`)) return;
+    try { await API.bulkDelete([...state.selected]); UI.toast(`${n}개 삭제됨`, 'success'); loadFiles(); }
+    catch (err) { UI.toast(err.message, 'error'); }
+  }
+  function bulkMoveModal() {
+    const opts = ['/', ...state.treeFolders].map((p) => `<option value="${UI.escapeHtml(p)}">${p === '/' ? '🏠 홈(루트)' : p}</option>`).join('');
+    const m = UI.modal(`<h3>선택 파일 폴더 이동</h3>
+      <div class="field"><label>이동할 폴더</label><select class="input" id="dest">${opts}</select></div>
+      <div class="field"><label>또는 새 폴더 경로 입력 (선택)</label><input class="input" id="newpath" placeholder="예: /2026/보고서"></div>
+      <div class="modal-actions"><button class="btn btn-ghost" id="c">취소</button><button class="btn btn-primary" id="ok">이동</button></div>`);
+    m.q('#c').addEventListener('click', m.close);
+    m.q('#ok').addEventListener('click', async () => {
+      const dest = m.q('#newpath').value.trim() || m.q('#dest').value;
+      try { await API.bulkMove([...state.selected], dest); m.close(); UI.toast('이동 완료', 'success'); loadAll(); }
+      catch (err) { UI.toast(err.message, 'error'); }
+    });
+  }
+
+  // ── 업로드 ──────────────────────────────
   async function uploadFiles(fileList) {
     const fd = new FormData();
     fd.append('folder', state.folder);
-    if (state.ownerId) fd.append('ownerId', state.ownerId);
+    if (document.getElementById('autosort')?.checked) fd.append('autoSort', '1');
     [...fileList].forEach((f) => fd.append('file', f));
-    UI.toast(`${fileList.length}개 파일 업로드 중…`);
+    UI.toast(`${fileList.length}개 업로드 중…`);
     try {
-      await API.upload(fd);
-      UI.toast('업로드 완료 ✅', 'success');
-      loadFiles();
-    } catch (err) {
-      UI.toast(err.message, 'error');
-    }
+      const res = await API.upload(fd, state.ownerId);
+      const sorted = res.uploaded.filter((u) => u.sorted).length;
+      UI.toast(`업로드 완료 ✅${sorted ? ` (${sorted}개 자동분류)` : ''}`, 'success');
+      loadAll();
+    } catch (err) { UI.toast(err.message, 'error'); }
   }
 
   function downloadFile(id) {
-    // 인증 헤더가 필요하므로 fetch → blob 방식
-    const url = API.downloadUrl(id);
-    fetch(url, { headers: API.hasToken() ? { Authorization: 'Bearer ' + localStorage.getItem('bj_token') } : {}, credentials: 'include' })
+    fetch(API.downloadUrl(id), { headers: { Authorization: 'Bearer ' + API.getToken() }, credentials: 'include' })
       .then((r) => { if (!r.ok) throw new Error('다운로드 실패'); return r.blob().then((b) => ({ b, r })); })
       .then(({ b, r }) => {
         const cd = r.headers.get('content-disposition') || '';
-        const m = /filename\*?=(?:UTF-8'')?["']?([^"';]+)/i.exec(cd);
-        const name = m ? decodeURIComponent(m[1]) : 'download';
-        const a = document.createElement('a');
-        a.href = URL.createObjectURL(b); a.download = name; a.click();
-        URL.revokeObjectURL(a.href);
-      })
-      .catch((err) => UI.toast(err.message, 'error'));
+        const mt = /filename\*?=(?:UTF-8'')?["']?([^"';]+)/i.exec(cd);
+        const name = mt ? decodeURIComponent(mt[1]) : 'download';
+        const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = name; a.click(); URL.revokeObjectURL(a.href);
+      }).catch((err) => UI.toast(err.message, 'error'));
   }
 
   async function deleteFile(id) {
     if (!confirm('이 파일을 삭제할까요?')) return;
-    try {
-      await API.deleteFile(id);
-      UI.toast('삭제되었습니다', 'success');
-      loadFiles();
-    } catch (err) { UI.toast(err.message, 'error'); }
+    try { await API.deleteFile(id); UI.toast('삭제됨', 'success'); loadFiles(); } catch (err) { UI.toast(err.message, 'error'); }
   }
 
+  // ── 모달들 ──────────────────────────────
   function newFolderModal() {
-    const m = UI.modal(`
-      <h3>새 폴더 만들기</h3>
-      <div class="field"><label>폴더 이름</label><input class="input" id="fname" placeholder="예: 2026-보고서"></div>
-      <div class="modal-actions">
-        <button class="btn btn-ghost" id="cancel">취소</button>
-        <button class="btn btn-primary" id="ok">만들기</button>
-      </div>`);
-    m.q('#cancel').addEventListener('click', m.close);
-    m.q('#ok').addEventListener('click', () => {
-      const name = m.q('#fname').value.trim().replace(/\//g, '');
+    const parent = state.folder === '/' ? '' : state.folder;
+    const m = UI.modal(`<h3>새 폴더</h3>
+      <div class="field"><label>폴더 이름 (현재 위치: ${state.folder})</label><input class="input" id="fn" placeholder="예: 2026-보고서"></div>
+      <div class="modal-actions"><button class="btn btn-ghost" id="c">취소</button><button class="btn btn-primary" id="ok">만들기</button></div>`);
+    m.q('#c').addEventListener('click', m.close);
+    m.q('#ok').addEventListener('click', async () => {
+      const name = m.q('#fn').value.trim().replace(/\//g, '');
       if (!name) return;
-      // 폴더는 파일 업로드 시 경로로 생성됨 → 즉시 이동
-      state.folder = (state.folder === '/' ? '' : state.folder) + '/' + name;
-      m.close();
-      UI.toast('폴더로 이동했어요. 파일을 올리면 폴더가 저장됩니다.', '');
-      renderFiles();
+      try { await API.createFolder(parent + '/' + name, state.ownerId); m.close(); UI.toast('폴더 생성됨', 'success'); loadAll(); }
+      catch (err) { UI.toast(err.message, 'error'); }
     });
   }
 
-  function changePasswordModal() {
-    const m = UI.modal(`
-      <h3>비밀번호 변경</h3>
-      <div class="field"><label>현재 비밀번호</label><input class="input" type="password" id="cur"></div>
-      <div class="field"><label>새 비밀번호 (8자 이상)</label><input class="input" type="password" id="nw"></div>
-      <div class="modal-actions">
-        <button class="btn btn-ghost" id="cancel">취소</button>
-        <button class="btn btn-primary" id="ok">변경</button>
-      </div>`);
-    m.q('#cancel').addEventListener('click', m.close);
+  function noteModal(id) {
+    const f = state.files.find((x) => String(x.id) === String(id));
+    const m = UI.modal(`<h3>비고 — ${UI.escapeHtml(f.name)}</h3>
+      <div class="field"><label>메모 (파일 설명, 최대 2000자)</label>
+        <textarea class="input" id="note" rows="4" placeholder="예: 2분기 매출 원본">${UI.escapeHtml(f.note || '')}</textarea></div>
+      ${f.noteUpdatedAt ? `<p class="muted" style="font-size:12px">최근 수정: ${new Date(f.noteUpdatedAt).toLocaleString('ko-KR')}</p>` : ''}
+      <div class="modal-actions"><button class="btn btn-ghost" id="c">취소</button><button class="btn btn-primary" id="ok">저장</button></div>`);
+    m.q('#c').addEventListener('click', m.close);
     m.q('#ok').addEventListener('click', async () => {
+      try { await API.setNote(id, m.q('#note').value); m.close(); UI.toast('비고 저장됨', 'success'); loadFiles(); }
+      catch (err) { UI.toast(err.message, 'error'); }
+    });
+  }
+
+  function renameModal(id) {
+    const f = state.files.find((x) => String(x.id) === String(id));
+    const m = UI.modal(`<h3>이름 변경</h3>
+      <div class="field"><label>새 파일 이름 (확장자 포함)</label><input class="input" id="nm" value="${UI.escapeHtml(f.name)}"></div>
+      <div class="modal-actions"><button class="btn btn-ghost" id="c">취소</button><button class="btn btn-primary" id="ok">변경</button></div>`);
+    m.q('#c').addEventListener('click', m.close);
+    m.q('#ok').addEventListener('click', async () => {
+      try { await API.renameFile(id, m.q('#nm').value.trim()); m.close(); UI.toast('이름 변경됨', 'success'); loadFiles(); }
+      catch (err) { UI.toast(err.message, 'error'); }
+    });
+  }
+
+  async function shareModal(id) {
+    const f = state.files.find((x) => String(x.id) === String(id));
+    const m = UI.modal(`<h3>🔗 공유 링크</h3>
+      <p class="muted" style="font-size:13px;margin-bottom:8px">${UI.escapeHtml(f.name)}</p>
+      <div class="field"><label>만료 기간</label>
+        <select class="input" id="exp"><option value="0">무기한</option><option value="1">1일</option><option value="7">7일</option><option value="30">30일</option></select></div>
+      <div class="modal-actions"><button class="btn btn-ghost" id="c">닫기</button><button class="btn btn-primary" id="gen">링크 생성</button></div>
+      <div id="result"></div>`);
+    m.q('#c').addEventListener('click', m.close);
+    m.q('#gen').addEventListener('click', async () => {
       try {
-        await API.changePassword(m.q('#cur').value, m.q('#nw').value);
-        UI.toast('비밀번호가 변경되었습니다 🔐', 'success');
-        m.close();
+        const r = await API.share(id, parseInt(m.q('#exp').value, 10));
+        const dl = r.url + '/download';
+        m.q('#result').innerHTML = `<div class="field" style="margin-top:14px"><label>다운로드 링크 (누구나 접근 가능)</label>
+          <input class="input" id="lnk" readonly value="${dl}"></div>
+          <button class="btn btn-secondary btn-sm" id="copy">📋 링크 복사</button>`;
+        m.q('#lnk').select();
+        m.q('#copy').addEventListener('click', () => {
+          m.q('#lnk').select(); navigator.clipboard?.writeText(dl); UI.toast('링크 복사됨', 'success');
+        });
       } catch (err) { UI.toast(err.message, 'error'); }
     });
   }
 
-  // 관리자 페이지에서 특정 계정 파일 열람 진입 (URL: index.html?ownerId=3&name=xxx)
+  function changePasswordModal() {
+    const m = UI.modal(`<h3>비밀번호 변경</h3>
+      <div class="field"><label>현재 비밀번호</label><input class="input" type="password" id="cur"></div>
+      <div class="field"><label>새 비밀번호 (8자 이상)</label><input class="input" type="password" id="nw"></div>
+      <div class="modal-actions"><button class="btn btn-ghost" id="c">취소</button><button class="btn btn-primary" id="ok">변경</button></div>`);
+    m.q('#c').addEventListener('click', m.close);
+    m.q('#ok').addEventListener('click', async () => {
+      try { await API.changePassword(m.q('#cur').value, m.q('#nw').value); UI.toast('변경됨 🔐', 'success'); m.close(); }
+      catch (err) { UI.toast(err.message, 'error'); }
+    });
+  }
+
   function checkImpersonate() {
     const p = new URLSearchParams(location.search);
-    if (p.get('ownerId')) {
-      state.ownerId = p.get('ownerId');
-      state.ownerName = p.get('name') || '';
-    }
+    if (p.get('ownerId')) { state.ownerId = p.get('ownerId'); state.ownerName = p.get('name') || ''; }
   }
 
   return { boot, checkImpersonate };
 })();
 
-document.addEventListener('DOMContentLoaded', () => {
-  App.checkImpersonate();
-  App.boot();
-});
+document.addEventListener('DOMContentLoaded', () => { App.checkImpersonate(); App.boot(); });

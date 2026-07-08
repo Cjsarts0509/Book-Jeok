@@ -43,7 +43,7 @@ router.get('/users', wrap(async (req, res) => {
 router.post('/users', wrap(async (req, res) => {
   const username = String(req.body.username || '').trim().toLowerCase();
   const displayName = String(req.body.displayName || '').trim();
-  const role = req.body.role === 'admin' ? 'admin' : 'user';
+  const role = ['admin', 'manager', 'user'].includes(req.body.role) ? req.body.role : 'user';
   const quotaBytes = Math.max(0, parseInt(req.body.quotaBytes || '0', 10) || 0);
   let password = String(req.body.password || '').trim();
 
@@ -113,7 +113,7 @@ router.patch('/users/:id', wrap(async (req, res) => {
   let i = 1;
   if (req.body.role !== undefined) {
     fields.push(`role = $${i++}`);
-    values.push(req.body.role === 'admin' ? 'admin' : 'user');
+    values.push(['admin', 'manager', 'user'].includes(req.body.role) ? req.body.role : 'user');
   }
   if (req.body.quotaBytes !== undefined) {
     fields.push(`quota_bytes = $${i++}`);

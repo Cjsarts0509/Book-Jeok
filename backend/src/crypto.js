@@ -49,10 +49,16 @@ function generatePassword(len = 12) {
   return out;
 }
 
+// 공유 링크용 추측 불가능한 난수 토큰 (URL-safe)
+function generateToken(bytes = 24) {
+  return crypto.randomBytes(bytes).toString('base64url');
+}
+
 module.exports = {
   hashPassword,
   verifyPassword,
   encryptSecret,
   decryptSecret,
   generatePassword,
+  generateToken,
 };
