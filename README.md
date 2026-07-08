@@ -40,12 +40,12 @@ Book-Jeok/
 │  └─ Dockerfile
 ├─ frontend/         반응형 SPA (PC/모바일 분기)
 │  ├─ index.html · admin.html
+│  ├─ config.js            백엔드 API 주소 (분리 배포 시 이 파일만 편집)
 │  ├─ css/style.css         디자인 시스템
 │  └─ js/                   api · app · admin · common
 ├─ deploy/           cloudflared · nginx 설정
-├─ docs/             오라클/클라우드플레어/보안/FileBrowser 가이드
-├─ docker-compose.yml
-└─ .github/workflows/deploy-frontend.yml
+├─ docs/             배포 런북 · 오라클/클라우드플레어/보안/FileBrowser 가이드
+└─ docker-compose.yml
 ```
 
 ## 🚀 빠른 시작 (로컬)
@@ -76,8 +76,9 @@ npm run dev            # http://localhost:4000
 ```
 
 ## ☁️ 배포
-- **오라클 클라우드 + 독립 디스크 구성**: [docs/oracle-cloud-setup.md](docs/oracle-cloud-setup.md)
-- **Cloudflare (Tunnel / Pages)**: [docs/cloudflare-setup.md](docs/cloudflare-setup.md)
+- **⭐ 실전 배포 런북 (프런트=Pages · 백엔드=오라클+Tunnel)**: [docs/deployment-runbook.md](docs/deployment-runbook.md)
+- 오라클 클라우드 + 독립 디스크 구성: [docs/oracle-cloud-setup.md](docs/oracle-cloud-setup.md)
+- Cloudflare (Tunnel / Pages): [docs/cloudflare-setup.md](docs/cloudflare-setup.md)
 
 ## 🔑 기본 사용 흐름
 1. 관리자 로그인 → **관리자 → 계정 관리**에서 계정 발급 (초기 비밀번호 자동 생성·표시)

@@ -36,16 +36,13 @@
    (예: `https://book-jeok.pages.dev`)
 2. 백엔드는 `api.book-jeok.example.com` 서브도메인으로 터널
    (`cloudflared-config.yml` 의 주석 처리된 hostname 사용)
-3. 프런트 배포는 GitHub Actions 자동화:
-   - 저장소 **Settings → Secrets and variables → Actions** 에 등록:
-     | Secret | 값 |
-     |---|---|
-     | `CLOUDFLARE_API_TOKEN` | Pages 편집 권한 토큰 |
-     | `CLOUDFLARE_ACCOUNT_ID` | CF 계정 ID |
-     | `BOOKJEOK_API` | `https://api.book-jeok.example.com` |
-   - `main` 브랜치에 push 하면 `.github/workflows/deploy-frontend.yml` 이
-     `frontend/` 를 `book-jeok` Pages 프로젝트로 배포합니다.
-   - 워크플로가 배포 직전 `window.BOOKJEOK_API` 를 실제 백엔드 주소로 치환합니다.
+3. `frontend/config.js` 의 `window.BOOKJEOK_API` 를 백엔드 주소로 설정 후 커밋
+   (예: `https://api.book-jeok.example.com`)
+4. Cloudflare 대시보드 → **Workers & Pages → Create → Pages → Connect to Git**
+   으로 저장소를 연결하고 Build output directory 를 `frontend` 로 지정하면,
+   `main` 에 push 할 때마다 자동 배포됩니다.
+
+> 상세 단계는 [deployment-runbook.md](./deployment-runbook.md) 파트 2를 참고하세요.
 
 ---
 
