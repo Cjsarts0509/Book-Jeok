@@ -21,7 +21,7 @@ const Admin = (() => {
     root().innerHTML = `
       <div class="layout">
         <header class="appbar">
-          <div class="brand"><img src="assets/logo.svg"><span class="brand-name">북적북적</span></div>
+          <a class="brand" href="index.html" title="홈으로"><img src="assets/logo.svg?v=8"><span class="brand-name">북적북적</span></a>
           <nav class="appbar-nav">
             ${item('users', '👥', '계정')}
             ${item('branches', '🏢', '영업점')}
@@ -104,32 +104,44 @@ const Admin = (() => {
     view.querySelectorAll('[data-del]').forEach((el) => el.addEventListener('click', () => deleteUser(el.dataset.del)));
   }
 
-  function createUserModal() {
+  async function createUserModal() {
+    let disk = { availableBytes: 0, totalBytes: 0 };
+    try { disk = await API.diskInfo(); } catch {}
     const m = UI.modal(`
       <h3>새 계정 발급</h3>
       <div class="field"><label>아이디 (영소문자/숫자)</label><input class="input" id="username" placeholder="예: hong.gd"></div>
       <div class="field"><label>표시 이름</label><input class="input" id="displayName" placeholder="예: 홍길동"></div>
-      <div class="field"><label>초기 비밀번호 (비우면 자동 생성)</label><input class="input" id="password" placeholder="자동 생성"></div>
+      <div class="field"><label>초기 비밀번호 (비우면 자동 생성)</label><input class="input" type="password" id="password" placeholder="자동 생성"></div>
+      <div class="field"><label>비밀번호 확인 (직접 입력 시)</label><input class="input" type="password" id="password2"><span class="pw-match muted" id="match"></span></div>
       <div class="field"><label>권한</label>
         <select class="input" id="role">
           <option value="user">일반 (본인 파일만)</option>
           <option value="manager">담당자 (일반 사용자 파일 열람·업로드, 관리기능 제외)</option>
-          <option value="admin">관리자 (전체 + 관리기능)</option>
+          <option value="admin">관리자 (전체 + 관리기능, 무제한)</option>
         </select>
       </div>
-      <div class="field"><label>할당량 (GB, 0=무제한)</label><input class="input num" id="quota" type="number" value="0" min="0"></div>
+      <div class="field" id="quota-field"><label>디스크 할당 (GB, 0=미할당)</label>
+        <input class="input num" id="quota" type="number" value="0" min="0" step="0.1">
+        <span class="muted" style="font-size:12px">할당 가능(남은) 용량: <b>${UI.bytes(disk.availableBytes)}</b> / 전체 ${UI.bytes(disk.totalBytes)}</span></div>
       <div class="modal-actions">
         <button class="btn btn-ghost" id="cancel">취소</button>
         <button class="btn btn-primary" id="ok">발급</button>
       </div>`);
+    const roleSel = m.q('#role'), quotaField = m.q('#quota-field');
+    const syncRole = () => { const admin = roleSel.value === 'admin'; quotaField.style.display = admin ? 'none' : ''; };
+    roleSel.addEventListener('change', () => m.animate(syncRole)); syncRole();
+    const check = () => { const a = m.q('#password').value, b = m.q('#password2').value; const el = m.q('#match'); if (!a && !b) { el.textContent = ''; return; } if (a === b) { el.textContent = '✓ 일치'; el.className = 'pw-match ok'; } else { el.textContent = '✗ 불일치'; el.className = 'pw-match bad'; } };
+    m.q('#password').addEventListener('input', check); m.q('#password2').addEventListener('input', check);
     m.q('#cancel').addEventListener('click', m.close);
     m.q('#ok').addEventListener('click', async () => {
+      const pw = m.q('#password').value.trim();
+      if (pw && pw !== m.q('#password2').value.trim()) return UI.toast('비밀번호가 일치하지 않습니다', 'error');
       try {
         const res = await API.createUser({
           username: m.q('#username').value.trim(),
           displayName: m.q('#displayName').value.trim(),
-          password: m.q('#password').value.trim(),
-          role: m.q('#role').value,
+          password: pw,
+          role: roleSel.value,
           quotaBytes: Math.round((parseFloat(m.q('#quota').value) || 0) * 1024 * 1024 * 1024),
         });
         m.close();
@@ -148,16 +160,22 @@ const Admin = (() => {
         <p style="font-size:12px;color:var(--text-muted);margin-top:10px">
           이 열람 기록은 감사 로그에 남습니다. 아래에서 새 비밀번호로 재설정할 수도 있습니다.
         </p>
-        <div class="field" style="margin-top:14px"><label>새 비밀번호로 재설정 (선택)</label>
-          <input class="input" id="newpw" placeholder="비우면 자동 생성"></div>
+        <div class="field" style="margin-top:14px"><label>새 비밀번호로 재설정 (비우면 자동 생성)</label>
+          <input class="input" type="password" id="newpw" placeholder="자동 생성"></div>
+        <div class="field"><label>새 비밀번호 확인 (직접 입력 시)</label>
+          <input class="input" type="password" id="newpw2"><span class="pw-match muted" id="match"></span></div>
         <div class="modal-actions">
           <button class="btn btn-ghost" id="cancel">닫기</button>
           <button class="btn btn-secondary" id="reset">재설정</button>
         </div>`);
+      const check = () => { const a = m.q('#newpw').value, b = m.q('#newpw2').value; const el = m.q('#match'); if (!a && !b) { el.textContent = ''; return; } if (a === b) { el.textContent = '✓ 일치'; el.className = 'pw-match ok'; } else { el.textContent = '✗ 불일치'; el.className = 'pw-match bad'; } };
+      m.q('#newpw').addEventListener('input', check); m.q('#newpw2').addEventListener('input', check);
       m.q('#cancel').addEventListener('click', m.close);
       m.q('#reset').addEventListener('click', async () => {
+        const pw = m.q('#newpw').value.trim();
+        if (pw && pw !== m.q('#newpw2').value.trim()) return UI.toast('비밀번호가 일치하지 않습니다', 'error');
         try {
-          const res = await API.resetPassword(id, m.q('#newpw').value.trim());
+          const res = await API.resetPassword(id, pw);
           m.close();
           showSecret('비밀번호 재설정 완료', `아이디: ${username}`, res.password);
         } catch (err) { UI.toast(err.message, 'error'); }
@@ -178,21 +196,24 @@ const Admin = (() => {
         </select></div>
       <div class="field"><label>상태</label>
         <select class="input" id="active"><option value="true" ${u.isActive ? 'selected' : ''}>활성</option><option value="false" ${!u.isActive ? 'selected' : ''}>정지</option></select></div>
-      <div class="field"><label>할당량 (GB, 0=무제한)</label><input class="input num" id="quota" type="number" min="0" step="0.1" value="${u.quotaBytes > 0 ? (u.quotaBytes / 1024 / 1024 / 1024).toFixed(1) : 0}">
-        <span class="muted" style="font-size:12px">현재 사용량: ${UI.bytes(u.usedBytes)} · 현재 사용량보다 작게 줄일 수 없습니다.</span></div>
+      <div class="field" id="quota-field"><label>디스크 할당 (GB, 0=미할당)</label><input class="input num" id="quota" type="number" min="0" step="0.1" value="${u.quotaBytes > 0 ? (u.quotaBytes / 1024 / 1024 / 1024).toFixed(1) : 0}">
+        <span class="muted" style="font-size:12px">현재 사용량: ${UI.bytes(u.usedBytes)} · 사용량보다 작게 줄일 수 없습니다. 관리자는 무제한입니다.</span></div>
       <div class="modal-actions">
         <button class="btn btn-ghost" id="cancel">취소</button>
         <button class="btn btn-primary" id="ok">저장</button>
       </div>`);
+    const roleSel = m.q('#role'), quotaField = m.q('#quota-field');
+    const syncRole = () => { quotaField.style.display = roleSel.value === 'admin' ? 'none' : ''; };
+    roleSel.addEventListener('change', () => m.animate(syncRole)); syncRole();
     m.q('#cancel').addEventListener('click', m.close);
     m.q('#ok').addEventListener('click', async () => {
-      const gb = parseFloat(m.q('#quota').value) || 0;
-      const bytes = Math.round(gb * 1024 * 1024 * 1024);
-      if (bytes > 0 && bytes < u.usedBytes) { UI.toast(`현재 사용량(${UI.bytes(u.usedBytes)})보다 작게 설정할 수 없습니다`, 'error'); return; }
+      const g = parseFloat(m.q('#quota').value) || 0;
+      const bytes = Math.round(g * 1024 * 1024 * 1024);
+      if (roleSel.value !== 'admin' && bytes > 0 && bytes < u.usedBytes) { UI.toast(`현재 사용량(${UI.bytes(u.usedBytes)})보다 작게 설정할 수 없습니다`, 'error'); return; }
       try {
         await API.updateUser(id, {
           displayName: m.q('#dn').value.trim(),
-          role: m.q('#role').value,
+          role: roleSel.value,
           isActive: m.q('#active').value === 'true',
           quotaBytes: bytes,
         });
@@ -324,15 +345,47 @@ const Admin = (() => {
   function noticeModal(n) {
     const m = UI.modal(`<h3>${n ? '공지 수정' : '공지 작성'}</h3>
       <div class="field"><label>제목</label><input class="input" id="t" value="${n ? UI.escapeHtml(n.title) : ''}"></div>
-      <div class="field"><label>내용</label><textarea class="input" id="b" rows="5">${n ? UI.escapeHtml(n.body || '') : ''}</textarea></div>
+      <div class="field"><label>내용</label>
+        <div class="rte-toolbar">
+          <button type="button" class="rte-btn" data-cmd="bold" title="굵게"><b>B</b></button>
+          <button type="button" class="rte-btn" data-cmd="italic" title="기울임"><i>I</i></button>
+          <button type="button" class="rte-btn" data-cmd="underline" title="밑줄"><u>U</u></button>
+          <select class="rte-sel" data-cmd="fontSize" title="글자 크기">
+            <option value="">크기</option><option value="2">작게</option><option value="3">보통</option><option value="5">크게</option><option value="6">매우 크게</option>
+          </select>
+          <label class="rte-color" title="글자 색상">🎨<input type="color" data-cmd="foreColor" value="#343A40"></label>
+          <button type="button" class="rte-btn" data-cmd="createLink" title="링크">🔗</button>
+          <button type="button" class="rte-btn" id="rte-img" title="이미지 첨부">🖼️</button>
+          <input type="file" id="rte-file" accept="image/*" hidden>
+        </div>
+        <div class="rte-editor input" id="b" contenteditable="true">${n ? (n.body || '') : ''}</div>
+      </div>
       <div style="display:flex;gap:10px">
         <div class="field" style="flex:1"><label>시작 (비우면 즉시)</label><input class="input" type="datetime-local" id="s" value="${n ? toLocalInput(n.start_at) : ''}"></div>
         <div class="field" style="flex:1"><label>종료 (비우면 무기한)</label><input class="input" type="datetime-local" id="e" value="${n ? toLocalInput(n.end_at) : ''}"></div>
       </div>
       <div class="modal-actions"><button class="btn btn-ghost" id="c">취소</button><button class="btn btn-primary" id="ok">저장</button></div>`);
+    m.el.querySelector('.modal').classList.add('modal-wide');
+    const editor = m.q('#b');
+    const exec = (cmd, val) => { editor.focus(); document.execCommand(cmd, false, val); };
+    m.el.querySelectorAll('.rte-btn[data-cmd]').forEach((btn) => btn.addEventListener('click', () => {
+      const cmd = btn.dataset.cmd;
+      if (cmd === 'createLink') { const url = prompt('링크 주소(URL)를 입력하세요:', 'https://'); if (url) exec('createLink', url); }
+      else exec(cmd);
+    }));
+    m.el.querySelector('.rte-sel[data-cmd=fontSize]').addEventListener('change', (e) => { if (e.target.value) exec('fontSize', e.target.value); e.target.value = ''; });
+    m.el.querySelector('.rte-color input').addEventListener('input', (e) => exec('foreColor', e.target.value));
+    m.q('#rte-img').addEventListener('click', () => m.q('#rte-file').click());
+    m.q('#rte-file').addEventListener('change', (e) => {
+      const file = e.target.files[0]; if (!file) return;
+      if (file.size > 5 * 1024 * 1024) return UI.toast('이미지는 5MB 이하만 첨부할 수 있습니다', 'error');
+      const reader = new FileReader();
+      reader.onload = () => { exec('insertHTML', `<img src="${reader.result}" style="max-width:100%;vertical-align:middle">`); };
+      reader.readAsDataURL(file);
+    });
     m.q('#c').addEventListener('click', m.close);
     m.q('#ok').addEventListener('click', async () => {
-      const data = { title: m.q('#t').value.trim(), body: m.q('#b').value, startAt: m.q('#s').value ? new Date(m.q('#s').value).toISOString() : '', endAt: m.q('#e').value ? new Date(m.q('#e').value).toISOString() : '' };
+      const data = { title: m.q('#t').value.trim(), body: editor.innerHTML, startAt: m.q('#s').value ? new Date(m.q('#s').value).toISOString() : '', endAt: m.q('#e').value ? new Date(m.q('#e').value).toISOString() : '' };
       if (!data.title) return UI.toast('제목을 입력하세요', 'error');
       try { if (n) await API.editNotice(n.id, data); else await API.addNotice(data); m.close(); UI.toast('저장됨', 'success'); loadNotices(); } catch (err) { UI.toast(err.message, 'error'); }
     });

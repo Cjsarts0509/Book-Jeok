@@ -216,12 +216,17 @@ router.get('/', authenticate, wrap(resolveOwner), wrap(async (req, res) => {
 router.post('/upload', authenticate, wrap(resolveOwner), upload.array('file', 30), wrap(async (req, res) => {
   const folder = normalizeFolder(req.body.folder);
   if (!req.files || req.files.length === 0) return res.status(400).json({ error: '업로드할 파일이 없습니다.' });
-  const owner = await query('SELECT quota_bytes FROM users WHERE id=$1', [req.targetOwnerId]);
-  const quota = Number(owner.rows[0].quota_bytes);
-  if (quota > 0) {
+  const owner = await query('SELECT quota_bytes, role FROM users WHERE id=$1', [req.targetOwnerId]);
+  // 관리자는 무제한, 그 외는 할당량 적용(0=미할당이므로 업로드 불가)
+  if (owner.rows[0].role !== 'admin') {
+    const quota = Number(owner.rows[0].quota_bytes);
     const used = await query('SELECT COALESCE(SUM(size_bytes),0) AS s FROM files WHERE owner_id=$1 AND deleted_at IS NULL', [req.targetOwnerId]);
     const incoming = req.files.reduce((s, f) => s + f.size, 0);
-    if (Number(used.rows[0].s) + incoming > quota) { await Promise.all(req.files.map((f) => fsp.unlink(f.path).catch(() => {}))); return res.status(413).json({ error: '저장 용량 할당량을 초과했습니다.' }); }
+    if (Number(used.rows[0].s) + incoming > quota) {
+      await Promise.all(req.files.map((f) => fsp.unlink(f.path).catch(() => {})));
+      const msg = quota === 0 ? '디스크가 할당되지 않은 계정입니다. 관리자에게 문의하세요.' : '저장 용량 할당량을 초과했습니다.';
+      return res.status(413).json({ error: msg });
+    }
   }
   await ensureFolder(req.targetOwnerId, folder);
   const saved = [];
@@ -343,8 +348,11 @@ router.post('/:id(\\d+)/share', authenticate, wrap(async (req, res) => {
 // ── 사용량 ──────────
 router.get('/usage/summary', authenticate, wrap(resolveOwner), wrap(async (req, res) => {
   const r = await query('SELECT COUNT(*)::int AS files, COALESCE(SUM(size_bytes),0) AS bytes FROM files WHERE owner_id=$1 AND deleted_at IS NULL', [req.targetOwnerId]);
-  const q = await query('SELECT quota_bytes FROM users WHERE id=$1', [req.targetOwnerId]);
-  res.json({ ownerId: req.targetOwnerId, fileCount: r.rows[0].files, usedBytes: Number(r.rows[0].bytes), quotaBytes: Number(q.rows[0].quota_bytes) });
+  const q = await query('SELECT quota_bytes, role FROM users WHERE id=$1', [req.targetOwnerId]);
+  res.json({
+    ownerId: req.targetOwnerId, fileCount: r.rows[0].files, usedBytes: Number(r.rows[0].bytes),
+    quotaBytes: Number(q.rows[0].quota_bytes), unlimited: q.rows[0].role === 'admin',
+  });
 }));
 
 module.exports = router;

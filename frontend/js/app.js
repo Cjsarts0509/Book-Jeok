@@ -22,7 +22,7 @@ const App = (() => {
     root().innerHTML = `
       <div class="login-screen">
         <form class="login-card" id="login-form">
-          <img src="assets/logo.svg?v=7" class="login-logo" alt="북적북적">
+          <img src="assets/logo.svg?v=8" class="login-logo" alt="북적북적">
           <div class="login-title">북적북적</div>
           <div class="login-sub">Book-Jeok · 우리끼리 나누는 파일 창고</div>
           <div class="field"><label>아이디</label><input class="input" name="username" autocomplete="username" placeholder="아이디" required></div>
@@ -46,7 +46,7 @@ const App = (() => {
       <div class="layout">
         <header class="appbar">
           <button class="icon-btn appbar-menu" id="menu-toggle" title="폴더">☰</button>
-          <div class="brand"><img src="assets/logo.svg?v=7"><span class="brand-name">북적북적</span></div>
+          <div class="brand" id="brand-home" title="홈으로"><img src="assets/logo.svg?v=8"><span class="brand-name">북적북적</span></div>
           ${isPriv() ? `<select class="input account-switcher" id="account-switcher"><option value="">내 파일</option></select>` : ''}
           <div class="topbar-spacer"></div>
           <nav class="appbar-nav">
@@ -69,6 +69,7 @@ const App = (() => {
     }));
     document.getElementById('menu-toggle').addEventListener('click', toggleTree);
     document.getElementById('tree-backdrop').addEventListener('click', toggleTree);
+    document.getElementById('brand-home').addEventListener('click', () => { state.folder = '/'; loadFiles(); renderTree(); });
     if (isPriv()) setupAccountSwitcher();
     loadAll();
     loadBranches();
@@ -101,11 +102,12 @@ const App = (() => {
     const period = (n.start_at || n.end_at)
       ? `<p class="muted" style="font-size:12px;margin-bottom:10px">${n.start_at ? new Date(n.start_at).toLocaleDateString('ko-KR') : ''} ~ ${n.end_at ? new Date(n.end_at).toLocaleDateString('ko-KR') : ''}</p>` : '';
     const m = UI.modal(`<h3>📢 ${UI.escapeHtml(n.title)}</h3>${period}
-      <div style="white-space:pre-wrap;line-height:1.7;max-height:50vh;overflow-y:auto">${UI.escapeHtml(n.body || '')}</div>
+      <div class="notice-body">${n.body || ''}</div>
       <div class="modal-actions" style="align-items:center">
         <label class="autosort" style="margin-right:auto"><input type="checkbox" id="hide7"> 일주일간 보지 않기</label>
         <button class="btn btn-primary" id="close">닫기</button>
       </div>`);
+    m.el.querySelector('.modal').classList.add('modal-wide');
     const done = () => { if (m.q('#hide7').checked) localStorage.setItem('bj_notice_hide_' + n.id, String(Date.now() + 7 * 86400000)); m.close(); };
     m.q('#close').addEventListener('click', done);
   }
@@ -176,7 +178,7 @@ const App = (() => {
         <button class="btn btn-secondary btn-sm" id="new-folder">📂 <span class="label">새 폴더</span></button>
         <button class="btn btn-primary btn-sm" id="upload-btn">⬆️ <span class="label">업로드</span></button>
       </div>
-      <div class="usage-line"><span class="num">${UI.bytes(u.usedBytes)}</span><span class="muted">${u.quotaBytes > 0 ? '/ ' + UI.bytes(u.quotaBytes) : '· 무제한'} · ${u.fileCount}개 파일</span>${u.quotaBytes > 0 ? `<span class="usage-bar" style="flex:1"><span style="width:${pct}%"></span></span>` : ''}</div>
+      <div class="usage-line"><span class="num">${UI.bytes(u.usedBytes)}</span><span class="muted">${u.unlimited ? '· 무제한' : (u.quotaBytes > 0 ? '/ ' + UI.bytes(u.quotaBytes) : '· 미할당')} · ${u.fileCount}개 파일</span>${!u.unlimited && u.quotaBytes > 0 ? `<span class="usage-bar" style="flex:1"><span style="width:${pct}%"></span></span>` : ''}</div>
       <label class="dropzone" id="dropzone" for="file-input">
         <div class="big">📥</div><div>여기로 끌어다 놓거나 클릭해서 업로드</div>
         <div class="hint">허용: ${state.allowedExt.join(' · ')}</div>
@@ -500,9 +502,18 @@ const App = (() => {
   }
 
   function changePasswordModal() {
-    const m = UI.modal(`<h3>비밀번호 변경</h3><div class="field"><label>현재 비밀번호</label><input class="input" type="password" id="cur"></div><div class="field"><label>새 비밀번호 (8자 이상)</label><input class="input" type="password" id="nw"></div><div class="modal-actions"><button class="btn btn-ghost" id="c">취소</button><button class="btn btn-primary" id="ok">변경</button></div>`);
+    const m = UI.modal(`<h3>비밀번호 변경</h3>
+      <div class="field"><label>현재 비밀번호</label><input class="input" type="password" id="cur"></div>
+      <div class="field"><label>새 비밀번호 (8자 이상)</label><input class="input" type="password" id="nw"></div>
+      <div class="field"><label>새 비밀번호 확인</label><input class="input" type="password" id="nw2"><span class="pw-match muted" id="match"></span></div>
+      <div class="modal-actions"><button class="btn btn-ghost" id="c">취소</button><button class="btn btn-primary" id="ok">변경</button></div>`);
+    const check = () => { const a = m.q('#nw').value, b = m.q('#nw2').value; const el = m.q('#match'); if (!b) { el.textContent = ''; return; } if (a === b) { el.textContent = '✓ 일치'; el.className = 'pw-match ok'; } else { el.textContent = '✗ 불일치'; el.className = 'pw-match bad'; } };
+    m.q('#nw').addEventListener('input', check); m.q('#nw2').addEventListener('input', check);
     m.q('#c').addEventListener('click', m.close);
-    m.q('#ok').addEventListener('click', async () => { try { await API.changePassword(m.q('#cur').value, m.q('#nw').value); UI.toast('변경됨 🔐', 'success'); m.close(); } catch (err) { UI.toast(err.message, 'error'); } });
+    m.q('#ok').addEventListener('click', async () => {
+      if (m.q('#nw').value !== m.q('#nw2').value) return UI.toast('새 비밀번호가 일치하지 않습니다', 'error');
+      try { await API.changePassword(m.q('#cur').value, m.q('#nw').value); UI.toast('변경됨 🔐', 'success'); m.close(); } catch (err) { UI.toast(err.message, 'error'); }
+    });
   }
 
   function checkImpersonate() { const p = new URLSearchParams(location.search); if (p.get('ownerId')) { state.ownerId = p.get('ownerId'); state.ownerName = p.get('name') || ''; } }

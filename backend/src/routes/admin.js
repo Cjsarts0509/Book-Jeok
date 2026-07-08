@@ -10,6 +10,9 @@ const { authenticate, requireAdmin } = require('../middleware/auth');
 const { audit, wrap } = require('../util');
 const { RETENTION_MS } = require('../purge');
 const { getAllowedExtensions, setAllowedExtensions } = require('../settings');
+const { diskTotalBytes, allocatedBytes, validateAllocation } = require('../disk');
+
+function gb(bytes) { return (bytes / 1073741824).toFixed(2) + 'GB'; }
 
 const router = express.Router();
 router.use(authenticate, requireAdmin);
@@ -68,7 +71,8 @@ router.post('/users', wrap(async (req, res) => {
   const username = String(req.body.username || '').trim().toLowerCase();
   const displayName = String(req.body.displayName || '').trim();
   const role = ['admin', 'manager', 'user'].includes(req.body.role) ? req.body.role : 'user';
-  const quotaBytes = Math.max(0, parseInt(req.body.quotaBytes || '0', 10) || 0);
+  // 관리자는 무제한(quota 0), 그 외는 지정 할당(0=미할당)
+  const quotaBytes = role === 'admin' ? 0 : Math.max(0, parseInt(req.body.quotaBytes || '0', 10) || 0);
   let password = String(req.body.password || '').trim();
 
   if (!/^[a-z0-9._-]{3,64}$/.test(username)) {
@@ -77,6 +81,10 @@ router.post('/users', wrap(async (req, res) => {
   const dup = await query('SELECT id FROM users WHERE username = $1', [username]);
   if (dup.rowCount > 0) {
     return res.status(409).json({ error: '이미 존재하는 아이디입니다.' });
+  }
+  const alloc = await validateAllocation(quotaBytes);
+  if (!alloc.ok) {
+    return res.status(400).json({ error: `할당 가능한 디스크 용량을 초과했습니다. (남은 용량: ${gb(alloc.available)})` });
   }
   if (!password) password = generatePassword(12);
   if (password.length < 8) {
@@ -140,12 +148,20 @@ router.patch('/users/:id', wrap(async (req, res) => {
     values.push(['admin', 'manager', 'user'].includes(req.body.role) ? req.body.role : 'user');
   }
   if (req.body.quotaBytes !== undefined) {
-    const q = Math.max(0, parseInt(req.body.quotaBytes, 10) || 0);
-    if (q > 0) {
+    // 대상 계정의 역할 확인 (관리자는 항상 무제한 0)
+    const roleRow = await query('SELECT role FROM users WHERE id=$1', [req.params.id]);
+    const targetRole = req.body.role !== undefined ? req.body.role : roleRow.rows[0]?.role;
+    let q = Math.max(0, parseInt(req.body.quotaBytes, 10) || 0);
+    if (targetRole === 'admin') q = 0;
+    if (targetRole !== 'admin' && q > 0) {
       // 현재 사용량보다 작은 할당량으로는 줄일 수 없음
       const used = await query('SELECT COALESCE(SUM(size_bytes),0) AS s FROM files WHERE owner_id=$1 AND deleted_at IS NULL', [req.params.id]);
       if (Number(used.rows[0].s) > q) {
-        return res.status(400).json({ error: `현재 사용량(${(Number(used.rows[0].s) / 1073741824).toFixed(2)}GB)보다 작은 할당량으로 변경할 수 없습니다.` });
+        return res.status(400).json({ error: `현재 사용량(${gb(Number(used.rows[0].s))})보다 작은 할당량으로 변경할 수 없습니다.` });
+      }
+      const alloc = await validateAllocation(q, Number(req.params.id));
+      if (!alloc.ok) {
+        return res.status(400).json({ error: `할당 가능한 디스크 용량을 초과했습니다. (남은 용량: ${gb(alloc.available)})` });
       }
     }
     fields.push(`quota_bytes = $${i++}`);
@@ -282,6 +298,13 @@ router.delete('/trash/folder/:id', wrap(async (req, res) => {
   await query('DELETE FROM folders WHERE owner_id=$1 AND deleted_at IS NOT NULL AND (path=$2 OR path LIKE $3)', [fo.owner_id, fo.path, oldLike]);
   await audit(req, 'purge_folder', `${fo.path}`);
   res.json({ ok: true });
+}));
+
+// ══════════ 디스크 용량/할당 현황 ══════════
+router.get('/disk-info', wrap(async (req, res) => {
+  const total = await diskTotalBytes();
+  const allocated = await allocatedBytes();
+  res.json({ totalBytes: total, allocatedBytes: allocated, availableBytes: Math.max(0, total - allocated) });
 }));
 
 // ══════════ 허용 확장자 ══════════

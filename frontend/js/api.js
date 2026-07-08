@@ -74,6 +74,8 @@ const API = (() => {
     restoreFolder: (id) => req('POST', `/admin/trash/folder/${id}/restore`),
     purgeFile: (id) => req('DELETE', `/admin/trash/file/${id}`),
     purgeFolder: (id) => req('DELETE', `/admin/trash/folder/${id}`),
+    // 디스크
+    diskInfo: () => req('GET', '/admin/disk-info'),
     // 확장자
     getExtensions: () => req('GET', '/admin/settings/extensions'),
     setExtensions: (extensions) => req('PUT', '/admin/settings/extensions', { extensions }),

@@ -76,7 +76,8 @@ textarea.input { resize: vertical; }
 
 .appbar { height: var(--appbar-h); display: flex; align-items: center; gap: 14px; padding: 0 20px; background: var(--surface); border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 40; }
 .appbar-menu { display: none; }
-.brand { display: flex; align-items: center; gap: 9px; }
+.brand { display: flex; align-items: center; gap: 9px; cursor: pointer; border-radius: var(--radius-sm); transition: opacity .15s; text-decoration: none; color: inherit; }
+.brand:hover { opacity: .75; }
 .brand img { width: 34px; height: 34px; }
 .brand-name { font-weight: 800; font-size: 18px; letter-spacing: -.5px; }
 .account-switcher { width: auto; max-width: 240px; padding: 8px 12px; font-size: 13px; font-weight: 600; border-radius: var(--radius-sm); }
@@ -198,6 +199,26 @@ th { background: var(--bg); font-weight: 700; color: var(--text-muted); font-siz
 .modal h3 { font-size: 18px; margin-bottom: 16px; padding-right: 28px; }
 .modal.modal-wide { max-width: 720px; }
 @media (max-width: 768px) { .modal.modal-wide { max-width: 100%; } }
+
+/* 비밀번호 일치 표시 */
+.pw-match { font-size: 12px; font-weight: 600; margin-top: 4px; display: inline-block; }
+.pw-match.ok { color: #05835f; } .pw-match.bad { color: var(--danger); }
+
+/* 리치 텍스트 에디터 (공지) */
+.rte-toolbar { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; padding: 6px; border: 1.5px solid var(--border); border-bottom: none; border-radius: var(--radius-sm) var(--radius-sm) 0 0; background: var(--bg); }
+.rte-btn { min-width: 32px; height: 30px; border: 1px solid var(--border); background: var(--surface); border-radius: 6px; cursor: pointer; font-size: 14px; }
+.rte-btn:hover { background: var(--hover); }
+.rte-sel { height: 30px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); font-size: 13px; }
+.rte-color { display: inline-flex; align-items: center; gap: 3px; height: 30px; padding: 0 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); cursor: pointer; font-size: 13px; }
+.rte-color input { width: 22px; height: 22px; border: none; background: none; padding: 0; cursor: pointer; }
+.rte-editor { min-height: 160px; max-height: 40vh; overflow-y: auto; border-radius: 0 0 var(--radius-sm) var(--radius-sm); line-height: 1.7; }
+.rte-editor:focus { outline: none; }
+.rte-editor img { max-width: 100%; border-radius: 6px; }
+
+/* 공지 팝업 본문 */
+.notice-body { line-height: 1.7; max-height: 55vh; overflow-y: auto; word-break: break-word; }
+.notice-body img { max-width: 100%; border-radius: 8px; margin: 4px 0; }
+.notice-body a { color: var(--secondary); text-decoration: underline; }
 
 /* ── 공통 등장 애니메이션 ── */
 @keyframes fadeInUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
