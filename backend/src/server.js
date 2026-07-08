@@ -44,6 +44,7 @@ app.use('/api/auth', require('./routes/auth'));
 app.use('/api/files', require('./routes/files'));
 app.use('/api/admin', require('./routes/admin'));
 app.use('/api/share', require('./routes/share'));
+app.use('/api/meta', require('./routes/meta')); // 영업점 목록·활성 공지 (로그인 사용자 공용)
 
 // (선택) 프런트엔드를 같은 서버에서 서빙하려면 SERVE_FRONTEND=1
 if (process.env.SERVE_FRONTEND === '1') {
@@ -66,6 +67,7 @@ app.use((err, req, res, next) => {
 
 // ── 시작 ────────────────────────────────────────────
 fs.mkdirSync(config.storageRoot, { recursive: true });
+require('./settings').loadSettings(); // 허용 확장자 캐시 로드
 require('./purge').startPurgeScheduler(); // 휴지통 1년 경과분 자동 영구삭제
 app.listen(config.port, () => {
   console.log(`북적북적 API 서버 실행 중 → http://localhost:${config.port}  (env: ${config.env})`);

@@ -23,10 +23,13 @@ const Admin = (() => {
         <header class="appbar">
           <div class="brand"><img src="assets/logo.svg"><span class="brand-name">북적북적</span></div>
           <nav class="appbar-nav">
-            ${item('users', '👥', '계정 관리')}
+            ${item('users', '👥', '계정')}
+            ${item('branches', '🏢', '영업점')}
+            ${item('notices', '📢', '공지')}
+            ${item('ext', '🧩', '확장자')}
             ${item('trash', '🗑️', '휴지통')}
-            ${item('db', '🗄️', 'DB 상태')}
-            ${item('audit', '📜', '감사 로그')}
+            ${item('db', '🗄️', 'DB')}
+            ${item('audit', '📜', '로그')}
             <a class="nav-item" href="index.html"><span class="ico">📁</span><span class="t">파일로</span></a>
           </nav>
           <div class="topbar-spacer"></div>
@@ -44,10 +47,13 @@ const Admin = (() => {
     state.tab = tab;
     renderShell();
     if (tab === 'users') loadUsers();
+    else if (tab === 'branches') loadBranches();
+    else if (tab === 'notices') loadNotices();
+    else if (tab === 'ext') loadExt();
     else if (tab === 'trash') loadTrash();
     else if (tab === 'db') loadDb();
     else if (tab === 'audit') loadAudit();
-    const titles = { users: '계정 관리', trash: '휴지통', db: 'DB 상태', audit: '감사 로그' };
+    const titles = { users: '계정 관리', branches: '영업점 관리', notices: '공지사항', ext: '허용 확장자', trash: '휴지통', db: 'DB 상태', audit: '감사 로그' };
     document.getElementById('page-title').textContent = titles[tab];
   }
 
@@ -249,6 +255,102 @@ const Admin = (() => {
     if (!ok) return;
     try { if (type === 'folder') await API.purgeFolder(id); else await API.purgeFile(id); UI.toast('영구 삭제되었습니다', 'success'); loadTrash(); }
     catch (err) { UI.toast(err.message, 'error'); }
+  }
+
+  // ── 영업점 관리 ──────────────────────────
+  async function loadBranches() {
+    const view = document.getElementById('view');
+    view.innerHTML = '<div class="empty"><div class="big">⏳</div>불러오는 중…</div>';
+    try {
+      const { branches } = await API.adminBranches();
+      const rows = branches.map((b) => `
+        <tr class="fade-in"><td><b>${UI.escapeHtml(b.name)}</b></td>
+          <td class="row-actions" style="text-align:right">
+            <button class="btn btn-sm btn-ghost" data-eb="${b.id}" data-name="${UI.escapeHtml(b.name)}">✏️ 수정</button>
+            <button class="btn btn-sm btn-danger" data-db="${b.id}" data-name="${UI.escapeHtml(b.name)}">🗑️ 삭제</button>
+          </td></tr>`).join('');
+      view.innerHTML = `
+        <div class="toolbar"><span class="muted">사용자가 '새 폴더 → 영업점 폴더'에서 선택하는 목록입니다. 총 ${branches.length}개</span><div style="flex:1"></div><button class="btn btn-primary" id="add-branch">＋ 영업점 추가</button></div>
+        <div class="table-wrap fade-in"><table><thead><tr><th>영업점</th><th></th></tr></thead><tbody>${rows || '<tr><td colspan=2 class="muted">등록된 영업점이 없습니다.</td></tr>'}</tbody></table></div>`;
+      document.getElementById('add-branch').addEventListener('click', () => branchModal());
+      view.querySelectorAll('[data-eb]').forEach((el) => el.addEventListener('click', () => branchModal(el.dataset.eb, el.dataset.name)));
+      view.querySelectorAll('[data-db]').forEach((el) => el.addEventListener('click', async () => {
+        const ok = await UI.confirm({ title: '영업점 삭제', danger: true, confirmText: '삭제', message: `'${el.dataset.name}' 영업점을 목록에서 삭제할까요?\n(이미 만들어진 폴더는 영향받지 않습니다)` });
+        if (!ok) return;
+        try { await API.deleteBranch(el.dataset.db); UI.toast('삭제됨', 'success'); loadBranches(); } catch (err) { UI.toast(err.message, 'error'); }
+      }));
+    } catch (err) { view.innerHTML = `<div class="empty">⚠️ ${UI.escapeHtml(err.message)}</div>`; }
+  }
+  function branchModal(id, name) {
+    const m = UI.modal(`<h3>${id ? '영업점 수정' : '영업점 추가'}</h3><div class="field"><label>영업점 이름</label><input class="input" id="bn" value="${UI.escapeHtml(name || '')}" placeholder="예: 강남점"></div><div class="modal-actions"><button class="btn btn-ghost" id="c">취소</button><button class="btn btn-primary" id="ok">저장</button></div>`);
+    m.q('#c').addEventListener('click', m.close);
+    m.q('#ok').addEventListener('click', async () => {
+      const v = m.q('#bn').value.trim(); if (!v) return;
+      try { if (id) await API.editBranch(id, v); else await API.addBranch(v); m.close(); UI.toast('저장됨', 'success'); loadBranches(); } catch (err) { UI.toast(err.message, 'error'); }
+    });
+    setTimeout(() => m.q('#bn').focus(), 50);
+  }
+
+  // ── 공지사항 ──────────────────────────
+  async function loadNotices() {
+    const view = document.getElementById('view');
+    view.innerHTML = '<div class="empty"><div class="big">⏳</div>불러오는 중…</div>';
+    try {
+      const { notices } = await API.adminNotices();
+      const now = Date.now();
+      const rows = notices.map((n) => {
+        const active = (!n.start_at || new Date(n.start_at).getTime() <= now) && (!n.end_at || new Date(n.end_at).getTime() >= now);
+        return `<tr class="fade-in">
+          <td><b>${UI.escapeHtml(n.title)}</b><br><span class="muted" style="font-size:12px">${n.start_at ? UI.date(n.start_at) : '무기한'} ~ ${n.end_at ? UI.date(n.end_at) : '무기한'}</span></td>
+          <td><span class="badge ${active ? 'on' : 'off'}">${active ? '노출중' : '비노출'}</span></td>
+          <td class="row-actions" style="text-align:right"><button class="btn btn-sm btn-ghost" data-en="${n.id}">✏️ 수정</button><button class="btn btn-sm btn-danger" data-dn="${n.id}">🗑️ 삭제</button></td></tr>`;
+      }).join('');
+      view.innerHTML = `
+        <div class="toolbar"><span class="muted">노출 기간에 해당하면 사용자 로그인 시 팝업으로 표시됩니다.</span><div style="flex:1"></div><button class="btn btn-primary" id="add-notice">＋ 공지 작성</button></div>
+        <div class="table-wrap fade-in"><table><thead><tr><th>제목 / 기간</th><th>상태</th><th></th></tr></thead><tbody>${rows || '<tr><td colspan=3 class="muted">공지가 없습니다.</td></tr>'}</tbody></table></div>`;
+      document.getElementById('add-notice').addEventListener('click', () => noticeModal());
+      view.querySelectorAll('[data-en]').forEach((el) => el.addEventListener('click', () => noticeModal(notices.find((x) => String(x.id) === el.dataset.en))));
+      view.querySelectorAll('[data-dn]').forEach((el) => el.addEventListener('click', async () => {
+        const ok = await UI.confirm({ title: '공지 삭제', danger: true, confirmText: '삭제', message: '이 공지사항을 삭제할까요?' });
+        if (!ok) return; try { await API.deleteNotice(el.dataset.dn); UI.toast('삭제됨', 'success'); loadNotices(); } catch (err) { UI.toast(err.message, 'error'); }
+      }));
+    } catch (err) { view.innerHTML = `<div class="empty">⚠️ ${UI.escapeHtml(err.message)}</div>`; }
+  }
+  function toLocalInput(iso) { if (!iso) return ''; const d = new Date(iso); const p = (n) => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`; }
+  function noticeModal(n) {
+    const m = UI.modal(`<h3>${n ? '공지 수정' : '공지 작성'}</h3>
+      <div class="field"><label>제목</label><input class="input" id="t" value="${n ? UI.escapeHtml(n.title) : ''}"></div>
+      <div class="field"><label>내용</label><textarea class="input" id="b" rows="5">${n ? UI.escapeHtml(n.body || '') : ''}</textarea></div>
+      <div style="display:flex;gap:10px">
+        <div class="field" style="flex:1"><label>시작 (비우면 즉시)</label><input class="input" type="datetime-local" id="s" value="${n ? toLocalInput(n.start_at) : ''}"></div>
+        <div class="field" style="flex:1"><label>종료 (비우면 무기한)</label><input class="input" type="datetime-local" id="e" value="${n ? toLocalInput(n.end_at) : ''}"></div>
+      </div>
+      <div class="modal-actions"><button class="btn btn-ghost" id="c">취소</button><button class="btn btn-primary" id="ok">저장</button></div>`);
+    m.q('#c').addEventListener('click', m.close);
+    m.q('#ok').addEventListener('click', async () => {
+      const data = { title: m.q('#t').value.trim(), body: m.q('#b').value, startAt: m.q('#s').value ? new Date(m.q('#s').value).toISOString() : '', endAt: m.q('#e').value ? new Date(m.q('#e').value).toISOString() : '' };
+      if (!data.title) return UI.toast('제목을 입력하세요', 'error');
+      try { if (n) await API.editNotice(n.id, data); else await API.addNotice(data); m.close(); UI.toast('저장됨', 'success'); loadNotices(); } catch (err) { UI.toast(err.message, 'error'); }
+    });
+    setTimeout(() => m.q('#t').focus(), 50);
+  }
+
+  // ── 허용 확장자 ──────────────────────────
+  async function loadExt() {
+    const view = document.getElementById('view');
+    view.innerHTML = '<div class="empty"><div class="big">⏳</div>불러오는 중…</div>';
+    try {
+      const { extensions } = await API.getExtensions();
+      view.innerHTML = `
+        <div class="card" style="max-width:640px">
+          <p class="muted" style="margin-bottom:12px">업로드를 허용할 파일 확장자를 입력하세요. 쉼표 또는 공백으로 구분하며, 점(.)은 있어도 없어도 됩니다. 예: <code>.txt, .csv, xlsx</code></p>
+          <div class="field"><label>허용 확장자</label><textarea class="input" id="ext" rows="4">${extensions.join(', ')}</textarea></div>
+          <div style="display:flex;gap:10px;justify-content:flex-end"><button class="btn btn-primary" id="save-ext">저장</button></div>
+        </div>`;
+      document.getElementById('save-ext').addEventListener('click', async () => {
+        try { const r = await API.setExtensions(document.getElementById('ext').value); UI.toast(`저장됨 (${r.extensions.length}종)`, 'success'); loadExt(); } catch (err) { UI.toast(err.message, 'error'); }
+      });
+    } catch (err) { view.innerHTML = `<div class="empty">⚠️ ${UI.escapeHtml(err.message)}</div>`; }
   }
 
   function showSecret(title, sub, secret) {

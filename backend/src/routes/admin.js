@@ -9,6 +9,7 @@ const { hashPassword, encryptSecret, decryptSecret, generatePassword } = require
 const { authenticate, requireAdmin } = require('../middleware/auth');
 const { audit, wrap } = require('../util');
 const { RETENTION_MS } = require('../purge');
+const { getAllowedExtensions, setAllowedExtensions } = require('../settings');
 
 const router = express.Router();
 router.use(authenticate, requireAdmin);
@@ -272,6 +273,88 @@ router.delete('/trash/folder/:id', wrap(async (req, res) => {
   if (files.rowCount) await query('DELETE FROM files WHERE id = ANY($1::bigint[])', [files.rows.map((f) => f.id)]);
   await query('DELETE FROM folders WHERE owner_id=$1 AND deleted_at IS NOT NULL AND (path=$2 OR path LIKE $3)', [fo.owner_id, fo.path, oldLike]);
   await audit(req, 'purge_folder', `${fo.path}`);
+  res.json({ ok: true });
+}));
+
+// ══════════ 허용 확장자 ══════════
+router.get('/settings/extensions', wrap(async (req, res) => {
+  res.json({ extensions: getAllowedExtensions() });
+}));
+router.put('/settings/extensions', wrap(async (req, res) => {
+  const normalized = await setAllowedExtensions(req.body.extensions || '');
+  await audit(req, 'set_extensions', normalized);
+  res.json({ ok: true, extensions: normalized.split(',').filter(Boolean) });
+}));
+
+// ══════════ 영업점 관리 ══════════
+router.get('/branches', wrap(async (req, res) => {
+  const r = await query('SELECT id, name, sort_order FROM branches ORDER BY sort_order, name');
+  res.json({ branches: r.rows });
+}));
+router.post('/branches', wrap(async (req, res) => {
+  const name = String(req.body.name || '').trim();
+  if (!name) return res.status(400).json({ error: '영업점 이름을 입력하세요.' });
+  const max = await query('SELECT COALESCE(MAX(sort_order),0)+1 AS n FROM branches');
+  try {
+    const r = await query('INSERT INTO branches (name, sort_order) VALUES ($1,$2) RETURNING id', [name, max.rows[0].n]);
+    await audit(req, 'add_branch', name);
+    res.status(201).json({ id: r.rows[0].id, name });
+  } catch (err) {
+    if (err.code === '23505') return res.status(409).json({ error: '이미 있는 영업점입니다.' });
+    throw err;
+  }
+}));
+router.patch('/branches/:id', wrap(async (req, res) => {
+  const name = String(req.body.name || '').trim();
+  if (!name) return res.status(400).json({ error: '영업점 이름을 입력하세요.' });
+  try {
+    const r = await query('UPDATE branches SET name=$1 WHERE id=$2 RETURNING id', [name, req.params.id]);
+    if (r.rowCount === 0) return res.status(404).json({ error: '영업점을 찾을 수 없습니다.' });
+    await audit(req, 'edit_branch', name);
+    res.json({ ok: true });
+  } catch (err) {
+    if (err.code === '23505') return res.status(409).json({ error: '이미 있는 영업점입니다.' });
+    throw err;
+  }
+}));
+router.delete('/branches/:id', wrap(async (req, res) => {
+  const r = await query('DELETE FROM branches WHERE id=$1 RETURNING name', [req.params.id]);
+  if (r.rowCount === 0) return res.status(404).json({ error: '영업점을 찾을 수 없습니다.' });
+  await audit(req, 'delete_branch', r.rows[0].name);
+  res.json({ ok: true });
+}));
+
+// ══════════ 공지사항 관리 ══════════
+router.get('/notices', wrap(async (req, res) => {
+  const r = await query('SELECT id, title, body, start_at, end_at, created_at FROM notices ORDER BY created_at DESC');
+  res.json({ notices: r.rows });
+}));
+router.post('/notices', wrap(async (req, res) => {
+  const title = String(req.body.title || '').trim();
+  if (!title) return res.status(400).json({ error: '제목을 입력하세요.' });
+  const body = String(req.body.body || '');
+  const startAt = req.body.startAt || null;
+  const endAt = req.body.endAt || null;
+  const r = await query('INSERT INTO notices (title, body, start_at, end_at) VALUES ($1,$2,$3,$4) RETURNING id', [title, body, startAt, endAt]);
+  await audit(req, 'add_notice', title);
+  res.status(201).json({ id: r.rows[0].id });
+}));
+router.patch('/notices/:id', wrap(async (req, res) => {
+  const fields = []; const values = []; let i = 1;
+  for (const [k, col] of [['title', 'title'], ['body', 'body'], ['startAt', 'start_at'], ['endAt', 'end_at']]) {
+    if (req.body[k] !== undefined) { fields.push(`${col}=$${i++}`); values.push(req.body[k] === '' ? null : req.body[k]); }
+  }
+  if (fields.length === 0) return res.status(400).json({ error: '변경할 항목이 없습니다.' });
+  values.push(req.params.id);
+  const r = await query(`UPDATE notices SET ${fields.join(', ')} WHERE id=$${i} RETURNING id`, values);
+  if (r.rowCount === 0) return res.status(404).json({ error: '공지를 찾을 수 없습니다.' });
+  await audit(req, 'edit_notice', `id=${req.params.id}`);
+  res.json({ ok: true });
+}));
+router.delete('/notices/:id', wrap(async (req, res) => {
+  const r = await query('DELETE FROM notices WHERE id=$1 RETURNING id', [req.params.id]);
+  if (r.rowCount === 0) return res.status(404).json({ error: '공지를 찾을 수 없습니다.' });
+  await audit(req, 'delete_notice', `id=${req.params.id}`);
   res.json({ ok: true });
 }));
 

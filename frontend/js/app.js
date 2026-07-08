@@ -3,7 +3,8 @@ const App = (() => {
   const state = {
     user: null, folder: '/', ownerId: null, ownerName: null,
     files: [], folders: [], treeFolders: [], usage: null, accounts: [],
-    view: localStorage.getItem('bj_view') || 'grid',
+    view: localStorage.getItem('bj_view') || 'list',
+    branches: [],
     selected: new Map(), // key -> {type:'file'|'folder', id, path, name}
   };
   const root = () => document.getElementById('app');
@@ -20,7 +21,7 @@ const App = (() => {
     root().innerHTML = `
       <div class="login-screen">
         <form class="login-card" id="login-form">
-          <img src="assets/logo.svg?v=5" class="login-logo" alt="북적북적">
+          <img src="assets/logo.svg?v=6" class="login-logo" alt="북적북적">
           <div class="login-title">북적북적</div>
           <div class="login-sub">Book-Jeok · 우리끼리 나누는 파일 창고</div>
           <div class="field"><label>아이디</label><input class="input" name="username" autocomplete="username" placeholder="아이디" required></div>
@@ -44,7 +45,7 @@ const App = (() => {
       <div class="layout">
         <header class="appbar">
           <button class="icon-btn appbar-menu" id="menu-toggle" title="폴더">☰</button>
-          <div class="brand"><img src="assets/logo.svg?v=5"><span class="brand-name">북적북적</span></div>
+          <div class="brand"><img src="assets/logo.svg?v=6"><span class="brand-name">북적북적</span></div>
           ${isPriv() ? `<select class="input account-switcher" id="account-switcher"><option value="">내 파일</option></select>` : ''}
           <div class="topbar-spacer"></div>
           <nav class="appbar-nav">
@@ -69,6 +70,36 @@ const App = (() => {
     document.getElementById('tree-backdrop').addEventListener('click', toggleTree);
     if (isPriv()) setupAccountSwitcher();
     loadAll();
+    loadBranches();
+    showNotices();
+  }
+
+  async function loadBranches() { try { state.branches = (await API.branches()).branches; } catch {} }
+
+  // ── 공지사항 팝업 (로그인 후) ──────────
+  async function showNotices() {
+    try {
+      const { notices } = await API.activeNotices();
+      for (const n of notices) {
+        const key = 'bj_notice_hide_' + n.id;
+        const until = parseInt(localStorage.getItem(key) || '0', 10);
+        if (until && until > Date.now()) continue; // 일주일간 보지 않기 유효
+        noticePopup(n);
+        break; // 한 번에 하나씩
+      }
+    } catch {}
+  }
+  function noticePopup(n) {
+    const period = (n.start_at || n.end_at)
+      ? `<p class="muted" style="font-size:12px;margin-bottom:10px">${n.start_at ? new Date(n.start_at).toLocaleDateString('ko-KR') : ''} ~ ${n.end_at ? new Date(n.end_at).toLocaleDateString('ko-KR') : ''}</p>` : '';
+    const m = UI.modal(`<h3>📢 ${UI.escapeHtml(n.title)}</h3>${period}
+      <div style="white-space:pre-wrap;line-height:1.7;max-height:50vh;overflow-y:auto">${UI.escapeHtml(n.body || '')}</div>
+      <div class="modal-actions" style="align-items:center">
+        <label class="autosort" style="margin-right:auto"><input type="checkbox" id="hide7"> 일주일간 보지 않기</label>
+        <button class="btn btn-primary" id="close">닫기</button>
+      </div>`);
+    const done = () => { if (m.q('#hide7').checked) localStorage.setItem('bj_notice_hide_' + n.id, String(Date.now() + 7 * 86400000)); m.close(); };
+    m.q('#close').addEventListener('click', done);
   }
 
   function toggleTree() { document.getElementById('tree-sidebar').classList.toggle('open'); document.getElementById('tree-backdrop').classList.toggle('show'); }
@@ -129,7 +160,6 @@ const App = (() => {
           <button class="vt ${state.view === 'grid' ? 'on' : ''}" data-view="grid" title="미리보기">▦</button>
           <button class="vt ${state.view === 'list' ? 'on' : ''}" data-view="list" title="리스트">☰</button>
         </div>
-        <label class="autosort" title="지점_날짜 파일을 연도/지점 폴더로 자동 정리"><input type="checkbox" id="autosort"> 지점파일 자동정리</label>
         <button class="btn btn-secondary btn-sm" id="new-folder">📂 <span class="label">새 폴더</span></button>
         <button class="btn btn-primary btn-sm" id="upload-btn">⬆️ <span class="label">업로드</span></button>
       </div>
@@ -160,7 +190,7 @@ const App = (() => {
 
   function gridHTML() {
     const folders = state.folders.map((f) => `
-      <div class="file-card fade-in" data-folder-card="${UI.escapeHtml(f.path)}">
+      <div class="file-card fade-in" data-folder-card="${UI.escapeHtml(f.path)}" title="더블클릭하여 열기">
         <div class="file-actions">
           <button class="icon-btn" data-fnote="${UI.escapeHtml(f.path)}" title="비고">📝</button>
           <button class="icon-btn" data-frename="${UI.escapeHtml(f.path)}" title="이름변경">✏️</button>
@@ -168,7 +198,7 @@ const App = (() => {
         </div>
         <div class="file-ico">📁</div>
         <div class="file-name">${UI.escapeHtml(f.name)}</div>
-        <div class="file-meta">폴더</div>
+        <div class="file-meta num">${UI.bytes(f.size)} · ${f.createdAt ? UI.date(f.createdAt) : '폴더'}</div>
         ${f.note ? `<div class="file-note" title="${UI.escapeHtml(f.note)}">📝 ${UI.escapeHtml(f.note)}</div>` : ''}
       </div>`).join('');
     const files = state.files.map((f) => `
@@ -194,10 +224,11 @@ const App = (() => {
       const key = `folder:${f.path}`;
       return `<tr data-folder-row="${UI.escapeHtml(f.path)}" class="${isSel(key) ? 'sel' : ''}">
         <td><input type="checkbox" class="rowcheck" data-sel-folder="${UI.escapeHtml(f.path)}" data-name="${UI.escapeHtml(f.name)}" ${isSel(key) ? 'checked' : ''}></td>
-        <td class="open-cell" data-open="${UI.escapeHtml(f.path)}"><span class="ic">📁</span> ${UI.escapeHtml(f.name)}</td>
-        <td class="muted">폴더</td>
-        <td class="note-cell" data-fnote="${UI.escapeHtml(f.path)}" title="클릭하여 비고 편집">${f.note ? UI.escapeHtml(f.note) : '<span class="muted">+ 비고</span>'}</td>
+        <td class="open-cell" data-open="${UI.escapeHtml(f.path)}" title="더블클릭하여 열기"><span class="ic">📁</span> ${UI.escapeHtml(f.name)}</td>
+        <td class="num muted">${UI.bytes(f.size)}</td>
+        <td class="num muted">${f.createdAt ? UI.date(f.createdAt) : '—'}</td>
         <td class="num muted">${f.noteUpdatedAt ? UI.date(f.noteUpdatedAt) : '—'}</td>
+        <td class="note-cell" data-fnote="${UI.escapeHtml(f.path)}" title="클릭하여 비고 편집">${f.note ? UI.escapeHtml(f.note) : '<span class="muted">+ 비고</span>'}</td>
         <td class="row-actions"><button class="icon-btn" data-frename="${UI.escapeHtml(f.path)}" title="이름변경">✏️</button></td>
       </tr>`;
     }).join('');
@@ -207,13 +238,14 @@ const App = (() => {
         <td><input type="checkbox" class="rowcheck" data-sel-file="${f.id}" data-name="${UI.escapeHtml(f.name)}" ${isSel(key) ? 'checked' : ''}></td>
         <td><span class="ic">${UI.fileIcon(f.name)}</span> ${UI.escapeHtml(f.name)}</td>
         <td class="num muted">${UI.bytes(f.size)}</td>
-        <td class="note-cell" data-note="${f.id}" title="클릭하여 비고 편집">${f.note ? UI.escapeHtml(f.note) : '<span class="muted">+ 비고</span>'}</td>
+        <td class="num muted">${UI.date(f.createdAt)}</td>
         <td class="num muted">${UI.date(f.updatedAt || f.createdAt)}</td>
+        <td class="note-cell" data-note="${f.id}" title="클릭하여 비고 편집">${f.note ? UI.escapeHtml(f.note) : '<span class="muted">+ 비고</span>'}</td>
         <td class="row-actions"><button class="icon-btn" data-share="${f.id}" title="공유">🔗</button><button class="icon-btn" data-dl="${f.id}" title="다운로드">⬇️</button></td>
       </tr>`;
     }).join('');
     return `<div class="table-wrap fade-in"><table class="filetable">
-      <thead><tr><th style="width:34px"><input type="checkbox" id="check-all"></th><th>이름</th><th style="width:90px">크기</th><th>비고</th><th style="width:110px">수정일</th><th style="width:90px"></th></tr></thead>
+      <thead><tr><th style="width:34px"><input type="checkbox" id="check-all"></th><th>이름</th><th style="width:84px">크기</th><th style="width:96px">등록일</th><th style="width:96px">수정일</th><th>비고</th><th style="width:70px"></th></tr></thead>
       <tbody>${folders}${files}</tbody></table></div>`;
   }
 
@@ -233,9 +265,9 @@ const App = (() => {
 
   function wireListing() {
     const box = document.getElementById('listing');
-    // 폴더 열기
-    box.querySelectorAll('[data-folder-card]').forEach((el) => el.addEventListener('click', (e) => { if (e.target.closest('.file-actions')) return; openFolder(el.dataset.folderCard); }));
-    box.querySelectorAll('[data-open]').forEach((el) => el.addEventListener('click', () => openFolder(el.dataset.open)));
+    // 폴더 열기 — 더블클릭으로만 진입
+    box.querySelectorAll('[data-folder-card]').forEach((el) => el.addEventListener('dblclick', (e) => { if (e.target.closest('.file-actions')) return; openFolder(el.dataset.folderCard); }));
+    box.querySelectorAll('[data-open]').forEach((el) => el.addEventListener('dblclick', () => openFolder(el.dataset.open)));
     // 파일 액션
     box.querySelectorAll('[data-dl]').forEach((el) => el.addEventListener('click', (e) => { e.stopPropagation(); downloadFile(el.dataset.dl); }));
     box.querySelectorAll('[data-del]').forEach((el) => el.addEventListener('click', (e) => { e.stopPropagation(); deleteFile(el.dataset.del); }));
@@ -317,10 +349,9 @@ const App = (() => {
 
   async function uploadFiles(fileList) {
     const fd = new FormData(); fd.append('folder', state.folder);
-    if (document.getElementById('autosort')?.checked) fd.append('autoSort', '1');
     [...fileList].forEach((f) => fd.append('file', f));
     UI.toast(`${fileList.length}개 업로드 중…`);
-    try { const res = await API.upload(fd, state.ownerId); const sorted = res.uploaded.filter((u) => u.sorted).length; UI.toast(`업로드 완료 ✅${sorted ? ` (${sorted}개 자동분류)` : ''}`, 'success'); loadAll(); }
+    try { await API.upload(fd, state.ownerId); UI.toast('업로드 완료 ✅', 'success'); loadAll(); }
     catch (err) { UI.toast(err.message, 'error'); }
   }
 
@@ -347,10 +378,36 @@ const App = (() => {
 
   function newFolderModal() {
     const parent = state.folder === '/' ? '' : state.folder;
-    const m = UI.modal(`<h3>새 폴더</h3><div class="field"><label>폴더 이름 (현재 위치: ${state.folder})</label><input class="input" id="fn" placeholder="예: 2026-보고서"></div><div class="modal-actions"><button class="btn btn-ghost" id="c">취소</button><button class="btn btn-primary" id="ok">만들기</button></div>`);
+    const branchOpts = state.branches.map((b) => `<label class="branch-chip"><input type="checkbox" value="${UI.escapeHtml(b.name)}"> ${UI.escapeHtml(b.name)}</label>`).join('');
+    const m = UI.modal(`<h3>새 폴더 (현재 위치: ${UI.escapeHtml(state.folder)})</h3>
+      <div class="seg" id="seg"><button class="seg-btn on" data-mode="normal">일반 폴더</button><button class="seg-btn" data-mode="branch">영업점 폴더</button></div>
+      <div id="pane-normal"><div class="field" style="margin-top:14px"><label>폴더 이름</label><input class="input" id="fn" placeholder="예: 2026-보고서"></div></div>
+      <div id="pane-branch" class="hidden">
+        <p class="muted" style="font-size:13px;margin:12px 0 8px">현재 폴더 아래에 선택한 영업점 폴더를 생성합니다. (여러 개 선택 가능)</p>
+        <div class="branch-list">${branchOpts || '<span class="muted">등록된 영업점이 없습니다. 관리자 페이지에서 추가하세요.</span>'}</div>
+      </div>
+      <div class="modal-actions"><button class="btn btn-ghost" id="c">취소</button><button class="btn btn-primary" id="ok">만들기</button></div>`);
+    let mode = 'normal';
+    m.el.querySelectorAll('.seg-btn').forEach((b) => b.addEventListener('click', () => {
+      mode = b.dataset.mode; m.el.querySelectorAll('.seg-btn').forEach((x) => x.classList.toggle('on', x === b));
+      m.q('#pane-normal').classList.toggle('hidden', mode !== 'normal');
+      m.q('#pane-branch').classList.toggle('hidden', mode !== 'branch');
+    }));
     m.q('#c').addEventListener('click', m.close);
-    m.q('#ok').addEventListener('click', async () => { const name = m.q('#fn').value.trim().replace(/\//g, ''); if (!name) return; try { await API.createFolder(parent + '/' + name, state.ownerId); m.close(); UI.toast('폴더 생성됨', 'success'); loadAll(); } catch (err) { UI.toast(err.message, 'error'); } });
-    setTimeout(() => m.q('#fn').focus(), 50);
+    m.q('#ok').addEventListener('click', async () => {
+      try {
+        if (mode === 'normal') {
+          const name = m.q('#fn').value.trim().replace(/\//g, ''); if (!name) return;
+          await API.createFolder(parent + '/' + name, state.ownerId);
+        } else {
+          const picked = [...m.el.querySelectorAll('#pane-branch input:checked')].map((x) => x.value);
+          if (picked.length === 0) return UI.toast('영업점을 하나 이상 선택하세요', 'error');
+          for (const name of picked) await API.createFolder(parent + '/' + name, state.ownerId);
+        }
+        m.close(); UI.toast('폴더 생성됨', 'success'); loadAll();
+      } catch (err) { UI.toast(err.message, 'error'); }
+    });
+    setTimeout(() => m.q('#fn')?.focus(), 50);
   }
 
   function noteModal(id) {

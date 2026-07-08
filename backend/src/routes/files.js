@@ -11,15 +11,9 @@ const { query } = require('../db');
 const { authenticate } = require('../middleware/auth');
 const { audit, wrap, canAccessOwner } = require('../util');
 const { generateToken } = require('../crypto');
+const { isAllowed, allowedLabel, getAllowedExtensions } = require('../settings');
 
 const router = express.Router();
-
-const ALLOWED_EXT = new Set([
-  'csv', 'xls', 'xlsx', 'xlsm', 'xlsb',
-  'jpg', 'jpeg', 'png', 'gif',
-  'ppt', 'pptx', 'doc', 'docx',
-]);
-const ALLOWED_LABEL = 'csv, xls, xlsx, jpg, jpeg, png, gif, ppt, pptx, doc, docx';
 
 const extOf = (name) => (name.split('.').pop() || '').toLowerCase();
 const userDir = (ownerId) => path.join(config.storageRoot, String(ownerId));
@@ -76,13 +70,6 @@ async function uniqueFolderPath(ownerId, wantedPath) {
   }
 }
 
-function smartFolderFor(originalName) {
-  const base = originalName.replace(/\.[^.]+$/, '');
-  const m = base.match(/^(.+?점)_(\d{4})(\d{2})(\d{2})/);
-  if (!m) return null;
-  return `/${m[2]}/${m[1].replace(/\//g, '')}`;
-}
-
 const upload = multer({
   storage: multer.diskStorage({
     destination: (req, file, cb) => { const d = userDir(req.targetOwnerId); fs.mkdirSync(d, { recursive: true }); cb(null, d); },
@@ -91,7 +78,7 @@ const upload = multer({
   limits: { fileSize: parseInt(process.env.MAX_UPLOAD_BYTES || String(2 * 1024 * 1024 * 1024), 10) },
   fileFilter: (req, file, cb) => {
     const name = Buffer.from(file.originalname, 'latin1').toString('utf8');
-    if (!ALLOWED_EXT.has(extOf(name))) return cb(Object.assign(new Error(`허용되지 않는 파일 형식입니다. 가능: ${ALLOWED_LABEL}`), { status: 415 }));
+    if (!isAllowed(extOf(name))) return cb(Object.assign(new Error(`허용되지 않는 파일 형식입니다. 가능: ${allowedLabel()}`), { status: 415 }));
     cb(null, true);
   },
 });
@@ -206,20 +193,28 @@ router.get('/', authenticate, wrap(resolveOwner), wrap(async (req, res) => {
   );
   const childPaths = new Set();
   for (const r of rows.rows) { const rest = r.path.slice(prefix.length); if (rest) childPaths.add(prefix + rest.split('/')[0]); }
-  // 각 폴더가 folders 테이블에 존재하도록 백필 후 note/id 조회
+  // 각 폴더가 folders 테이블에 존재하도록 백필 후 note/id/크기/등록일 조회
   const folders = [];
   for (const p of [...childPaths].sort()) {
     await query('INSERT INTO folders (owner_id, path) VALUES ($1,$2) ON CONFLICT (owner_id, path) DO NOTHING', [req.targetOwnerId, p]);
-    const fr = await query('SELECT id, note, note_updated_at FROM folders WHERE owner_id=$1 AND path=$2', [req.targetOwnerId, p]);
-    folders.push({ id: fr.rows[0]?.id, path: p, name: p.split('/').pop(), note: fr.rows[0]?.note || '', noteUpdatedAt: fr.rows[0]?.note_updated_at || null });
+    const fr = await query('SELECT id, note, note_updated_at, created_at FROM folders WHERE owner_id=$1 AND path=$2', [req.targetOwnerId, p]);
+    const agg = await query(
+      'SELECT COALESCE(SUM(size_bytes),0) AS s, COUNT(*)::int AS c FROM files WHERE owner_id=$1 AND deleted_at IS NULL AND (folder=$2 OR folder LIKE $3)',
+      [req.targetOwnerId, p, p + '/%']
+    );
+    folders.push({
+      id: fr.rows[0]?.id, path: p, name: p.split('/').pop(),
+      note: fr.rows[0]?.note || '', noteUpdatedAt: fr.rows[0]?.note_updated_at || null,
+      createdAt: fr.rows[0]?.created_at || null,
+      size: Number(agg.rows[0].s), fileCount: agg.rows[0].c,
+    });
   }
   res.json({ folder, ownerId: req.targetOwnerId, folders, files: files.rows.map(fileRow) });
 }));
 
 // ── 업로드 ──────────
 router.post('/upload', authenticate, wrap(resolveOwner), upload.array('file', 30), wrap(async (req, res) => {
-  const baseFolder = normalizeFolder(req.body.folder);
-  const autoSort = String(req.body.autoSort || '') === '1' || req.body.autoSort === true;
+  const folder = normalizeFolder(req.body.folder);
   if (!req.files || req.files.length === 0) return res.status(400).json({ error: '업로드할 파일이 없습니다.' });
   const owner = await query('SELECT quota_bytes FROM users WHERE id=$1', [req.targetOwnerId]);
   const quota = Number(owner.rows[0].quota_bytes);
@@ -228,22 +223,25 @@ router.post('/upload', authenticate, wrap(resolveOwner), upload.array('file', 30
     const incoming = req.files.reduce((s, f) => s + f.size, 0);
     if (Number(used.rows[0].s) + incoming > quota) { await Promise.all(req.files.map((f) => fsp.unlink(f.path).catch(() => {}))); return res.status(413).json({ error: '저장 용량 할당량을 초과했습니다.' }); }
   }
+  await ensureFolder(req.targetOwnerId, folder);
   const saved = [];
   for (const f of req.files) {
     const originalName = Buffer.from(f.originalname, 'latin1').toString('utf8');
-    let folder = baseFolder, sorted = false;
-    if (autoSort) { const smart = smartFolderFor(originalName); if (smart) { folder = smart; sorted = true; } }
-    await ensureFolder(req.targetOwnerId, folder);
     const name = await uniqueFileName(req.targetOwnerId, folder, originalName);
     const row = await query(
       `INSERT INTO files (owner_id, folder, original_name, stored_name, size_bytes, mime_type)
        VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
       [req.targetOwnerId, folder, name, path.basename(f.path), f.size, f.mimetype]
     );
-    saved.push({ id: row.rows[0].id, name, size: f.size, folder, sorted });
+    saved.push({ id: row.rows[0].id, name, size: f.size, folder });
   }
-  await audit(req, 'upload', `owner=${req.targetOwnerId} count=${saved.length} autoSort=${autoSort}`);
+  await audit(req, 'upload', `owner=${req.targetOwnerId} count=${saved.length}`);
   res.status(201).json({ uploaded: saved });
+}));
+
+// 허용 확장자 조회 (로그인 사용자)
+router.get('/allowed-extensions', authenticate, wrap(async (req, res) => {
+  res.json({ extensions: getAllowedExtensions() });
 }));
 
 // ── 다운로드 ──────────
@@ -276,7 +274,7 @@ router.patch('/:id(\\d+)/rename', authenticate, wrap(async (req, res) => {
   const r = await query('SELECT owner_id, folder FROM files WHERE id=$1 AND deleted_at IS NULL', [req.params.id]);
   if (r.rowCount === 0) return res.status(404).json({ error: '파일을 찾을 수 없습니다.' });
   if (!(await canAccessOwner(req.user, r.rows[0].owner_id))) return res.status(403).json({ error: '권한이 없습니다.' });
-  if (!ALLOWED_EXT.has(extOf(newName))) return res.status(415).json({ error: `허용되지 않는 확장자입니다. 가능: ${ALLOWED_LABEL}` });
+  if (!isAllowed(extOf(newName))) return res.status(415).json({ error: `허용되지 않는 확장자입니다. 가능: ${allowedLabel()}` });
   const unique = await uniqueFileName(r.rows[0].owner_id, r.rows[0].folder, newName);
   await query('UPDATE files SET original_name=$1, updated_at=now() WHERE id=$2', [unique, req.params.id]);
   await audit(req, 'rename', `file=${req.params.id} -> ${unique}`);

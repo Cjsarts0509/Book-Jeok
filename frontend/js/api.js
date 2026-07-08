@@ -43,6 +43,8 @@ const API = (() => {
     listFiles: (folder, ownerId) => req('GET', `/files?folder=${encodeURIComponent(folder)}${ownerId ? '&ownerId=' + ownerId : ''}`),
     tree: (ownerId) => req('GET', `/files/tree${ownerId ? '?ownerId=' + ownerId : ''}`),
     accounts: () => req('GET', '/files/accounts'),
+    branches: () => req('GET', '/meta/branches'),
+    activeNotices: () => req('GET', '/meta/notices/active'),
     usage: (ownerId) => req('GET', `/files/usage/summary${ownerId ? '?ownerId=' + ownerId : ''}`),
     upload: (formData, ownerId) => req('POST', `/files/upload${ownerId ? '?ownerId=' + ownerId : ''}`, formData, true),
     createFolder: (path, ownerId) => req('POST', '/files/folders', { path, ownerId }),
@@ -71,5 +73,18 @@ const API = (() => {
     restoreFolder: (id) => req('POST', `/admin/trash/folder/${id}/restore`),
     purgeFile: (id) => req('DELETE', `/admin/trash/file/${id}`),
     purgeFolder: (id) => req('DELETE', `/admin/trash/folder/${id}`),
+    // 확장자
+    getExtensions: () => req('GET', '/admin/settings/extensions'),
+    setExtensions: (extensions) => req('PUT', '/admin/settings/extensions', { extensions }),
+    // 영업점
+    adminBranches: () => req('GET', '/admin/branches'),
+    addBranch: (name) => req('POST', '/admin/branches', { name }),
+    editBranch: (id, name) => req('PATCH', `/admin/branches/${id}`, { name }),
+    deleteBranch: (id) => req('DELETE', `/admin/branches/${id}`),
+    // 공지사항
+    adminNotices: () => req('GET', '/admin/notices'),
+    addNotice: (data) => req('POST', '/admin/notices', data),
+    editNotice: (id, data) => req('PATCH', `/admin/notices/${id}`, data),
+    deleteNotice: (id) => req('DELETE', `/admin/notices/${id}`),
   };
 })();

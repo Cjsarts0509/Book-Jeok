@@ -62,6 +62,30 @@ CREATE TABLE IF NOT EXISTS audit_log (
   created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_log(created_at DESC);
+
+-- 전역 설정 (허용 확장자 등)
+CREATE TABLE IF NOT EXISTS settings (
+  key   TEXT PRIMARY KEY,
+  value TEXT NOT NULL DEFAULT ''
+);
+
+-- 영업점 목록
+CREATE TABLE IF NOT EXISTS branches (
+  id         BIGSERIAL PRIMARY KEY,
+  name       TEXT UNIQUE NOT NULL,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- 공지사항
+CREATE TABLE IF NOT EXISTS notices (
+  id         BIGSERIAL PRIMARY KEY,
+  title      TEXT NOT NULL,
+  body       TEXT NOT NULL DEFAULT '',
+  start_at   TIMESTAMPTZ,
+  end_at     TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 `;
 
 // ── 마이그레이션(기존 배포 대상) ──────────────────────────
@@ -87,10 +111,36 @@ ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check;
 ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN ('user','manager','admin'));
 `;
 
+const DEFAULT_EXT = 'csv,xls,xlsx,xlsm,xlsb,jpg,jpeg,png,gif,ppt,pptx,doc,docx,txt';
+const BRANCHES = [
+  '광화문점', '이화여대점', '강남점', '서울대점', '대구점', '칠곡센터', '잠실점', '영등포점', '목동점', '천안점',
+  '안양점', '부산점', '수유점', '창원점', '디큐브시티점', '판교점', '전주점', '동대문점', '울산점', '송도점',
+  '해운대점', '일산점', '대전점', '광교월드스퀘어센터', '반월당점', '센텀시티점', '은평점', '워크엔드', '세종점', '청량리점',
+  '합정점', '가든파이브점', '평촌점', '경성대부경대센터', '거제디큐브', '분당점', '광주상무센터', '광교점', '천호점', '동탄점',
+  '원그로브점', '수원점', '광명팝업스토어', '고척팝업스토어',
+];
+
+async function seed() {
+  // 허용 확장자 기본값
+  await query(
+    "INSERT INTO settings (key, value) VALUES ('allowed_extensions', $1) ON CONFLICT (key) DO NOTHING",
+    [DEFAULT_EXT]
+  );
+  // 영업점 목록 (비어있을 때만 시드)
+  const cnt = await query('SELECT COUNT(*)::int AS c FROM branches');
+  if (cnt.rows[0].c === 0) {
+    for (let i = 0; i < BRANCHES.length; i++) {
+      await query('INSERT INTO branches (name, sort_order) VALUES ($1, $2) ON CONFLICT (name) DO NOTHING', [BRANCHES[i], i]);
+    }
+    console.log(`[init-db] 영업점 ${BRANCHES.length}개 시드 완료`);
+  }
+}
+
 async function main() {
   console.log('[init-db] 스키마/마이그레이션 적용 중...');
   await query(SCHEMA);
   await query(MIGRATIONS);
+  await seed();
   console.log('[init-db] 완료.');
   await pool.end();
 }
