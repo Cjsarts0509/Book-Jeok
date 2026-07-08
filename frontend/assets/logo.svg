@@ -1,37 +1,114 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
-  <g stroke="#2B2D42" stroke-width="3.2" stroke-linejoin="round" stroke-linecap="round">
-    <!-- 폴더 뒷판 -->
-    <path d="M18 54 h26 l8 8 h54 a4 4 0 0 1 4 4 v38 a4 4 0 0 1 -4 4 H22 a4 4 0 0 1 -4 -4 V58 a4 4 0 0 1 4 -4 z" fill="#F2B22E"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <!-- Background (Optional, keeping it transparent for typical favicon usage) -->
+    <rect id="bg" width="512" height="512" rx="64" fill="#FFFFFF" opacity="0" />
+  </defs>
 
-    <!-- 파란 책 (폴더 안, 앞판 뒤에 반쯤) -->
-    <g transform="rotate(-8 52 84)">
-      <rect x="37" y="60" width="30" height="42" rx="3" fill="#4C9BE8"/>
-      <rect x="37" y="60" width="7" height="42" rx="2" fill="#EAF4FC"/>
-      <rect x="49" y="82" width="14" height="5" rx="2" fill="#BFE0F5"/>
-    </g>
+  <use href="#bg" />
 
-    <!-- 빨간 책 -->
-    <g transform="rotate(-22 50 46)">
-      <rect x="35" y="24" width="29" height="42" rx="3" fill="#EA4B54"/>
-      <rect x="35" y="24" width="7" height="42" rx="2" fill="#FDE9E6"/>
-      <rect x="47" y="47" width="13" height="5" rx="2" fill="#FBE0A6"/>
-    </g>
+  <!-- Drop Shadow at the bottom -->
+  <ellipse cx="256" cy="475" rx="200" ry="18" fill="#E2E8F0" />
 
-    <!-- 초록 책 -->
-    <g transform="rotate(-4 90 34)">
-      <rect x="78" y="16" width="24" height="36" rx="3" fill="#37B34A"/>
-      <rect x="78" y="16" width="6" height="36" rx="2" fill="#E7F7E2"/>
-      <rect x="88" y="40" width="10" height="4.5" rx="2" fill="#A8E063"/>
-    </g>
+  <!-- Motion Lines -->
+  <!-- Left Side -->
+  <path d="M 110 120 Q 140 60 200 40" fill="none" stroke="#2C3E50" stroke-width="10" stroke-linecap="round"/>
+  <path d="M 160 140 Q 190 80 240 70" fill="none" stroke="#2C3E50" stroke-width="10" stroke-linecap="round"/>
+  <path d="M 100 160 Q 120 120 140 100" fill="none" stroke="#2C3E50" stroke-width="10" stroke-linecap="round"/>
+  
+  <!-- Right Side -->
+  <path d="M 390 180 Q 420 120 440 70" fill="none" stroke="#2C3E50" stroke-width="10" stroke-linecap="round"/>
+  <path d="M 350 140 Q 380 90 400 50" fill="none" stroke="#2C3E50" stroke-width="10" stroke-linecap="round"/>
+  <path d="M 430 200 Q 450 170 460 140" fill="none" stroke="#2C3E50" stroke-width="10" stroke-linecap="round"/>
 
-    <!-- 보라 책 -->
-    <g transform="rotate(18 100 62)">
-      <rect x="86" y="44" width="27" height="40" rx="3" fill="#8B5CF6"/>
-      <rect x="86" y="44" width="7" height="40" rx="2" fill="#EFE9FD"/>
-      <path d="M98 62 h11 M98 69 h11" stroke="#C9B6F2" stroke-width="3"/>
-    </g>
+  <!-- Folder Back -->
+  <path d="M 90 440 L 90 220
+           C 90 205 100 195 115 195
+           L 200 195
+           C 215 195 225 205 235 220
+           L 255 250
+           C 260 255 270 260 280 260
+           L 415 260
+           C 430 260 440 270 440 285
+           L 440 440
+           C 440 455 430 465 415 465
+           L 115 465
+           C 100 465 90 455 90 440 Z"
+        fill="#F39C12" stroke="#2C3E50" stroke-width="12" stroke-linejoin="round"/>
 
-    <!-- 폴더 앞판 -->
-    <path d="M14 70 h96 l-6 40 a4 4 0 0 1 -4 3 H24 a4 4 0 0 1 -4 -3 z" fill="#FFD166"/>
+  <!-- Blue Book (Inside Left) -->
+  <g transform="translate(100, 270) rotate(12)">
+    <!-- White Pages -->
+    <path d="M 12 -12 L 115 -12 C 122 -12 128 -6 128 0 L 128 140" fill="#FFFFFF" stroke="#2C3E50" stroke-width="10" stroke-linejoin="round"/>
+    <!-- Cover -->
+    <rect x="0" y="0" width="115" height="140" rx="8" fill="#3498DB" stroke="#2C3E50" stroke-width="10"/>
+    <!-- Spine Line -->
+    <line x1="22" y1="0" x2="22" y2="140" stroke="#2C3E50" stroke-width="10"/>
+    <!-- Spine Accents -->
+    <rect x="5" y="15" width="12" height="20" rx="3" fill="#F1C40F" stroke="#2C3E50" stroke-width="6"/>
+    <rect x="5" y="105" width="12" height="20" rx="3" fill="#F1C40F" stroke="#2C3E50" stroke-width="6"/>
   </g>
+
+  <!-- Purple Book (Inside Right) -->
+  <g transform="translate(265, 190) rotate(-32)">
+    <!-- White Pages -->
+    <path d="M 12 -14 L 115 -14 C 122 -14 128 -8 128 -2 L 128 140" fill="#FFFFFF" stroke="#2C3E50" stroke-width="10" stroke-linejoin="round"/>
+    <!-- Cover -->
+    <rect x="0" y="0" width="115" height="140" rx="8" fill="#9B59B6" stroke="#2C3E50" stroke-width="10"/>
+    <!-- Spine Line -->
+    <line x1="22" y1="0" x2="22" y2="140" stroke="#2C3E50" stroke-width="10"/>
+    <!-- Lines on Cover -->
+    <line x1="45" y1="45" x2="100" y2="45" stroke="#FFFFFF" stroke-width="8" stroke-linecap="round"/>
+    <line x1="45" y1="70" x2="80" y2="70" stroke="#FFFFFF" stroke-width="8" stroke-linecap="round"/>
+    <!-- Spine Accents -->
+    <rect x="5" y="15" width="12" height="18" rx="2" fill="#F1C40F" stroke="#2C3E50" stroke-width="6"/>
+    <rect x="5" y="105" width="12" height="18" rx="2" fill="#F1C40F" stroke="#2C3E50" stroke-width="6"/>
+  </g>
+
+  <!-- Folder Front -->
+  <path d="M 80 460
+           L 125 300
+           C 130 285 140 275 155 275
+           L 240 275
+           C 255 275 265 295 280 295
+           L 450 295
+           C 465 295 475 285 480 275
+           L 460 455
+           C 455 470 440 480 425 480
+           L 105 480
+           C 90 480 75 470 80 460 Z"
+        fill="#FFCC00" stroke="#2C3E50" stroke-width="12" stroke-linejoin="round"/>
+        
+  <!-- Front Folder Left Edge Highlight/Shadow -->
+  <path d="M 125 300 L 80 460" stroke="#F39C12" stroke-width="8" stroke-linecap="round" stroke-linejoin="round" />
+
+  <!-- Red Book (Falling Top Left, in front of folder) -->
+  <g transform="translate(110, 80) rotate(-28)">
+    <!-- White Pages -->
+    <path d="M 12 -14 L 115 -14 C 122 -14 128 -8 128 -2 L 128 140" fill="#FFFFFF" stroke="#2C3E50" stroke-width="10" stroke-linejoin="round"/>
+    <!-- Cover -->
+    <rect x="0" y="0" width="115" height="140" rx="8" fill="#E74C3C" stroke="#2C3E50" stroke-width="10"/>
+    <!-- Spine Line -->
+    <line x1="22" y1="0" x2="22" y2="140" stroke="#2C3E50" stroke-width="10"/>
+    <!-- Label -->
+    <rect x="42" y="35" width="55" height="28" rx="3" fill="#FFFFFF" stroke="none"/>
+    <!-- Spine Accents -->
+    <rect x="5" y="15" width="12" height="16" rx="2" fill="#F1C40F" stroke="#2C3E50" stroke-width="6"/>
+    <rect x="5" y="105" width="12" height="16" rx="2" fill="#F1C40F" stroke="#2C3E50" stroke-width="6"/>
+  </g>
+
+  <!-- Green Book (Falling Top Middle, in front of folder) -->
+  <g transform="translate(250, 45) rotate(-22)">
+    <!-- White Pages -->
+    <path d="M 10 -12 L 85 -12 C 92 -12 98 -6 98 0 L 98 110" fill="#FFFFFF" stroke="#2C3E50" stroke-width="10" stroke-linejoin="round"/>
+    <!-- Cover -->
+    <rect x="0" y="0" width="85" height="110" rx="6" fill="#2ECC71" stroke="#2C3E50" stroke-width="10"/>
+    <!-- Spine Line -->
+    <line x1="20" y1="0" x2="20" y2="110" stroke="#2C3E50" stroke-width="10"/>
+    <!-- Label -->
+    <rect x="35" y="25" width="35" height="18" rx="2" fill="#FFFFFF" stroke="none"/>
+    <!-- Spine Accents -->
+    <rect x="4" y="12" width="12" height="12" rx="2" fill="#F1C40F" stroke="#2C3E50" stroke-width="6"/>
+    <rect x="4" y="85" width="12" height="12" rx="2" fill="#F1C40F" stroke="#2C3E50" stroke-width="6"/>
+  </g>
+
 </svg>
