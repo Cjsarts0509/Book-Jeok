@@ -140,8 +140,16 @@ router.patch('/users/:id', wrap(async (req, res) => {
     values.push(['admin', 'manager', 'user'].includes(req.body.role) ? req.body.role : 'user');
   }
   if (req.body.quotaBytes !== undefined) {
+    const q = Math.max(0, parseInt(req.body.quotaBytes, 10) || 0);
+    if (q > 0) {
+      // 현재 사용량보다 작은 할당량으로는 줄일 수 없음
+      const used = await query('SELECT COALESCE(SUM(size_bytes),0) AS s FROM files WHERE owner_id=$1 AND deleted_at IS NULL', [req.params.id]);
+      if (Number(used.rows[0].s) > q) {
+        return res.status(400).json({ error: `현재 사용량(${(Number(used.rows[0].s) / 1073741824).toFixed(2)}GB)보다 작은 할당량으로 변경할 수 없습니다.` });
+      }
+    }
     fields.push(`quota_bytes = $${i++}`);
-    values.push(Math.max(0, parseInt(req.body.quotaBytes, 10) || 0));
+    values.push(q);
   }
   if (req.body.isActive !== undefined) {
     fields.push(`is_active = $${i++}`);

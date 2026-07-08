@@ -178,19 +178,23 @@ const Admin = (() => {
         </select></div>
       <div class="field"><label>상태</label>
         <select class="input" id="active"><option value="true" ${u.isActive ? 'selected' : ''}>활성</option><option value="false" ${!u.isActive ? 'selected' : ''}>정지</option></select></div>
-      <div class="field"><label>할당량 (GB, 0=무제한)</label><input class="input num" id="quota" type="number" min="0" value="${u.quotaBytes > 0 ? (u.quotaBytes / 1024 / 1024 / 1024).toFixed(1) : 0}"></div>
+      <div class="field"><label>할당량 (GB, 0=무제한)</label><input class="input num" id="quota" type="number" min="0" step="0.1" value="${u.quotaBytes > 0 ? (u.quotaBytes / 1024 / 1024 / 1024).toFixed(1) : 0}">
+        <span class="muted" style="font-size:12px">현재 사용량: ${UI.bytes(u.usedBytes)} · 현재 사용량보다 작게 줄일 수 없습니다.</span></div>
       <div class="modal-actions">
         <button class="btn btn-ghost" id="cancel">취소</button>
         <button class="btn btn-primary" id="ok">저장</button>
       </div>`);
     m.q('#cancel').addEventListener('click', m.close);
     m.q('#ok').addEventListener('click', async () => {
+      const gb = parseFloat(m.q('#quota').value) || 0;
+      const bytes = Math.round(gb * 1024 * 1024 * 1024);
+      if (bytes > 0 && bytes < u.usedBytes) { UI.toast(`현재 사용량(${UI.bytes(u.usedBytes)})보다 작게 설정할 수 없습니다`, 'error'); return; }
       try {
         await API.updateUser(id, {
           displayName: m.q('#dn').value.trim(),
           role: m.q('#role').value,
           isActive: m.q('#active').value === 'true',
-          quotaBytes: Math.round((parseFloat(m.q('#quota').value) || 0) * 1024 * 1024 * 1024),
+          quotaBytes: bytes,
         });
         m.close(); UI.toast('저장되었습니다', 'success'); loadUsers();
       } catch (err) { UI.toast(err.message, 'error'); }

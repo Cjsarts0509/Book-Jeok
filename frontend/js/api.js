@@ -45,6 +45,7 @@ const API = (() => {
     accounts: () => req('GET', '/files/accounts'),
     branches: () => req('GET', '/meta/branches'),
     activeNotices: () => req('GET', '/meta/notices/active'),
+    allowedExtensions: () => req('GET', '/files/allowed-extensions'),
     usage: (ownerId) => req('GET', `/files/usage/summary${ownerId ? '?ownerId=' + ownerId : ''}`),
     upload: (formData, ownerId) => req('POST', `/files/upload${ownerId ? '?ownerId=' + ownerId : ''}`, formData, true),
     createFolder: (path, ownerId) => req('POST', '/files/folders', { path, ownerId }),

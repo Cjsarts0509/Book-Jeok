@@ -69,7 +69,22 @@ const UI = (() => {
     backdrop.querySelector('.modal-x').addEventListener('click', close);
     const onKey = (e) => { if (e.key === 'Escape') close(); };
     document.addEventListener('keydown', onKey);
-    return { el: backdrop, close, q: (sel) => backdrop.querySelector(sel) };
+    const box = backdrop.querySelector('.modal');
+    // 내용이 바뀌어 크기가 변할 때 높이를 부드럽게 애니메이션
+    function animate(mutate) {
+      const start = box.offsetHeight;
+      mutate();
+      const end = box.offsetHeight;
+      if (start === end) return;
+      box.style.height = start + 'px';
+      box.getBoundingClientRect(); // reflow
+      box.style.transition = 'height .28s cubic-bezier(.2,.9,.25,1)';
+      box.style.height = end + 'px';
+      const clear = () => { box.style.height = ''; box.style.transition = ''; box.removeEventListener('transitionend', clear); };
+      box.addEventListener('transitionend', clear);
+      setTimeout(clear, 360);
+    }
+    return { el: backdrop, close, animate, q: (sel) => backdrop.querySelector(sel) };
   }
 
   // 삭제 등 위험 동작용 확인창 (Promise<boolean>)

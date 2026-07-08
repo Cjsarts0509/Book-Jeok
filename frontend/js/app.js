@@ -5,6 +5,7 @@ const App = (() => {
     files: [], folders: [], treeFolders: [], usage: null, accounts: [],
     view: localStorage.getItem('bj_view') || 'list',
     branches: [],
+    allowedExt: ['csv', 'xls', 'xlsx', 'jpg', 'png', 'gif', 'ppt', 'pptx', 'doc', 'docx', 'txt'],
     selected: new Map(), // key -> {type:'file'|'folder', id, path, name}
   };
   const root = () => document.getElementById('app');
@@ -21,7 +22,7 @@ const App = (() => {
     root().innerHTML = `
       <div class="login-screen">
         <form class="login-card" id="login-form">
-          <img src="assets/logo.svg?v=6" class="login-logo" alt="북적북적">
+          <img src="assets/logo.svg?v=7" class="login-logo" alt="북적북적">
           <div class="login-title">북적북적</div>
           <div class="login-sub">Book-Jeok · 우리끼리 나누는 파일 창고</div>
           <div class="field"><label>아이디</label><input class="input" name="username" autocomplete="username" placeholder="아이디" required></div>
@@ -45,7 +46,7 @@ const App = (() => {
       <div class="layout">
         <header class="appbar">
           <button class="icon-btn appbar-menu" id="menu-toggle" title="폴더">☰</button>
-          <div class="brand"><img src="assets/logo.svg?v=6"><span class="brand-name">북적북적</span></div>
+          <div class="brand"><img src="assets/logo.svg?v=7"><span class="brand-name">북적북적</span></div>
           ${isPriv() ? `<select class="input account-switcher" id="account-switcher"><option value="">내 파일</option></select>` : ''}
           <div class="topbar-spacer"></div>
           <nav class="appbar-nav">
@@ -71,10 +72,17 @@ const App = (() => {
     if (isPriv()) setupAccountSwitcher();
     loadAll();
     loadBranches();
+    loadAllowedExt();
     showNotices();
   }
 
   async function loadBranches() { try { state.branches = (await API.branches()).branches; } catch {} }
+  async function loadAllowedExt() { try { const r = await API.allowedExtensions(); if (r.extensions?.length) { state.allowedExt = r.extensions; refreshDropzoneHint(); } } catch {} }
+  function refreshDropzoneHint() {
+    const hint = document.querySelector('.dropzone .hint'); const input = document.getElementById('file-input');
+    if (hint) hint.textContent = '허용: ' + state.allowedExt.join(' · ');
+    if (input) input.setAttribute('accept', state.allowedExt.map((e) => '.' + e).join(','));
+  }
 
   // ── 공지사항 팝업 (로그인 후) ──────────
   async function showNotices() {
@@ -128,7 +136,12 @@ const App = (() => {
     view.innerHTML = '<div class="empty"><div class="big">⏳</div>불러오는 중…</div>';
     try {
       const [list, usage] = await Promise.all([API.listFiles(state.folder, state.ownerId), API.usage(state.ownerId)]);
-      state.files = list.files; state.folders = list.folders; state.usage = usage; state.selected.clear(); renderContent();
+      // 방어적 정규화 (구버전 백엔드가 문자열 배열을 줘도 안전)
+      state.folders = (list.folders || [])
+        .map((f) => (typeof f === 'string' ? { path: f } : f))
+        .filter((f) => f && f.path)
+        .map((f) => ({ ...f, name: f.name || f.path.split('/').filter(Boolean).pop() || '(이름없음)' }));
+      state.files = list.files || []; state.usage = usage; state.selected.clear(); renderContent();
     } catch (err) { view.innerHTML = `<div class="empty"><div class="big">⚠️</div>${UI.escapeHtml(err.message)}</div>`; }
   }
 
@@ -166,8 +179,8 @@ const App = (() => {
       <div class="usage-line"><span class="num">${UI.bytes(u.usedBytes)}</span><span class="muted">${u.quotaBytes > 0 ? '/ ' + UI.bytes(u.quotaBytes) : '· 무제한'} · ${u.fileCount}개 파일</span>${u.quotaBytes > 0 ? `<span class="usage-bar" style="flex:1"><span style="width:${pct}%"></span></span>` : ''}</div>
       <label class="dropzone" id="dropzone" for="file-input">
         <div class="big">📥</div><div>여기로 끌어다 놓거나 클릭해서 업로드</div>
-        <div class="hint">허용: csv · xls · xlsx · jpg · png · gif · ppt · pptx · doc · docx</div>
-        <input type="file" id="file-input" multiple hidden accept=".csv,.xls,.xlsx,.xlsm,.xlsb,.jpg,.jpeg,.png,.gif,.ppt,.pptx,.doc,.docx">
+        <div class="hint">허용: ${state.allowedExt.join(' · ')}</div>
+        <input type="file" id="file-input" multiple hidden accept="${state.allowedExt.map((e) => '.' + e).join(',')}">
       </label>
       <div id="selbar" class="selbar hidden"></div>
       <div id="listing"></div>`;
@@ -298,14 +311,27 @@ const App = (() => {
 
   function updateSelbar() {
     const bar = document.getElementById('selbar'); if (!bar) return;
-    if (state.view !== 'list' || state.selected.size === 0) { bar.classList.add('hidden'); return; }
-    bar.classList.remove('hidden');
+    if (state.view !== 'list' || state.selected.size === 0) {
+      // 부드럽게 닫힘
+      if (!bar.classList.contains('hidden') && !bar.classList.contains('closing')) {
+        bar.classList.add('closing');
+        setTimeout(() => { bar.classList.add('hidden'); bar.classList.remove('closing'); }, 200);
+      }
+      return;
+    }
+    bar.classList.remove('hidden', 'closing');
     bar.innerHTML = `<b>${state.selected.size}개 선택</b><div style="flex:1"></div>
       <button class="btn btn-sm btn-ghost" id="sel-rename" ${state.selected.size !== 1 ? 'disabled' : ''}>✏️ 이름변경</button>
       <button class="btn btn-sm btn-secondary" id="sel-move">📂 폴더이동</button>
       <button class="btn btn-sm btn-danger" id="sel-del">🗑️ 삭제</button>
       <button class="btn btn-sm btn-ghost" id="sel-clear">선택해제</button>`;
-    bar.querySelector('#sel-clear').addEventListener('click', () => { state.selected.clear(); renderListing(); });
+    bar.querySelector('#sel-clear').addEventListener('click', () => {
+      state.selected.clear();
+      document.querySelectorAll('#listing tr.sel').forEach((tr) => tr.classList.remove('sel'));
+      document.querySelectorAll('#listing .rowcheck').forEach((c) => { c.checked = false; });
+      const all = document.getElementById('check-all'); if (all) all.checked = false;
+      updateSelbar();
+    });
     bar.querySelector('#sel-del').addEventListener('click', bulkDelete);
     bar.querySelector('#sel-move').addEventListener('click', bulkMoveModal);
     const rn = bar.querySelector('#sel-rename');
@@ -378,21 +404,39 @@ const App = (() => {
 
   function newFolderModal() {
     const parent = state.folder === '/' ? '' : state.folder;
-    const branchOpts = state.branches.map((b) => `<label class="branch-chip"><input type="checkbox" value="${UI.escapeHtml(b.name)}"> ${UI.escapeHtml(b.name)}</label>`).join('');
+    const short = (s) => (s.length > 8 ? s.slice(0, 8) + '…' : s);
+    const branchCells = state.branches.map((b) =>
+      `<label class="branch-cell" title="${UI.escapeHtml(b.name)}"><input type="checkbox" value="${UI.escapeHtml(b.name)}"><span>${UI.escapeHtml(short(b.name))}</span></label>`
+    ).join('');
     const m = UI.modal(`<h3>새 폴더 (현재 위치: ${UI.escapeHtml(state.folder)})</h3>
       <div class="seg" id="seg"><button class="seg-btn on" data-mode="normal">일반 폴더</button><button class="seg-btn" data-mode="branch">영업점 폴더</button></div>
-      <div id="pane-normal"><div class="field" style="margin-top:14px"><label>폴더 이름</label><input class="input" id="fn" placeholder="예: 2026-보고서"></div></div>
-      <div id="pane-branch" class="hidden">
-        <p class="muted" style="font-size:13px;margin:12px 0 8px">현재 폴더 아래에 선택한 영업점 폴더를 생성합니다. (여러 개 선택 가능)</p>
-        <div class="branch-list">${branchOpts || '<span class="muted">등록된 영업점이 없습니다. 관리자 페이지에서 추가하세요.</span>'}</div>
+      <div class="pane-wrap">
+        <div class="pane" id="pane-normal"><div class="field" style="margin-top:14px"><label>폴더 이름</label><input class="input" id="fn" placeholder="예: 2026-보고서"></div></div>
+        <div class="pane hidden" id="pane-branch">
+          <div style="display:flex;align-items:center;margin:12px 0 10px">
+            <span class="muted" style="font-size:13px">현재 폴더 아래에 선택한 영업점 폴더를 생성합니다.</span>
+            <div style="flex:1"></div>
+            <label class="autosort"><input type="checkbox" id="branch-all"> 전체 선택</label>
+          </div>
+          <div class="branch-grid">${branchCells || '<span class="muted">등록된 영업점이 없습니다. 관리자 페이지에서 추가하세요.</span>'}</div>
+        </div>
       </div>
       <div class="modal-actions"><button class="btn btn-ghost" id="c">취소</button><button class="btn btn-primary" id="ok">만들기</button></div>`);
+    m.el.querySelector('.modal').classList.add('modal-wide');
     let mode = 'normal';
     m.el.querySelectorAll('.seg-btn').forEach((b) => b.addEventListener('click', () => {
-      mode = b.dataset.mode; m.el.querySelectorAll('.seg-btn').forEach((x) => x.classList.toggle('on', x === b));
-      m.q('#pane-normal').classList.toggle('hidden', mode !== 'normal');
-      m.q('#pane-branch').classList.toggle('hidden', mode !== 'branch');
+      if (b.dataset.mode === mode) return;
+      mode = b.dataset.mode;
+      m.el.querySelectorAll('.seg-btn').forEach((x) => x.classList.toggle('on', x === b));
+      m.animate(() => {
+        m.q('#pane-normal').classList.toggle('hidden', mode !== 'normal');
+        m.q('#pane-branch').classList.toggle('hidden', mode !== 'branch');
+      });
     }));
+    m.q('#branch-all')?.addEventListener('change', (e) => {
+      m.el.querySelectorAll('#pane-branch input[type=checkbox][value]').forEach((c) => { c.checked = e.target.checked; c.closest('.branch-cell').classList.toggle('on', e.target.checked); });
+    });
+    m.el.querySelectorAll('.branch-cell input').forEach((c) => c.addEventListener('change', () => c.closest('.branch-cell').classList.toggle('on', c.checked)));
     m.q('#c').addEventListener('click', m.close);
     m.q('#ok').addEventListener('click', async () => {
       try {
@@ -400,7 +444,7 @@ const App = (() => {
           const name = m.q('#fn').value.trim().replace(/\//g, ''); if (!name) return;
           await API.createFolder(parent + '/' + name, state.ownerId);
         } else {
-          const picked = [...m.el.querySelectorAll('#pane-branch input:checked')].map((x) => x.value);
+          const picked = [...m.el.querySelectorAll('#pane-branch input[value]:checked')].map((x) => x.value);
           if (picked.length === 0) return UI.toast('영업점을 하나 이상 선택하세요', 'error');
           for (const name of picked) await API.createFolder(parent + '/' + name, state.ownerId);
         }
