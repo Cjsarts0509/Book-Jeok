@@ -115,7 +115,7 @@ const UI = (() => {
   function modal(html, { onClose } = {}) {
     const backdrop = document.createElement('div');
     backdrop.className = 'modal-backdrop';
-    backdrop.innerHTML = `<div class="modal"><button class="modal-x" type="button" aria-label="닫기">✕</button>${html}</div>`;
+    backdrop.innerHTML = `<div class="modal"><button class="modal-x" type="button" aria-label="닫기">✕</button><div class="modal-scroll">${html}</div></div>`;
     document.body.appendChild(backdrop);
     // 부드러운 등장 애니메이션
     requestAnimationFrame(() => backdrop.classList.add('open'));

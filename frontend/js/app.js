@@ -14,6 +14,7 @@ const App = (() => {
     search: { on: false, q: '' }, // 이름 검색 모드
     anchor: null, drag: null, // 선택 앵커 / 드래그 중 항목
     extFilter: new Set(), // 확장자 필터(비어있으면 전체)
+    foldersOnly: false,   // 폴더만 보기
   };
   const root = () => document.getElementById('app');
   const isPriv = () => state.user && (state.user.role === 'admin' || state.user.role === 'manager');
@@ -34,7 +35,7 @@ const App = (() => {
     root().innerHTML = `
       <div class="login-screen">
         <form class="login-card" id="login-form">
-          <img src="assets/logo.svg?v=27" class="login-logo" alt="북적북적">
+          <img src="assets/logo.svg?v=28" class="login-logo" alt="북적북적">
           <div class="login-title">북적북적</div>
           <div class="login-sub">Book-Jeok · 우리끼리 나누는 파일 창고</div>
           <div class="field"><label>아이디</label><input class="input" name="username" autocomplete="username" placeholder="아이디" required></div>
@@ -58,7 +59,7 @@ const App = (() => {
       <div class="layout">
         <header class="appbar">
           <button class="icon-btn appbar-menu" id="menu-toggle" title="폴더">☰</button>
-          <div class="brand" id="brand-home" title="홈으로"><img src="assets/logo.svg?v=27"><span class="brand-name">북적북적</span></div>
+          <div class="brand" id="brand-home" title="홈으로"><img src="assets/logo.svg?v=28"><span class="brand-name">북적북적</span></div>
           ${isPriv() ? `<select class="input account-switcher" id="account-switcher"><option value="">내 파일</option></select>` : ''}
           <div class="topbar-spacer"></div>
           <nav class="appbar-nav">
@@ -229,7 +230,7 @@ const App = (() => {
             <button class="btn btn-secondary btn-sm" type="submit" title="검색">🔎 <span class="label">조회</span></button>
           </form>
           <div class="extfilter" id="extfilter">
-            <button type="button" class="btn btn-secondary btn-sm${state.extFilter.size ? ' on' : ''}" id="extfilter-btn" title="확장자 필터">🧩 <span class="label">확장자</span><span id="extfilter-count">${state.extFilter.size ? ` (${state.extFilter.size})` : ''}</span></button>
+            <button type="button" class="btn btn-secondary btn-sm${(state.extFilter.size || state.foldersOnly) ? ' on' : ''}" id="extfilter-btn" title="보기 필터(확장자·폴더만)">🧩 <span class="label">필터</span><span id="extfilter-count">${state.foldersOnly ? ' (폴더)' : (state.extFilter.size ? ` (${state.extFilter.size})` : '')}</span></button>
             <div class="extfilter-panel hidden" id="extfilter-panel"></div>
           </div>
         </div>
@@ -390,22 +391,26 @@ const App = (() => {
 
   // ── 확장자 필터 ──────────────────────────
   const extOf = (name) => (name.split('.').pop() || '').toLowerCase();
-  function filteredFiles() { return state.extFilter.size ? state.files.filter((f) => state.extFilter.has(extOf(f.name))) : state.files; }
+  function filteredFiles() { if (state.foldersOnly) return []; return state.extFilter.size ? state.files.filter((f) => state.extFilter.has(extOf(f.name))) : state.files; }
+  const filterActive = () => state.extFilter.size > 0 || state.foldersOnly;
   function updateExtCount() {
     const c = document.getElementById('extfilter-count'), b = document.getElementById('extfilter-btn');
-    if (c) c.textContent = state.extFilter.size ? ` (${state.extFilter.size})` : '';
-    if (b) b.classList.toggle('on', state.extFilter.size > 0);
+    if (c) c.textContent = state.foldersOnly ? ' (폴더)' : (state.extFilter.size ? ` (${state.extFilter.size})` : '');
+    if (b) b.classList.toggle('on', filterActive());
   }
   function buildExtFilterPanel() {
     const panel = document.getElementById('extfilter-panel'); if (!panel) return;
     const chips = state.allowedExt.map((e) => `<label class="ext-chip${state.extFilter.has(e) ? ' on' : ''}"><input type="checkbox" value="${e}" ${state.extFilter.has(e) ? 'checked' : ''}><span class="ei">${UI.extIcon(e)}</span> .${UI.escapeHtml(e)}</label>`).join('');
-    panel.innerHTML = `<div class="ext-panel-head"><b>확장자 필터</b><button class="btn btn-sm btn-ghost" id="ext-clear">전체 해제</button></div><div class="ext-chip-grid">${chips || '<span class="muted">허용 확장자가 없습니다.</span>'}</div>`;
-    panel.querySelectorAll('input[type=checkbox]').forEach((c) => c.addEventListener('change', () => {
+    panel.innerHTML = `<div class="ext-panel-head"><b>보기 필터</b><button class="btn btn-sm btn-ghost" id="ext-clear">전체 해제</button></div>
+      <label class="ext-chip only-folders${state.foldersOnly ? ' on' : ''}" style="margin-bottom:8px"><input type="checkbox" id="only-folders" ${state.foldersOnly ? 'checked' : ''}><span class="ei">📁</span> 폴더만 보기</label>
+      <div class="ext-chip-grid"${state.foldersOnly ? ' style="opacity:.4;pointer-events:none"' : ''}>${chips || '<span class="muted">허용 확장자가 없습니다.</span>'}</div>`;
+    panel.querySelector('#only-folders').addEventListener('change', (e) => { state.foldersOnly = e.target.checked; state.selected.clear(); state.anchor = null; buildExtFilterPanel(); updateExtCount(); renderListing(); });
+    panel.querySelectorAll('.ext-chip-grid input[type=checkbox]').forEach((c) => c.addEventListener('change', () => {
       if (c.checked) state.extFilter.add(c.value); else state.extFilter.delete(c.value);
       c.closest('.ext-chip').classList.toggle('on', c.checked);
       state.selected.clear(); state.anchor = null; updateExtCount(); renderListing();
     }));
-    panel.querySelector('#ext-clear')?.addEventListener('click', () => { state.extFilter.clear(); buildExtFilterPanel(); updateExtCount(); state.selected.clear(); renderListing(); });
+    panel.querySelector('#ext-clear')?.addEventListener('click', () => { state.extFilter.clear(); state.foldersOnly = false; buildExtFilterPanel(); updateExtCount(); state.selected.clear(); renderListing(); });
   }
 
   // ── 이름 검색 ──────────────────────────

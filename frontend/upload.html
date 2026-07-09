@@ -5,18 +5,18 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="theme-color" content="#FFD166">
   <title>파일 업로드 · 북적북적</title>
-  <link rel="icon" href="assets/logo.svg?v=27" type="image/svg+xml">
-  <link rel="stylesheet" href="css/style.css?v=27">
+  <link rel="icon" href="assets/logo.svg?v=28" type="image/svg+xml">
+  <link rel="stylesheet" href="css/style.css?v=28">
 </head>
 <body>
   <div class="login-screen">
     <div class="login-card" style="max-width:460px">
-      <img src="assets/logo.svg?v=27" class="login-logo" alt="북적북적">
+      <img src="assets/logo.svg?v=28" class="login-logo" alt="북적북적">
       <div class="login-title">파일 업로드</div>
       <div id="up-view" style="width:100%;margin-top:8px"><p class="muted" style="text-align:center">불러오는 중…</p></div>
     </div>
   </div>
-  <script src="config.js?v=27"></script>
+  <script src="config.js?v=28"></script>
   <script>
   (function () {
     const BASE = (window.BOOKJEOK_API || '').replace(/\/$/, '');
@@ -49,16 +49,30 @@
         ${pw}
         <label class="up-drop" id="drop"><input type="file" id="file" multiple hidden><div style="font-size:30px">📥</div><div>여기로 끌어다 놓거나 클릭</div>
           <div class="muted" style="font-size:11px;margin-top:4px">허용: ${esc(info.allowedExtensions.join(' · '))}</div></label>
-        <div id="picked" class="muted" style="font-size:12px;margin:8px 0;text-align:center"></div>
-        <button class="btn btn-primary" id="go" style="width:100%" disabled>⬆️ 업로드</button>
+        <div id="picked" class="up-list"></div>
+        <button class="btn btn-primary" id="go" style="width:100%;margin-top:10px" disabled>⬆️ 업로드</button>
         <p id="msg" class="muted" style="text-align:center;margin-top:10px;font-size:13px"></p>`;
       const input = document.getElementById('file'), drop = document.getElementById('drop'), go = document.getElementById('go');
-      let files = [];
-      const show = () => { document.getElementById('picked').textContent = files.length ? `${files.length}개 선택됨 · ${fmt(files.reduce((s, f) => s + f.size, 0))}` : ''; go.disabled = !files.length; };
-      input.addEventListener('change', () => { files = [...input.files]; show(); });
+      let files = []; let urls = [];
+      const IMG = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp'];
+      function renderList() {
+        urls.forEach((u) => URL.revokeObjectURL(u)); urls = [];
+        const box = document.getElementById('picked'); go.disabled = !files.length;
+        if (!files.length) { box.innerHTML = ''; return; }
+        box.innerHTML = `<div class="muted" style="font-size:12px;margin:10px 0 6px">${files.length}개 · ${fmt(files.reduce((s, f) => s + f.size, 0))}</div>` +
+          files.map((f, i) => {
+            const ext = (f.name.split('.').pop() || '').toLowerCase();
+            let thumb = '<span class="up-ic">📄</span>';
+            if (IMG.includes(ext)) { const u = URL.createObjectURL(f); urls.push(u); thumb = `<img class="up-thumb" alt="" src="${u}">`; }
+            return `<div class="up-item">${thumb}<span class="up-nm">${esc(f.name)}</span><span class="muted up-sz">${fmt(f.size)}</span><button class="up-x" data-rm="${i}" title="제거">✕</button></div>`;
+          }).join('');
+        box.querySelectorAll('[data-rm]').forEach((b) => b.addEventListener('click', () => { files.splice(+b.dataset.rm, 1); renderList(); }));
+      }
+      const addFiles = (list) => { files = files.concat([...list]); renderList(); };
+      input.addEventListener('change', () => addFiles(input.files));
       ['dragover', 'dragenter'].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.add('drag'); }));
       ['dragleave', 'drop'].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.remove('drag'); }));
-      drop.addEventListener('drop', (e) => { files = [...e.dataTransfer.files]; show(); });
+      drop.addEventListener('drop', (e) => addFiles(e.dataTransfer.files));
       go.addEventListener('click', () => upload(files));
     }
 
