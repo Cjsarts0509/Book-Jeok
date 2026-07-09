@@ -251,7 +251,9 @@ router.post('/upload', authenticate, wrap(resolveOwner), upload.array('file', 30
   await ensureFolder(req.targetOwnerId, folder);
   const saved = [];
   for (const f of req.files) {
-    const originalName = Buffer.from(f.originalname, 'latin1').toString('utf8');
+    // 경로 구분자·제어문자 제거 (zip-slip/헤더 주입 방어)
+    const originalName = Buffer.from(f.originalname, 'latin1').toString('utf8')
+      .replace(/[/\\]/g, '_').replace(/[\x00-\x1f]/g, '').trim() || 'file';
     const name = await uniqueFileName(req.targetOwnerId, folder, originalName);
     const row = await query(
       `INSERT INTO files (owner_id, folder, original_name, stored_name, size_bytes, mime_type)
