@@ -59,6 +59,7 @@ const API = (() => {
     share: (id, expiresInDays) => req('POST', `/files/${id}/share`, { expiresInDays: expiresInDays || 0 }),
     bulkDelete: (ids) => req('POST', '/files/bulk/delete', { ids }),
     bulkMove: (ids, folder) => req('POST', '/files/bulk/move', { ids, folder }),
+    bulkDownload: (ids, folders, folder, ownerId) => req('POST', '/files/bulk/download', { ids, folders, folder, ownerId }),
     downloadUrl: (id) => `${BASE}/api/files/${id}/download`,
     // admin
     adminUsers: () => req('GET', '/admin/users'),

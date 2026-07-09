@@ -350,6 +350,66 @@ router.post('/bulk/move', authenticate, wrap(async (req, res) => {
   res.json({ ok: true, moved: files.length });
 }));
 
+// ── 일괄 다운로드 (ZIP) ──────────
+router.post('/bulk/download', authenticate, wrap(resolveOwner), wrap(async (req, res) => {
+  const owner = req.targetOwnerId;
+  const base = normalizeFolder(req.body.folder || '/');
+  const ids = (Array.isArray(req.body.ids) ? req.body.ids : []).map(Number).filter(Boolean);
+  const folders = (Array.isArray(req.body.folders) ? req.body.folders : []).map(normalizeFolder);
+
+  // 대상 파일 수집: 직접 선택한 파일 + 선택한 폴더의 하위 파일 전부
+  const rows = new Map(); // id -> row
+  if (ids.length) {
+    const r = await query('SELECT * FROM files WHERE owner_id=$1 AND deleted_at IS NULL AND id = ANY($2::bigint[])', [owner, ids]);
+    r.rows.forEach((f) => rows.set(f.id, f));
+  }
+  for (const fp of folders) {
+    if (fp === '/') continue;
+    const r = await query('SELECT * FROM files WHERE owner_id=$1 AND deleted_at IS NULL AND (folder=$2 OR folder LIKE $3)', [owner, fp, fp + '/%']);
+    r.rows.forEach((f) => rows.set(f.id, f));
+  }
+  const files = [...rows.values()];
+  if (files.length === 0) return res.status(400).json({ error: '다운로드할 파일이 없습니다.' });
+
+  // zip 파일명: 폴더명_YYYYMMDD_HHMMSS.zip
+  const baseName = base === '/' ? '북적북적' : base.split('/').filter(Boolean).pop();
+  const d = new Date();
+  const p2 = (n) => String(n).padStart(2, '0');
+  const stamp = `${d.getFullYear()}${p2(d.getMonth() + 1)}${p2(d.getDate())}_${p2(d.getHours())}${p2(d.getMinutes())}${p2(d.getSeconds())}`;
+  const zipName = `${baseName}_${stamp}.zip`;
+
+  // 압축 스트림
+  let archiver;
+  try { archiver = require('archiver'); }
+  catch { return res.status(500).json({ error: '서버에 압축 모듈(archiver)이 설치되지 않았습니다. npm install 후 재시작하세요.' }); }
+
+  res.setHeader('Content-Type', 'application/zip');
+  res.setHeader('Content-Disposition', `attachment; filename="download.zip"; filename*=UTF-8''${encodeURIComponent(zipName)}`);
+
+  const archive = archiver('zip', { zlib: { level: 6 } });
+  archive.on('error', (err) => { try { res.destroy(err); } catch { /* noop */ } });
+  archive.pipe(res);
+
+  const seen = new Map(); // 엔트리명 중복 방지
+  const stripBase = base === '/' ? '' : base;
+  for (const f of files) {
+    const disk = path.join(userDir(owner), f.stored_name);
+    if (!fs.existsSync(disk)) continue;
+    // base 기준 상대 경로로 폴더 구조 보존
+    let relDir = f.folder.startsWith(stripBase) ? f.folder.slice(stripBase.length) : f.folder;
+    relDir = relDir.replace(/^\//, '');
+    let entry = (relDir ? relDir + '/' : '') + f.original_name;
+    if (seen.has(entry)) {
+      const n = seen.get(entry) + 1; seen.set(entry, n);
+      const dot = entry.lastIndexOf('.');
+      entry = dot > 0 ? `${entry.slice(0, dot)} (${n})${entry.slice(dot)}` : `${entry} (${n})`;
+    } else seen.set(entry, 0);
+    archive.file(disk, { name: entry });
+  }
+  await audit(req, 'bulk_download', `owner=${owner} count=${files.length}`);
+  await archive.finalize();
+}));
+
 // ── 공유 링크 ──────────
 router.post('/:id(\\d+)/share', authenticate, wrap(async (req, res) => {
   const r = await query('SELECT owner_id, original_name FROM files WHERE id=$1 AND deleted_at IS NULL', [req.params.id]);

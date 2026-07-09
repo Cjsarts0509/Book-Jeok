@@ -29,7 +29,7 @@ const App = (() => {
     root().innerHTML = `
       <div class="login-screen">
         <form class="login-card" id="login-form">
-          <img src="assets/logo.svg?v=12" class="login-logo" alt="북적북적">
+          <img src="assets/logo.svg?v=13" class="login-logo" alt="북적북적">
           <div class="login-title">북적북적</div>
           <div class="login-sub">Book-Jeok · 우리끼리 나누는 파일 창고</div>
           <div class="field"><label>아이디</label><input class="input" name="username" autocomplete="username" placeholder="아이디" required></div>
@@ -53,7 +53,7 @@ const App = (() => {
       <div class="layout">
         <header class="appbar">
           <button class="icon-btn appbar-menu" id="menu-toggle" title="폴더">☰</button>
-          <div class="brand" id="brand-home" title="홈으로"><img src="assets/logo.svg?v=12"><span class="brand-name">북적북적</span></div>
+          <div class="brand" id="brand-home" title="홈으로"><img src="assets/logo.svg?v=13"><span class="brand-name">북적북적</span></div>
           ${isPriv() ? `<select class="input account-switcher" id="account-switcher"><option value="">내 파일</option></select>` : ''}
           <div class="topbar-spacer"></div>
           <nav class="appbar-nav">
@@ -337,8 +337,10 @@ const App = (() => {
       </tr>`;
     }).join('');
     const th = (key, label, style = '') => `<th class="sortable${state.sort.key === key ? ' sorted' : ''}" data-sort="${key}"${style ? ` style="${style}"` : ''}>${label}${sortArrow(key)}</th>`;
+    const total = state.folders.length + state.files.length;
+    const allSel = total > 0 && state.folders.every((f) => isSel(`folder:${f.path}`)) && state.files.every((f) => isSel(`file:${f.id}`));
     return `<div class="table-wrap fade-in"><table class="filetable">
-      <thead><tr><th style="width:34px"><input type="checkbox" id="check-all"></th>${th('name', '이름')}${th('size', '크기', 'width:84px')}${th('createdAt', '등록일', 'width:96px')}${th('updatedAt', '수정일', 'width:96px')}${th('note', '비고')}<th style="width:70px"></th></tr></thead>
+      <thead><tr><th style="width:34px"><input type="checkbox" id="check-all" title="전체선택/해제" ${allSel ? 'checked' : ''}></th>${th('name', '이름')}${th('size', '크기', 'width:84px')}${th('createdAt', '등록일', 'width:96px')}${th('updatedAt', '수정일', 'width:96px')}${th('note', '비고')}<th style="width:70px"></th></tr></thead>
       <tbody>${folders}${files}</tbody></table></div>`;
   }
 
@@ -404,6 +406,7 @@ const App = (() => {
     bar.classList.remove('hidden', 'closing');
     bar.innerHTML = `<b>${state.selected.size}개 선택</b><div style="flex:1"></div>
       <button class="btn btn-sm btn-ghost" id="sel-rename" ${state.selected.size !== 1 ? 'disabled' : ''}>✏️ 이름변경</button>
+      <button class="btn btn-sm btn-primary" id="sel-dl">⬇️ 다운로드(ZIP)</button>
       <button class="btn btn-sm btn-secondary" id="sel-move">📂 폴더이동</button>
       <button class="btn btn-sm btn-danger" id="sel-del">🗑️ 삭제</button>
       <button class="btn btn-sm btn-ghost" id="sel-clear">선택해제</button>`;
@@ -415,6 +418,7 @@ const App = (() => {
       updateSelbar();
     });
     bar.querySelector('#sel-del').addEventListener('click', bulkDelete);
+    bar.querySelector('#sel-dl').addEventListener('click', bulkDownload);
     bar.querySelector('#sel-move').addEventListener('click', bulkMoveModal);
     const rn = bar.querySelector('#sel-rename');
     if (!rn.disabled) rn.addEventListener('click', () => {
@@ -434,6 +438,25 @@ const App = (() => {
       for (const fo of folders) await API.deleteFolder(fo.path, state.ownerId);
       UI.toast(`${items.length}개 삭제됨 (휴지통 이동)`, 'success'); loadAll();
     } catch (err) { UI.toast(err.message, 'error'); }
+  }
+
+  async function bulkDownload() {
+    const items = [...state.selected.values()];
+    const ids = items.filter((i) => i.type === 'file').map((i) => i.id);
+    const folders = items.filter((i) => i.type === 'folder').map((i) => i.path);
+    if (!ids.length && !folders.length) return;
+    UI.toast('압축 파일 준비 중…');
+    try {
+      const res = await API.bulkDownload(ids, folders, state.folder, state.ownerId);
+      const cd = res.headers.get('content-disposition') || '';
+      const mt = /filename\*?=(?:UTF-8'')?["']?([^"';]+)/i.exec(cd);
+      const name = mt ? decodeURIComponent(mt[1]) : 'download.zip';
+      const blob = await res.blob();
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob); a.download = name; a.click();
+      URL.revokeObjectURL(a.href);
+      UI.toast('다운로드 시작 ✅', 'success');
+    } catch (err) { UI.toast(err.message || '다운로드 실패', 'error'); }
   }
 
   function bulkMoveModal() {
