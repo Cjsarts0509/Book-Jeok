@@ -264,7 +264,11 @@ th { background: var(--bg); font-weight: 700; color: var(--text-muted); font-siz
 @keyframes fadeInUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 .fade-in { animation: fadeInUp .28s ease both; }
 @keyframes slideDown { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: none; } }
-@media (prefers-reduced-motion: reduce) { *, .modal, .fade-in { animation: none !important; transition: none !important; } }
+/* 동작 줄이기(reduce motion) 설정에서도 부드러운 전환은 유지하고,
+   반복적으로 재생되는 목록 등장 애니메이션의 큰 움직임만 최소화한다. */
+@media (prefers-reduced-motion: reduce) {
+  .fade-in, .pane { animation-duration: .01ms !important; }
+}
 .modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px; }
 .secret-box { background: var(--bg); border: 1px dashed var(--primary-dark); border-radius: var(--radius-sm); padding: 14px; font-family: var(--font-num); font-size: 16px; text-align: center; letter-spacing: 1px; user-select: all; }
 
