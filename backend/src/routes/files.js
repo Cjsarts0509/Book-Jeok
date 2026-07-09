@@ -593,4 +593,32 @@ router.get('/usage/summary', authenticate, wrap(resolveOwner), wrap(async (req, 
   });
 }));
 
+// ── 업로드 요청 링크 (소유자 관리) ──────────
+router.post('/upload-requests', authenticate, wrap(resolveOwner), wrap(async (req, res) => {
+  const owner = req.targetOwnerId;
+  const folder = normalizeFolder(req.body.folder);
+  await ensureFolder(owner, folder);
+  const label = String(req.body.label || '').slice(0, 100).trim() || (folder === '/' ? '홈' : folder.split('/').filter(Boolean).pop());
+  const password = String(req.body.password || '').trim();
+  const passwordHash = password ? await hashPassword(password) : null;
+  const days = parseInt(req.body.expiresInDays || '0', 10);
+  const expiresAt = days > 0 ? new Date(Date.now() + days * 86400000) : null;
+  const mf = parseInt(req.body.maxFiles, 10); const maxFiles = (Number.isFinite(mf) && mf > 0) ? mf : null;
+  const mgb = parseFloat(req.body.maxGb); const maxBytes = (Number.isFinite(mgb) && mgb > 0) ? Math.round(mgb * 1073741824) : null;
+  const token = generateToken(24);
+  const r = await query('INSERT INTO upload_requests (owner_id, folder, token, label, password_hash, max_files, max_bytes, expires_at, created_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id', [owner, folder, token, label, passwordHash, maxFiles, maxBytes, expiresAt, req.user.id]);
+  await audit(req, 'create_upload_request', `owner=${owner} ${folder}`);
+  res.status(201).json({ id: r.rows[0].id, token, url: `${shareWebBase(req)}/upload.html?t=${token}`, label });
+}));
+router.get('/upload-requests', authenticate, wrap(resolveOwner), wrap(async (req, res) => {
+  const r = await query('SELECT id, folder, token, label, password_hash IS NOT NULL AS has_password, max_files, max_bytes, uploaded_count, uploaded_bytes, disabled, expires_at, created_at FROM upload_requests WHERE owner_id=$1 ORDER BY created_at DESC', [req.targetOwnerId]);
+  res.json({ requests: r.rows.map((x) => ({ id: x.id, folder: x.folder, label: x.label, token: x.token, hasPassword: x.has_password, maxFiles: x.max_files, maxBytes: x.max_bytes != null ? Number(x.max_bytes) : null, uploadedCount: x.uploaded_count, uploadedBytes: Number(x.uploaded_bytes), disabled: x.disabled, expiresAt: x.expires_at, createdAt: x.created_at })) });
+}));
+router.delete('/upload-requests/:id(\\d+)', authenticate, wrap(resolveOwner), wrap(async (req, res) => {
+  const r = await query('DELETE FROM upload_requests WHERE id=$1 AND owner_id=$2 RETURNING id', [req.params.id, req.targetOwnerId]);
+  if (r.rowCount === 0) return res.status(404).json({ error: '요청을 찾을 수 없습니다.' });
+  await audit(req, 'delete_upload_request', `id=${req.params.id}`);
+  res.json({ ok: true });
+}));
+
 module.exports = router;

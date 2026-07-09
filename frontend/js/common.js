@@ -55,6 +55,55 @@ const UI = (() => {
     return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   }
 
+  // 공지 리치텍스트 등 HTML을 허용 태그/속성만 남기고 정화 (저장형 XSS 방지)
+  const SANITIZE = {
+    tags: new Set(['B', 'STRONG', 'I', 'EM', 'U', 'S', 'STRIKE', 'P', 'BR', 'DIV', 'SPAN', 'FONT', 'UL', 'OL', 'LI', 'A', 'IMG', 'H1', 'H2', 'H3', 'H4', 'BLOCKQUOTE', 'PRE', 'CODE', 'HR']),
+    remove: new Set(['SCRIPT', 'STYLE', 'IFRAME', 'OBJECT', 'EMBED', 'LINK', 'META', 'FORM', 'INPUT', 'BUTTON', 'TEXTAREA', 'SELECT', 'SVG', 'MATH', 'BASE', 'TEMPLATE']),
+    attrs: { A: ['href', 'target', 'rel'], IMG: ['src', 'alt', 'width', 'height', 'style'], FONT: ['color', 'size', 'face', 'style'], SPAN: ['style'], DIV: ['style'], P: ['style'], LI: ['style'], H1: ['style'], H2: ['style'], H3: ['style'], H4: ['style'] },
+    styleProps: new Set(['color', 'background-color', 'font-size', 'font-weight', 'font-style', 'text-decoration', 'text-align', 'font-family']),
+  };
+  function safeUrl(u, allowData) {
+    u = String(u || '').trim();
+    if (/^\s*(https?:|mailto:|tel:)/i.test(u)) return u;
+    if (allowData && /^data:image\/(png|jpe?g|gif|webp|bmp);base64,/i.test(u)) return u;
+    return '';
+  }
+  function cleanStyle(v) {
+    return String(v || '').split(';').map((d) => {
+      const i = d.indexOf(':'); if (i < 0) return '';
+      const prop = d.slice(0, i).trim().toLowerCase(), val = d.slice(i + 1).trim();
+      if (!SANITIZE.styleProps.has(prop)) return '';
+      if (/url\s*\(|expression|javascript:|<|>/i.test(val)) return '';
+      return `${prop}:${val}`;
+    }).filter(Boolean).join(';');
+  }
+  function sanitizeHtml(html) {
+    const doc = new DOMParser().parseFromString(String(html || ''), 'text/html');
+    const walk = (node) => {
+      [...node.childNodes].forEach((el) => {
+        if (el.nodeType === 3) return; // 텍스트
+        if (el.nodeType !== 1) { el.remove(); return; }
+        const tag = el.tagName.toUpperCase(); // SVG/MathML 등 외부요소는 소문자 → 정규화
+        if (SANITIZE.remove.has(tag) || el.namespaceURI !== 'http://www.w3.org/1999/xhtml') { el.remove(); return; }
+        if (!SANITIZE.tags.has(tag)) { // 허용 안 된 태그는 내용만 남기고 벗김
+          const parent = el.parentNode; while (el.firstChild) parent.insertBefore(el.firstChild, el); el.remove(); walk(parent); return;
+        }
+        const allow = SANITIZE.attrs[tag] || [];
+        [...el.attributes].forEach((a) => {
+          const n = a.name.toLowerCase();
+          if (n.startsWith('on') || !allow.includes(n)) { el.removeAttribute(a.name); return; }
+          if (n === 'href') { const s = safeUrl(a.value, false); if (s) el.setAttribute('href', s); else el.removeAttribute('href'); }
+          else if (n === 'src') { const s = safeUrl(a.value, true); if (s) el.setAttribute('src', s); else el.remove(); }
+          else if (n === 'style') { const s = cleanStyle(a.value); if (s) el.setAttribute('style', s); else el.removeAttribute('style'); }
+        });
+        if (tag === 'A') { el.setAttribute('rel', 'noopener noreferrer nofollow'); el.setAttribute('target', '_blank'); }
+        walk(el);
+      });
+    };
+    walk(doc.body);
+    return doc.body.innerHTML;
+  }
+
   // 최근성 판단 (기본 7일 이내)
   function isRecent(iso, days = 7) {
     if (!iso) return false;
@@ -117,5 +166,5 @@ const UI = (() => {
     });
   }
 
-  return { toast, bytes, date, fileIcon, extIcon, EXT_CATALOG, escapeHtml, isRecent, modal, confirm };
+  return { toast, bytes, date, fileIcon, extIcon, EXT_CATALOG, escapeHtml, sanitizeHtml, isRecent, modal, confirm };
 })();

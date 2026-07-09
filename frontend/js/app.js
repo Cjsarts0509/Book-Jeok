@@ -34,7 +34,7 @@ const App = (() => {
     root().innerHTML = `
       <div class="login-screen">
         <form class="login-card" id="login-form">
-          <img src="assets/logo.svg?v=24" class="login-logo" alt="북적북적">
+          <img src="assets/logo.svg?v=25" class="login-logo" alt="북적북적">
           <div class="login-title">북적북적</div>
           <div class="login-sub">Book-Jeok · 우리끼리 나누는 파일 창고</div>
           <div class="field"><label>아이디</label><input class="input" name="username" autocomplete="username" placeholder="아이디" required></div>
@@ -58,7 +58,7 @@ const App = (() => {
       <div class="layout">
         <header class="appbar">
           <button class="icon-btn appbar-menu" id="menu-toggle" title="폴더">☰</button>
-          <div class="brand" id="brand-home" title="홈으로"><img src="assets/logo.svg?v=24"><span class="brand-name">북적북적</span></div>
+          <div class="brand" id="brand-home" title="홈으로"><img src="assets/logo.svg?v=25"><span class="brand-name">북적북적</span></div>
           ${isPriv() ? `<select class="input account-switcher" id="account-switcher"><option value="">내 파일</option></select>` : ''}
           <div class="topbar-spacer"></div>
           <nav class="appbar-nav">
@@ -122,7 +122,7 @@ const App = (() => {
     const period = (n.start_at || n.end_at)
       ? `<p class="muted" style="font-size:12px;margin-bottom:10px">${n.start_at ? new Date(n.start_at).toLocaleDateString('ko-KR') : ''} ~ ${n.end_at ? new Date(n.end_at).toLocaleDateString('ko-KR') : ''}</p>` : '';
     const m = UI.modal(`<h3>📢 ${UI.escapeHtml(n.title)}</h3>${period}
-      <div class="notice-body">${n.body || ''}</div>
+      <div class="notice-body">${UI.sanitizeHtml(n.body || '')}</div>
       <div class="modal-actions" style="align-items:center">
         <label class="autosort" style="margin-right:auto"><input type="checkbox" id="hide7"> 일주일간 보지 않기</label>
         <button class="btn btn-primary" id="close">닫기</button>
@@ -314,6 +314,7 @@ const App = (() => {
     const files = sortItems(filteredFiles(), false).map((f) => `
       <div class="file-card fade-in${state.selected.has(`file:${f.id}`) ? ' sel' : ''}" data-file="${f.id}" data-row-key="file:${f.id}" draggable="true">
         <div class="file-actions">
+          ${canPreview(f.name) ? `<button class="icon-btn" data-preview="${f.id}" title="미리보기">👁️</button>` : ''}
           <button class="icon-btn" data-share="${f.id}" title="공유링크">🔗</button>
           <button class="icon-btn" data-note="${f.id}" title="비고">📝</button>
           <button class="icon-btn" data-rename="${f.id}" title="이름변경">✏️</button>
@@ -351,7 +352,7 @@ const App = (() => {
         <td class="num muted" data-label="등록">${UI.date(f.createdAt)}</td>
         <td class="num muted" data-label="수정">${UI.date(f.updatedAt || f.createdAt)}</td>
         <td class="note-cell" data-note="${f.id}" title="클릭하여 비고 편집">${f.note ? UI.escapeHtml(f.note) : '<span class="muted">+ 비고</span>'}</td>
-        <td class="row-actions"><button class="icon-btn" data-share="${f.id}" title="공유">🔗</button><button class="icon-btn" data-dl="${f.id}" title="다운로드">⬇️</button></td>
+        <td class="row-actions">${canPreview(f.name) ? `<button class="icon-btn" data-preview="${f.id}" title="미리보기">👁️</button>` : ''}<button class="icon-btn" data-share="${f.id}" title="공유">🔗</button><button class="icon-btn" data-dl="${f.id}" title="다운로드">⬇️</button></td>
       </tr>`;
     }).join('');
     const th = (key, label, style = '') => `<th class="sortable${state.sort.key === key ? ' sorted' : ''}" data-sort="${key}"${style ? ` style="${style}"` : ''}>${label}${sortArrow(key)}</th>`;
@@ -524,6 +525,7 @@ const App = (() => {
       el.addEventListener('drop', (e) => { if (!state.drag) return; e.preventDefault(); el.classList.remove('drop-target'); moveDraggedTo(el.dataset.dropFolder); });
     });
     // 파일 액션
+    box.querySelectorAll('[data-preview]').forEach((el) => el.addEventListener('click', (e) => { e.stopPropagation(); previewModal(el.dataset.preview); }));
     box.querySelectorAll('[data-dl]').forEach((el) => el.addEventListener('click', (e) => { e.stopPropagation(); downloadFile(el.dataset.dl); }));
     box.querySelectorAll('[data-del]').forEach((el) => el.addEventListener('click', (e) => { e.stopPropagation(); deleteFile(el.dataset.del); }));
     box.querySelectorAll('[data-share]').forEach((el) => el.addEventListener('click', (e) => { e.stopPropagation(); shareModal(el.dataset.share); }));
@@ -700,6 +702,29 @@ const App = (() => {
     return m ? m[1].trim() : fallback;
   }
 
+  // ── 파일 미리보기 ──────────────────────────
+  const PV_IMG = new Set(['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg', 'ico']);
+  const PV_TXT = new Set(['txt', 'md', 'csv', 'log', 'json', 'xml', 'yml', 'yaml', 'html', 'css', 'js', 'ts', 'sql', 'ini', 'cfg', 'env']);
+  const canPreview = (name) => { const e = (name.split('.').pop() || '').toLowerCase(); return PV_IMG.has(e) || PV_TXT.has(e) || e === 'pdf'; };
+  function previewModal(id) {
+    const f = state.files.find((x) => String(x.id) === String(id));
+    const name = f ? f.name : '파일'; const ext = (name.split('.').pop() || '').toLowerCase();
+    let objUrl = null;
+    const m = UI.modal(`<h3 class="pv-title">👁️ ${UI.escapeHtml(name)}</h3><div class="preview-body" id="pv"><p class="muted" style="text-align:center;padding:36px">불러오는 중…</p></div><div class="modal-actions"><button class="btn btn-secondary" id="pv-dl">⬇️ 다운로드</button><button class="btn btn-primary" id="pv-close">닫기</button></div>`, { onClose: () => { if (objUrl) URL.revokeObjectURL(objUrl); } });
+    m.el.querySelector('.modal').classList.add('modal-wide', 'modal-preview');
+    m.q('#pv-close').addEventListener('click', m.close);
+    m.q('#pv-dl').addEventListener('click', () => downloadFile(id));
+    fetch(API.downloadUrl(id), { headers: { Authorization: 'Bearer ' + API.getToken() }, credentials: 'include' })
+      .then((r) => { if (!r.ok) throw new Error('불러오기 실패'); return r.blob(); })
+      .then(async (blob) => {
+        const pv = m.q('#pv'); if (!pv) return;
+        if (PV_IMG.has(ext)) { objUrl = URL.createObjectURL(blob); pv.innerHTML = `<img class="pv-img" alt="" src="${objUrl}">`; }
+        else if (ext === 'pdf') { objUrl = URL.createObjectURL(blob); pv.innerHTML = `<iframe class="pv-frame" src="${objUrl}"></iframe>`; }
+        else { let text = await blob.text(); if (text.length > 200000) text = text.slice(0, 200000) + '\n…(생략됨)'; const pre = document.createElement('pre'); pre.className = 'pv-text'; pre.textContent = text; pv.innerHTML = ''; pv.appendChild(pre); }
+      })
+      .catch((e) => { const pv = m.q('#pv'); if (pv) pv.innerHTML = `<p class="muted" style="text-align:center;color:var(--danger);padding:36px">${UI.escapeHtml(e.message)}</p>`; });
+  }
+
   function downloadFile(id) {
     // 이미 목록에 아는 파일명이 있으면 그것을 기본값으로 (헤더를 못 읽어도 이름 보존)
     const known = state.files.find((x) => String(x.id) === String(id));
@@ -822,8 +847,10 @@ const App = (() => {
     const m = UI.modal(`<h3>폴더 설정</h3>
       <div class="field"><label>폴더 이름</label><input class="input" id="nm" value="${UI.escapeHtml(name)}"></div>
       ${stylePickerHTML(st.icon, st.color)}
+      <div class="field"><button class="btn btn-secondary btn-sm" id="uploadreq" type="button">📥 이 폴더로 업로드 요청 링크</button></div>
       <div class="modal-actions"><button class="btn btn-ghost" id="c">취소</button><button class="btn btn-primary" id="ok">저장</button></div>`);
     const picker = wireStylePicker(m);
+    m.q('#uploadreq').addEventListener('click', () => { m.close(); uploadRequestModal(path); });
     m.q('#c').addEventListener('click', m.close);
     m.q('#ok').addEventListener('click', async () => {
       const nn = m.q('#nm').value.trim().replace(/\//g, ''); if (!nn) return;
@@ -835,6 +862,58 @@ const App = (() => {
       } catch (err) { UI.toast(err.message, 'error'); }
     });
     setTimeout(() => m.q('#nm').focus(), 50);
+  }
+
+  // 업로드 요청 링크: 생성 + 목록 + 취소
+  function uploadRequestModal(folder) {
+    const fname = folder === '/' ? '홈(최상위)' : folder.split('/').filter(Boolean).pop();
+    const m = UI.modal(`<h3>📥 업로드 요청 링크</h3>
+      <p class="muted" style="font-size:13px;margin-bottom:10px"><b>${UI.escapeHtml(fname)}</b> 폴더로 외부인이 로그인 없이 업로드할 수 있는 링크를 만듭니다.</p>
+      <div class="field"><label>링크 이름(외부에 표시)</label><input class="input" id="ur-label" value="${UI.escapeHtml(fname)}"></div>
+      <div style="display:flex;gap:10px">
+        <div class="field" style="flex:1"><label>만료</label><select class="input" id="ur-exp"><option value="0">무기한</option><option value="1">1일</option><option value="7" selected>7일</option><option value="30">30일</option></select></div>
+        <div class="field" style="flex:1"><label>최대 개수</label><input class="input num" id="ur-mf" type="number" min="1" placeholder="무제한"></div>
+        <div class="field" style="flex:1"><label>최대 용량(GB)</label><input class="input num" id="ur-mg" type="number" min="0.1" step="0.1" placeholder="무제한"></div>
+      </div>
+      <div class="field"><label>비밀번호 (선택, 권장)</label><input class="input" id="ur-pw" type="text" placeholder="비우면 없음"></div>
+      <div style="text-align:right"><button class="btn btn-primary btn-sm" id="ur-gen">＋ 링크 생성</button></div>
+      <div id="ur-result"></div>
+      <hr class="manual-hr" style="margin:16px 0 12px">
+      <div class="muted" style="font-size:12px;margin-bottom:6px">이 폴더의 기존 링크</div>
+      <div id="ur-list"><p class="muted" style="font-size:13px">불러오는 중…</p></div>
+      <div class="modal-actions"><button class="btn btn-ghost" id="ur-close">닫기</button></div>`);
+    m.el.querySelector('.modal').classList.add('modal-wide');
+    m.q('#ur-close').addEventListener('click', m.close);
+    async function refresh() {
+      try {
+        const { requests } = await API.uploadRequests(state.ownerId);
+        const mine = requests.filter((r) => r.folder === folder);
+        if (!mine.length) { m.q('#ur-list').innerHTML = '<p class="muted" style="font-size:13px">아직 없습니다.</p>'; return; }
+        m.q('#ur-list').innerHTML = mine.map((r) => {
+          const cap = [r.maxFiles ? `${r.uploadedCount}/${r.maxFiles}개` : `${r.uploadedCount}개`, r.maxBytes ? `${UI.bytes(r.uploadedBytes)}/${UI.bytes(r.maxBytes)}` : UI.bytes(r.uploadedBytes)].join(' · ');
+          const badges = [r.hasPassword ? '🔒' : '', r.disabled ? '중지' : '', r.expiresAt ? UI.date(r.expiresAt) + '까지' : '무기한'].filter(Boolean).join(' · ');
+          return `<div class="ur-row"><div style="flex:1;min-width:0"><b>${UI.escapeHtml(r.label)}</b> <span class="muted" style="font-size:12px">${badges}</span><br><span class="muted" style="font-size:11px">받음 ${cap}</span></div>
+            <button class="btn btn-sm btn-ghost" data-copy="${UI.escapeHtml(location.origin + '/upload.html?t=' + r.token)}">📋 복사</button>
+            <button class="btn btn-sm btn-danger" data-del="${r.id}">취소</button></div>`;
+        }).join('');
+        m.el.querySelectorAll('[data-copy]').forEach((b) => b.addEventListener('click', () => { navigator.clipboard?.writeText(b.dataset.copy); UI.toast('링크 복사됨', 'success'); }));
+        m.el.querySelectorAll('[data-del]').forEach((b) => b.addEventListener('click', async () => { try { await API.deleteUploadRequest(b.dataset.del, state.ownerId); UI.toast('취소됨', 'success'); refresh(); } catch (e) { UI.toast(e.message, 'error'); } }));
+      } catch (e) { m.q('#ur-list').innerHTML = `<p class="muted" style="color:var(--danger)">${UI.escapeHtml(e.message)}</p>`; }
+    }
+    m.q('#ur-gen').addEventListener('click', async () => {
+      try {
+        const r = await API.createUploadRequest({
+          folder, ownerId: state.ownerId, label: m.q('#ur-label').value.trim(),
+          expiresInDays: parseInt(m.q('#ur-exp').value, 10) || 0, password: m.q('#ur-pw').value.trim(),
+          maxFiles: parseInt(m.q('#ur-mf').value, 10) || 0, maxGb: parseFloat(m.q('#ur-mg').value) || 0,
+        });
+        m.animate(() => { m.q('#ur-result').innerHTML = `<div class="field" style="margin-top:10px"><label>업로드 링크</label><input class="input" id="ur-lnk" readonly value="${UI.escapeHtml(r.url)}"></div><button class="btn btn-secondary btn-sm" id="ur-copy">📋 복사</button>`; });
+        m.q('#ur-lnk').select();
+        m.q('#ur-copy').addEventListener('click', () => { m.q('#ur-lnk').select(); navigator.clipboard?.writeText(r.url); UI.toast('링크 복사됨', 'success'); });
+        refresh();
+      } catch (e) { UI.toast(e.message, 'error'); }
+    });
+    refresh();
   }
 
   // 공유 옵션(만료·비밀번호·횟수) 공통 필드/값/결과

@@ -67,6 +67,9 @@ const API = (() => {
     selfTrash: () => req('GET', '/files/trash'),
     restoreSelfFile: (id) => req('POST', `/files/trash/file/${id}/restore`),
     restoreSelfFolder: (id) => req('POST', `/files/trash/folder/${id}/restore`),
+    createUploadRequest: (data) => req('POST', '/files/upload-requests', data),
+    uploadRequests: (ownerId) => req('GET', `/files/upload-requests${ownerId ? '?ownerId=' + ownerId : ''}`),
+    deleteUploadRequest: (id, ownerId) => req('DELETE', `/files/upload-requests/${id}${ownerId ? '?ownerId=' + ownerId : ''}`),
     downloadUrl: (id) => `${BASE}/api/files/${id}/download`,
     // admin
     adminUsers: () => req('GET', '/admin/users'),

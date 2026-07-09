@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#FFD166">
+  <title>파일 업로드 · 북적북적</title>
+  <link rel="icon" href="assets/logo.svg?v=25" type="image/svg+xml">
+  <link rel="stylesheet" href="css/style.css?v=25">
+</head>
+<body>
+  <div class="login-screen">
+    <div class="login-card" style="max-width:460px">
+      <img src="assets/logo.svg?v=25" class="login-logo" alt="북적북적">
+      <div class="login-title">파일 업로드</div>
+      <div id="up-view" style="width:100%;margin-top:8px"><p class="muted" style="text-align:center">불러오는 중…</p></div>
+    </div>
+  </div>
+  <script src="config.js?v=25"></script>
+  <script>
+  (function () {
+    const BASE = (window.BOOKJEOK_API || '').replace(/\/$/, '');
+    const view = document.getElementById('up-view');
+    const token = new URLSearchParams(location.search).get('t');
+    const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const fmt = (n) => { n = Number(n) || 0; if (!n) return '0 B'; const u = ['B', 'KB', 'MB', 'GB', 'TB']; const i = Math.floor(Math.log(n) / Math.log(1024)); return (n / Math.pow(1024, i)).toFixed(i ? 1 : 0) + ' ' + u[i]; };
+    if (!token) { view.innerHTML = '<p class="muted" style="text-align:center">잘못된 링크입니다.</p>'; return; }
+    let info = null;
+
+    async function load() {
+      try {
+        const r = await fetch(`${BASE}/api/upload-link/${encodeURIComponent(token)}`);
+        const d = await r.json(); if (!r.ok) throw new Error(d.error || '유효하지 않은 링크입니다.');
+        info = d; render();
+      } catch (e) { view.innerHTML = `<p class="muted" style="text-align:center;color:var(--danger)">${esc(e.message)}</p>`; }
+    }
+
+    function render() {
+      if (info.status === 'expired') { view.innerHTML = '<p style="text-align:center;color:var(--danger)">만료된 링크입니다.</p>'; return; }
+      if (info.status === 'disabled') { view.innerHTML = '<p style="text-align:center;color:var(--danger)">중지된 링크입니다.</p>'; return; }
+      const caps = [];
+      if (info.remainingFiles != null) caps.push(`남은 개수 ${info.remainingFiles}개`);
+      if (info.remainingBytes != null) caps.push(`남은 용량 ${fmt(info.remainingBytes)}`);
+      const pw = info.needsPassword ? `<div class="field"><label>비밀번호</label><input class="input" type="password" id="pw" placeholder="업로드 비밀번호"></div>` : '';
+      view.innerHTML = `
+        <p class="muted" style="text-align:center;margin-bottom:6px">아래 위치로 파일을 올립니다</p>
+        <div class="secret-box" style="user-select:text">${esc(info.label)}</div>
+        ${caps.length ? `<p class="muted" style="text-align:center;margin-top:8px;font-size:12px">${caps.join(' · ')}</p>` : ''}
+        ${pw}
+        <label class="up-drop" id="drop"><input type="file" id="file" multiple hidden><div style="font-size:30px">📥</div><div>여기로 끌어다 놓거나 클릭</div>
+          <div class="muted" style="font-size:11px;margin-top:4px">허용: ${esc(info.allowedExtensions.join(' · '))}</div></label>
+        <div id="picked" class="muted" style="font-size:12px;margin:8px 0;text-align:center"></div>
+        <button class="btn btn-primary" id="go" style="width:100%" disabled>⬆️ 업로드</button>
+        <p id="msg" class="muted" style="text-align:center;margin-top:10px;font-size:13px"></p>`;
+      const input = document.getElementById('file'), drop = document.getElementById('drop'), go = document.getElementById('go');
+      let files = [];
+      const show = () => { document.getElementById('picked').textContent = files.length ? `${files.length}개 선택됨 · ${fmt(files.reduce((s, f) => s + f.size, 0))}` : ''; go.disabled = !files.length; };
+      input.addEventListener('change', () => { files = [...input.files]; show(); });
+      ['dragover', 'dragenter'].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.add('drag'); }));
+      ['dragleave', 'drop'].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.remove('drag'); }));
+      drop.addEventListener('drop', (e) => { files = [...e.dataTransfer.files]; show(); });
+      go.addEventListener('click', () => upload(files));
+    }
+
+    async function upload(files) {
+      const go = document.getElementById('go'), msg = document.getElementById('msg');
+      const pwEl = document.getElementById('pw');
+      go.disabled = true; msg.style.color = ''; msg.textContent = '업로드 중…';
+      try {
+        const fd = new FormData(); files.forEach((f) => fd.append('file', f));
+        const r = await fetch(`${BASE}/api/upload-link/${encodeURIComponent(token)}`, { method: 'POST', headers: pwEl && pwEl.value ? { 'x-upload-password': pwEl.value } : {}, body: fd });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(d.error || '업로드 실패');
+        msg.style.color = 'var(--accent)'; msg.textContent = `✅ ${d.uploaded}개 업로드 완료! 감사합니다.`;
+        load();
+      } catch (e) { msg.style.color = 'var(--danger)'; msg.textContent = e.message; go.disabled = false; }
+    }
+    load();
+  })();
+  </script>
+</body>
+</html>

@@ -133,6 +133,25 @@ ALTER TABLE share_links ADD COLUMN IF NOT EXISTS bundle_id BIGINT REFERENCES zip
 -- share_links: 비밀번호(선택)·다운로드 횟수 제한(선택)
 ALTER TABLE share_links ADD COLUMN IF NOT EXISTS password_hash TEXT;
 ALTER TABLE share_links ADD COLUMN IF NOT EXISTS max_downloads INTEGER;
+
+-- 업로드 요청 링크(외부인이 특정 폴더로 업로드)
+CREATE TABLE IF NOT EXISTS upload_requests (
+  id             BIGSERIAL PRIMARY KEY,
+  owner_id       INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  folder         TEXT NOT NULL,
+  token          VARCHAR(64) UNIQUE NOT NULL,
+  label          TEXT NOT NULL DEFAULT '',
+  password_hash  TEXT,
+  max_files      INTEGER,
+  max_bytes      BIGINT,
+  uploaded_count INTEGER NOT NULL DEFAULT 0,
+  uploaded_bytes BIGINT NOT NULL DEFAULT 0,
+  disabled       BOOLEAN NOT NULL DEFAULT false,
+  expires_at     TIMESTAMPTZ,
+  created_by     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_upload_req_token ON upload_requests(token);
 `;
 
 const DEFAULT_EXT = 'csv,xls,xlsx,xlsm,xlsb,jpg,jpeg,png,gif,ppt,pptx,doc,docx,txt';

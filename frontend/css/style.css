@@ -224,6 +224,22 @@ textarea.input { resize: vertical; }
 .ext-opt:hover { border-color: var(--primary); }
 .ext-opt.on { border-color: var(--primary); background: var(--hover); font-weight: 600; }
 
+/* 파일 미리보기 */
+.modal-preview { max-width: 880px; }
+.pv-title { max-width: 92%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.preview-body { min-height: 200px; max-height: 68vh; overflow: auto; display: flex; align-items: center; justify-content: center; background: var(--bg); border-radius: var(--radius-sm); }
+.pv-img { max-width: 100%; max-height: 68vh; object-fit: contain; }
+.pv-frame { width: 100%; height: 68vh; border: none; background: #fff; }
+.pv-text { width: 100%; margin: 0; padding: 14px; font-family: var(--font-num); font-size: 13px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; text-align: left; align-self: stretch; }
+
+/* 업로드 요청 링크 목록 */
+.ur-row { display: flex; align-items: center; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--border); }
+.ur-row:last-child { border-bottom: none; }
+
+/* 공개 업로드 페이지 드롭영역 */
+.up-drop { display: flex; flex-direction: column; align-items: center; justify-content: center; border: 2.5px dashed var(--border); border-radius: var(--radius); padding: 22px; text-align: center; color: var(--text-muted); cursor: pointer; margin-top: 12px; transition: border-color .2s, background .2s; }
+.up-drop.drag { border-color: var(--primary); background: var(--hover); color: var(--text); }
+
 /* 검색 결과 배너 */
 .search-banner { display: flex; align-items: center; gap: 8px; padding: 9px 12px; margin-bottom: 10px; background: #E7F5FB; border: 1px solid #B6E3F4; border-radius: var(--radius-sm); font-size: 14px; color: var(--secondary); }
 
