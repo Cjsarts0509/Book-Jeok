@@ -350,14 +350,10 @@ router.post('/bulk/move', authenticate, wrap(async (req, res) => {
   res.json({ ok: true, moved: files.length });
 }));
 
-// ── 일괄 다운로드 (ZIP) ──────────
-router.post('/bulk/download', authenticate, wrap(resolveOwner), wrap(async (req, res) => {
-  const owner = req.targetOwnerId;
-  const base = normalizeFolder(req.body.folder || '/');
-  const ids = (Array.isArray(req.body.ids) ? req.body.ids : []).map(Number).filter(Boolean);
-  const folders = (Array.isArray(req.body.folders) ? req.body.folders : []).map(normalizeFolder);
+// ── 압축(ZIP) 번들 ──────────
+const BUNDLE_DIR = path.join(config.storageRoot, '_bundles');
 
-  // 대상 파일 수집: 직접 선택한 파일 + 선택한 폴더의 하위 파일 전부
+async function collectBundleFiles(owner, ids, folders) {
   const rows = new Map(); // id -> row
   if (ids.length) {
     const r = await query('SELECT * FROM files WHERE owner_id=$1 AND deleted_at IS NULL AND id = ANY($2::bigint[])', [owner, ids]);
@@ -368,46 +364,121 @@ router.post('/bulk/download', authenticate, wrap(resolveOwner), wrap(async (req,
     const r = await query('SELECT * FROM files WHERE owner_id=$1 AND deleted_at IS NULL AND (folder=$2 OR folder LIKE $3)', [owner, fp, fp + '/%']);
     r.rows.forEach((f) => rows.set(f.id, f));
   }
-  const files = [...rows.values()];
-  if (files.length === 0) return res.status(400).json({ error: '다운로드할 파일이 없습니다.' });
+  return [...rows.values()];
+}
 
-  // zip 파일명: 폴더명_YYYYMMDD_HHMMSS.zip
-  const baseName = base === '/' ? '북적북적' : base.split('/').filter(Boolean).pop();
+function stamp14() {
   const d = new Date();
   const p2 = (n) => String(n).padStart(2, '0');
-  const stamp = `${d.getFullYear()}${p2(d.getMonth() + 1)}${p2(d.getDate())}_${p2(d.getHours())}${p2(d.getMinutes())}${p2(d.getSeconds())}`;
-  const zipName = `${baseName}_${stamp}.zip`;
+  return `${d.getFullYear()}${p2(d.getMonth() + 1)}${p2(d.getDate())}_${p2(d.getHours())}${p2(d.getMinutes())}${p2(d.getSeconds())}`;
+}
+function sanitizeBaseName(name) {
+  const s = String(name || '').trim().replace(/[/\\:*?"<>|]/g, '').slice(0, 80);
+  return s || '북적북적';
+}
 
-  // 압축 스트림
+// 오래된 번들 정리: 하루 지났고 유효한(만료 안 된) 공유가 없는 번들 삭제
+async function cleanupBundles() {
+  try {
+    const r = await query(
+      `SELECT id, stored_name FROM zip_bundles b
+       WHERE b.created_at < now() - interval '1 day'
+         AND NOT EXISTS (SELECT 1 FROM share_links s WHERE s.bundle_id = b.id AND (s.expires_at IS NULL OR s.expires_at > now()))`
+    );
+    for (const b of r.rows) {
+      try { fs.unlinkSync(path.join(BUNDLE_DIR, b.stored_name)); } catch { /* noop */ }
+      await query('DELETE FROM zip_bundles WHERE id=$1', [b.id]);
+    }
+  } catch { /* noop */ }
+}
+
+// 선택 항목을 압축해 번들로 임시 저장 → { bundleId, name, size }
+router.post('/bulk/zip', authenticate, wrap(resolveOwner), wrap(async (req, res) => {
+  const owner = req.targetOwnerId;
+  const base = normalizeFolder(req.body.folder || '/');
+  const ids = (Array.isArray(req.body.ids) ? req.body.ids : []).map(Number).filter(Boolean);
+  const folders = (Array.isArray(req.body.folders) ? req.body.folders : []).map(normalizeFolder);
+  const files = await collectBundleFiles(owner, ids, folders);
+  if (files.length === 0) return res.status(400).json({ error: '압축할 파일이 없습니다.' });
+
   let archiver;
   try { archiver = require('archiver'); }
   catch { return res.status(500).json({ error: '서버에 압축 모듈(archiver)이 설치되지 않았습니다. npm install 후 재시작하세요.' }); }
 
-  res.setHeader('Content-Type', 'application/zip');
-  res.setHeader('Content-Disposition', `attachment; filename="download.zip"; filename*=UTF-8''${encodeURIComponent(zipName)}`);
+  // 파일명: (요청된)폴더명_YYYYMMDD_HHMMSS.zip
+  const baseName = sanitizeBaseName(req.body.name || (base === '/' ? '북적북적' : base.split('/').filter(Boolean).pop()));
+  const zipName = `${baseName}_${stamp14()}.zip`;
 
-  const archive = archiver('zip', { zlib: { level: 6 } });
-  archive.on('error', (err) => { try { res.destroy(err); } catch { /* noop */ } });
-  archive.pipe(res);
-
-  const seen = new Map(); // 엔트리명 중복 방지
+  fs.mkdirSync(BUNDLE_DIR, { recursive: true });
+  const storedName = generateToken(16) + '.zip';
+  const diskPath = path.join(BUNDLE_DIR, storedName);
   const stripBase = base === '/' ? '' : base;
-  for (const f of files) {
-    const disk = path.join(userDir(owner), f.stored_name);
-    if (!fs.existsSync(disk)) continue;
-    // base 기준 상대 경로로 폴더 구조 보존
-    let relDir = f.folder.startsWith(stripBase) ? f.folder.slice(stripBase.length) : f.folder;
-    relDir = relDir.replace(/^\//, '');
-    let entry = (relDir ? relDir + '/' : '') + f.original_name;
-    if (seen.has(entry)) {
-      const n = seen.get(entry) + 1; seen.set(entry, n);
-      const dot = entry.lastIndexOf('.');
-      entry = dot > 0 ? `${entry.slice(0, dot)} (${n})${entry.slice(dot)}` : `${entry} (${n})`;
-    } else seen.set(entry, 0);
-    archive.file(disk, { name: entry });
-  }
-  await audit(req, 'bulk_download', `owner=${owner} count=${files.length}`);
-  await archive.finalize();
+
+  await new Promise((resolve, reject) => {
+    const out = fs.createWriteStream(diskPath);
+    const archive = archiver('zip', { zlib: { level: 6 } });
+    out.on('close', resolve);
+    out.on('error', reject);
+    archive.on('error', reject);
+    archive.pipe(out);
+    const seen = new Map(); // 엔트리명 중복 방지
+    for (const f of files) {
+      const disk = path.join(userDir(owner), f.stored_name);
+      if (!fs.existsSync(disk)) continue;
+      let relDir = f.folder.startsWith(stripBase) ? f.folder.slice(stripBase.length) : f.folder;
+      relDir = relDir.replace(/^\//, '');
+      let entry = (relDir ? relDir + '/' : '') + f.original_name;
+      if (seen.has(entry)) {
+        const n = seen.get(entry) + 1; seen.set(entry, n);
+        const dot = entry.lastIndexOf('.');
+        entry = dot > 0 ? `${entry.slice(0, dot)} (${n})${entry.slice(dot)}` : `${entry} (${n})`;
+      } else seen.set(entry, 0);
+      archive.file(disk, { name: entry });
+    }
+    archive.finalize();
+  });
+
+  const size = fs.statSync(diskPath).size;
+  const ins = await query(
+    'INSERT INTO zip_bundles (owner_id, stored_name, display_name, size_bytes, created_by) VALUES ($1,$2,$3,$4,$5) RETURNING id',
+    [owner, storedName, zipName, size, req.user.id]
+  );
+  await audit(req, 'bulk_zip', `owner=${owner} count=${files.length} -> ${zipName}`);
+  cleanupBundles(); // 비동기 정리(대기 안 함)
+  res.status(201).json({ bundleId: ins.rows[0].id, name: zipName, size });
+}));
+
+async function loadBundleForUser(user, id) {
+  const r = await query('SELECT * FROM zip_bundles WHERE id=$1', [id]);
+  if (r.rowCount === 0) return null;
+  const b = r.rows[0];
+  if (!(await canAccessOwner(user, b.owner_id))) return 'forbidden';
+  return b;
+}
+
+// 번들 다운로드 (내 기기로)
+router.get('/bundle/:id(\\d+)/download', authenticate, wrap(async (req, res) => {
+  const b = await loadBundleForUser(req.user, req.params.id);
+  if (!b) return res.status(404).json({ error: '압축 파일을 찾을 수 없습니다.' });
+  if (b === 'forbidden') return res.status(403).json({ error: '접근 권한이 없습니다.' });
+  const diskPath = path.join(BUNDLE_DIR, b.stored_name);
+  if (!fs.existsSync(diskPath)) return res.status(410).json({ error: '압축 파일이 만료되었습니다. 다시 시도해주세요.' });
+  res.download(diskPath, b.display_name);
+}));
+
+// 번들 공유 링크 생성 (단일 공유와 동일 UX)
+router.post('/bundle/:id(\\d+)/share', authenticate, wrap(async (req, res) => {
+  const b = await loadBundleForUser(req.user, req.params.id);
+  if (!b) return res.status(404).json({ error: '압축 파일을 찾을 수 없습니다.' });
+  if (b === 'forbidden') return res.status(403).json({ error: '권한이 없습니다.' });
+  const days = parseInt(req.body.expiresInDays || '0', 10);
+  const expiresAt = days > 0 ? new Date(Date.now() + days * 86400000) : null;
+  const token = generateToken(24);
+  await query('INSERT INTO share_links (bundle_id, token, created_by, expires_at) VALUES ($1,$2,$3,$4)', [b.id, token, req.user.id, expiresAt]);
+  const proto = (req.headers['x-forwarded-proto'] || 'https').split(',')[0];
+  const base = config.publicApiUrl || `${proto}://${req.headers.host}`;
+  await audit(req, 'create_share', `bundle=${b.id}`);
+  res.status(201).json({ token, url: `${base}/api/share/${token}`, fileName: b.display_name, expiresAt });
 }));
 
 // ── 공유 링크 ──────────

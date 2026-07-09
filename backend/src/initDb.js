@@ -116,6 +116,20 @@ ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN ('user','manage
 
 -- notices: 노출 대상 권한 (기본: 전체)
 ALTER TABLE notices ADD COLUMN IF NOT EXISTS target_roles TEXT[] NOT NULL DEFAULT ARRAY['admin','manager','user'];
+
+-- 압축(ZIP) 번들: 선택 항목을 묶어 임시 생성한 파일. 다운로드/공유 대상.
+CREATE TABLE IF NOT EXISTS zip_bundles (
+  id           BIGSERIAL PRIMARY KEY,
+  owner_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  stored_name  TEXT NOT NULL,
+  display_name TEXT NOT NULL,
+  size_bytes   BIGINT NOT NULL DEFAULT 0,
+  created_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+-- share_links: 파일 또는 압축번들을 가리킬 수 있도록
+ALTER TABLE share_links ALTER COLUMN file_id DROP NOT NULL;
+ALTER TABLE share_links ADD COLUMN IF NOT EXISTS bundle_id BIGINT REFERENCES zip_bundles(id) ON DELETE CASCADE;
 `;
 
 const DEFAULT_EXT = 'csv,xls,xlsx,xlsm,xlsb,jpg,jpeg,png,gif,ppt,pptx,doc,docx,txt';

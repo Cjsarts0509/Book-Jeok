@@ -29,7 +29,7 @@ const App = (() => {
     root().innerHTML = `
       <div class="login-screen">
         <form class="login-card" id="login-form">
-          <img src="assets/logo.svg?v=15" class="login-logo" alt="북적북적">
+          <img src="assets/logo.svg?v=16" class="login-logo" alt="북적북적">
           <div class="login-title">북적북적</div>
           <div class="login-sub">Book-Jeok · 우리끼리 나누는 파일 창고</div>
           <div class="field"><label>아이디</label><input class="input" name="username" autocomplete="username" placeholder="아이디" required></div>
@@ -53,7 +53,7 @@ const App = (() => {
       <div class="layout">
         <header class="appbar">
           <button class="icon-btn appbar-menu" id="menu-toggle" title="폴더">☰</button>
-          <div class="brand" id="brand-home" title="홈으로"><img src="assets/logo.svg?v=15"><span class="brand-name">북적북적</span></div>
+          <div class="brand" id="brand-home" title="홈으로"><img src="assets/logo.svg?v=16"><span class="brand-name">북적북적</span></div>
           ${isPriv() ? `<select class="input account-switcher" id="account-switcher"><option value="">내 파일</option></select>` : ''}
           <div class="topbar-spacer"></div>
           <nav class="appbar-nav">
@@ -440,21 +440,66 @@ const App = (() => {
     } catch (err) { UI.toast(err.message, 'error'); }
   }
 
+  const lastSeg = (p) => (p && p !== '/') ? p.split('/').filter(Boolean).pop() : '';
   async function bulkDownload() {
     const items = [...state.selected.values()];
     const ids = items.filter((i) => i.type === 'file').map((i) => i.id);
     const folders = items.filter((i) => i.type === 'folder').map((i) => i.path);
     if (!ids.length && !folders.length) return;
-    UI.toast('압축 파일 준비 중…');
+    // 압축 파일명 기준: 폴더 하나만 선택했으면 그 폴더명, 그 외엔 현재 보고 있는 폴더명
+    const zipBase = (folders.length === 1 && ids.length === 0)
+      ? lastSeg(folders[0])
+      : (lastSeg(state.folder) || '북적북적');
+
+    const btn = document.getElementById('sel-dl');
+    if (btn) { btn.disabled = true; btn.textContent = '압축 중…'; }
+    let bundle;
     try {
-      const res = await API.bulkDownload(ids, folders, state.folder, state.ownerId);
-      const name = filenameFromCD(res.headers.get('content-disposition'), 'download.zip');
-      const blob = await res.blob();
+      bundle = await API.bulkZip(ids, folders, state.folder, zipBase, state.ownerId);
+    } catch (err) { UI.toast(err.message || '압축 실패', 'error'); return; }
+    finally { if (btn) { btn.disabled = false; btn.innerHTML = '⬇️ 다운로드(ZIP)'; } }
+    zipActionModal(bundle);
+  }
+
+  // 압축 완료 후: 내 기기로 다운로드 / 공유링크 만들기 선택
+  function zipActionModal(bundle) {
+    const m = UI.modal(`<h3>🗜️ 압축 완료</h3>
+      <p class="muted" style="font-size:13px;margin-bottom:4px">${UI.escapeHtml(bundle.name)}</p>
+      <p class="muted" style="font-size:12px;margin-bottom:14px">크기: ${UI.bytes(bundle.size)}</p>
+      <div class="zip-actions">
+        <button class="btn btn-primary" id="zdl">⬇️ 내 기기로 다운로드</button>
+        <button class="btn btn-secondary" id="zshare">🔗 공유링크 만들기</button>
+      </div>
+      <div id="zresult"></div>
+      <div class="modal-actions"><button class="btn btn-ghost" id="zclose">닫기</button></div>`);
+    m.q('#zclose').addEventListener('click', m.close);
+    m.q('#zdl').addEventListener('click', () => {
       const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob); a.download = name; a.click();
-      URL.revokeObjectURL(a.href);
-      UI.toast('다운로드 시작 ✅', 'success');
-    } catch (err) { UI.toast(err.message || '다운로드 실패', 'error'); }
+      a.href = API.bundleDownloadUrl(bundle.bundleId); a.download = bundle.name;
+      // 인증이 필요하므로 fetch로 blob 받아 저장
+      fetch(a.href, { headers: { Authorization: 'Bearer ' + API.getToken() }, credentials: 'include' })
+        .then((r) => { if (!r.ok) throw new Error('다운로드 실패'); return r.blob(); })
+        .then((b) => { const u = URL.createObjectURL(b); const el = document.createElement('a'); el.href = u; el.download = bundle.name; el.click(); URL.revokeObjectURL(u); UI.toast('다운로드 시작 ✅', 'success'); })
+        .catch((err) => UI.toast(err.message, 'error'));
+    });
+    m.q('#zshare').addEventListener('click', () => {
+      m.animate(() => {
+        m.q('#zresult').innerHTML = `<div class="field" style="margin-top:14px"><label>만료 기간</label>
+          <select class="input" id="zexp"><option value="0">무기한</option><option value="1">1일</option><option value="7">7일</option><option value="30">30일</option></select></div>
+          <button class="btn btn-primary btn-sm" id="zgen">링크 생성</button><div id="zlink"></div>`;
+      });
+      m.q('#zgen').addEventListener('click', async () => {
+        try {
+          const r = await API.bundleShare(bundle.bundleId, parseInt(m.q('#zexp').value, 10));
+          const dl = r.url + '/download';
+          m.animate(() => {
+            m.q('#zlink').innerHTML = `<div class="field" style="margin-top:14px"><label>다운로드 링크 (누구나 접근 가능)</label><input class="input" id="zlnk" readonly value="${dl}"></div><button class="btn btn-secondary btn-sm" id="zcopy">📋 링크 복사</button>`;
+          });
+          m.q('#zlnk').select();
+          m.q('#zcopy').addEventListener('click', () => { m.q('#zlnk').select(); navigator.clipboard?.writeText(dl); UI.toast('링크 복사됨', 'success'); });
+        } catch (err) { UI.toast(err.message, 'error'); }
+      });
+    });
   }
 
   function bulkMoveModal() {

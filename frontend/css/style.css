@@ -208,6 +208,9 @@ th { background: var(--bg); font-weight: 700; color: var(--text-muted); font-siz
 .badge-new, .badge-upd { display: inline-block; margin-left: 6px; padding: 1px 7px; border-radius: 999px; font-size: 10px; font-weight: 800; letter-spacing: .3px; vertical-align: middle; line-height: 1.6; }
 .badge-new { background: #D6F7EC; color: #06795A; }
 .badge-upd { background: #FFE7B8; color: #8A5A00; }
+/* 압축 완료 모달의 선택 버튼 */
+.zip-actions { display: flex; flex-direction: column; gap: 10px; }
+.zip-actions .btn { width: 100%; }
 /* 공지 노출 대상 권한 선택 */
 .role-picker { display: flex; flex-wrap: wrap; gap: 8px; }
 .role-chip { display: inline-flex; align-items: center; gap: 6px; padding: 8px 14px; border: 1.5px solid var(--border); border-radius: 999px; font-size: 13px; font-weight: 600; cursor: pointer; user-select: none; transition: border-color .12s, background .12s; }
