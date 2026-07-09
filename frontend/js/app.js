@@ -10,6 +10,7 @@ const App = (() => {
     treeStyles: {},      // path -> {icon, color}
     expanded: new Set(['/']), // 펼쳐진 폴더 경로 (기본: 루트만 = 최상위만 보임)
     sort: { key: 'name', dir: 'asc' }, // 리스트 정렬 기준
+    nav: { stack: ['/'], idx: 0 }, // 폴더 이동 히스토리(뒤로/앞으로)
   };
   const root = () => document.getElementById('app');
   const isPriv = () => state.user && (state.user.role === 'admin' || state.user.role === 'manager');
@@ -21,6 +22,7 @@ const App = (() => {
   const folderStyle = (path) => state.treeStyles[path] || {};
 
   async function boot() {
+    setupGlobal();
     if (API.hasToken()) { try { state.user = (await API.me()).user; return renderApp(); } catch { API.setToken(null); } }
     renderLogin();
   }
@@ -29,7 +31,7 @@ const App = (() => {
     root().innerHTML = `
       <div class="login-screen">
         <form class="login-card" id="login-form">
-          <img src="assets/logo.svg?v=21" class="login-logo" alt="북적북적">
+          <img src="assets/logo.svg?v=22" class="login-logo" alt="북적북적">
           <div class="login-title">북적북적</div>
           <div class="login-sub">Book-Jeok · 우리끼리 나누는 파일 창고</div>
           <div class="field"><label>아이디</label><input class="input" name="username" autocomplete="username" placeholder="아이디" required></div>
@@ -53,7 +55,7 @@ const App = (() => {
       <div class="layout">
         <header class="appbar">
           <button class="icon-btn appbar-menu" id="menu-toggle" title="폴더">☰</button>
-          <div class="brand" id="brand-home" title="홈으로"><img src="assets/logo.svg?v=21"><span class="brand-name">북적북적</span></div>
+          <div class="brand" id="brand-home" title="홈으로"><img src="assets/logo.svg?v=22"><span class="brand-name">북적북적</span></div>
           ${isPriv() ? `<select class="input account-switcher" id="account-switcher"><option value="">내 파일</option></select>` : ''}
           <div class="topbar-spacer"></div>
           <nav class="appbar-nav">
@@ -73,14 +75,15 @@ const App = (() => {
           <div class="tree-backdrop" id="tree-backdrop"></div>
           <main class="content" id="view"></main>
         </div>
-      </div>`;
+      </div>
+      <div class="drop-overlay hidden" id="drop-overlay"><div class="drop-inner"><div class="drop-ic">📥</div>여기에 놓아 업로드<div class="drop-sub">현재 폴더로 올라갑니다</div></div></div>`;
     root().querySelectorAll('.appbar-nav [data-nav]').forEach((el) => el.addEventListener('click', () => {
       const n = el.dataset.nav;
       if (n === 'logout') doLogout(); else if (n === 'password') changePasswordModal(); else if (n === 'files') resetToOwn(); else if (n === 'help') helpModal();
     }));
     document.getElementById('menu-toggle').addEventListener('click', toggleTree);
     document.getElementById('tree-backdrop').addEventListener('click', toggleTree);
-    document.getElementById('brand-home').addEventListener('click', () => { state.folder = '/'; loadFiles(); renderTree(); });
+    document.getElementById('brand-home').addEventListener('click', () => goTo('/'));
     document.getElementById('expand-all').addEventListener('click', expandAll);
     document.getElementById('collapse-all').addEventListener('click', collapseAll);
     if (isPriv()) setupAccountSwitcher();
@@ -93,9 +96,9 @@ const App = (() => {
   async function loadBranches() { try { state.branches = (await API.branches()).branches; } catch {} }
   async function loadAllowedExt() { try { const r = await API.allowedExtensions(); if (r.extensions?.length) { state.allowedExt = r.extensions; refreshDropzoneHint(); } } catch {} }
   function refreshDropzoneHint() {
-    const hint = document.querySelector('.dropzone .hint'); const input = document.getElementById('file-input');
-    if (hint) hint.textContent = '허용: ' + state.allowedExt.join(' · ');
+    const input = document.getElementById('file-input'); const btn = document.getElementById('upload-btn');
     if (input) input.setAttribute('accept', state.allowedExt.map((e) => '.' + e).join(','));
+    if (btn) btn.title = '허용: ' + state.allowedExt.join(' · ');
   }
 
   // ── 공지사항 팝업 (로그인 후) ──────────
@@ -126,7 +129,7 @@ const App = (() => {
   }
 
   function toggleTree() { document.getElementById('tree-sidebar').classList.toggle('open'); document.getElementById('tree-backdrop').classList.toggle('show'); }
-  function resetToOwn() { state.ownerId = null; state.ownerName = null; state.folder = '/'; state.selected.clear(); const sw = document.getElementById('account-switcher'); if (sw) sw.value = ''; loadAll(); }
+  function resetToOwn() { state.ownerId = null; state.ownerName = null; state.folder = '/'; state.selected.clear(); resetNav(); const sw = document.getElementById('account-switcher'); if (sw) sw.value = ''; loadAll(); }
 
   async function setupAccountSwitcher() {
     try {
@@ -137,7 +140,7 @@ const App = (() => {
       sw.addEventListener('change', () => {
         if (!sw.value) return resetToOwn();
         const a = state.accounts.find((x) => String(x.id) === sw.value);
-        state.ownerId = a.id; state.ownerName = a.displayName; state.folder = '/'; state.selected.clear(); loadAll();
+        state.ownerId = a.id; state.ownerName = a.displayName; state.folder = '/'; state.selected.clear(); resetNav(); loadAll();
       });
     } catch {}
   }
@@ -185,17 +188,9 @@ const App = (() => {
     const toggleExpand = (p) => { if (p === '/') return; if (state.expanded.has(p)) state.expanded.delete(p); else state.expanded.add(p); renderTree(); };
     // 캐럿 버튼: 한 번 클릭으로 하위트리 열고 닫기
     el.querySelectorAll('[data-toggle]').forEach((c) => c.addEventListener('click', (e) => { e.stopPropagation(); toggleExpand(c.dataset.toggle); }));
+    // 트리 폴더 클릭: 해당 폴더로 이동(경로에 맞춰 트리 자동 펼침). 열고닫기는 ▸ 캐럿으로.
     el.querySelectorAll('.tree-item[data-folder]').forEach((n) => {
-      // 한 번 클릭: 해당 폴더 조회 (트리 재렌더 없이 active 표시만 갱신 → 더블클릭 인식 유지)
-      n.addEventListener('click', () => {
-        const p = n.dataset.folder;
-        if (state.folder !== p) { state.folder = p; loadFiles(); }
-        el.querySelectorAll('.tree-item.active').forEach((x) => x.classList.remove('active'));
-        n.classList.add('active');
-        if (window.innerWidth <= 768) toggleTree();
-      });
-      // 더블 클릭: 하위트리 열기/닫기
-      n.addEventListener('dblclick', () => toggleExpand(n.dataset.folder));
+      n.addEventListener('click', () => goTo(n.dataset.folder));
     });
   }
   function expandAll() { state.expanded = allTreePaths(); renderTree(); }
@@ -206,21 +201,22 @@ const App = (() => {
     document.getElementById('view').innerHTML = `
       ${state.ownerId ? `<div class="impersonate-banner">👁️ <b>${UI.escapeHtml(state.ownerName || '')}</b> 계정의 파일을 보는 중<div style="flex:1"></div><button class="btn btn-sm btn-secondary" id="exit-imp">내 파일로</button></div>` : ''}
       <div class="content-head">
+        <div class="navcon">
+          <button class="icon-btn nav-btn" id="nav-back" title="뒤로 (Backspace)" ${state.nav.idx > 0 ? '' : 'disabled'}>◀</button>
+          <button class="icon-btn nav-btn" id="nav-fwd" title="앞으로" ${state.nav.idx < state.nav.stack.length - 1 ? '' : 'disabled'}>▶</button>
+          <button class="icon-btn nav-btn" id="nav-up" title="상위 폴더로" ${state.folder !== '/' ? '' : 'disabled'}>▲</button>
+          <div class="viewtoggle">
+            <button class="vt ${state.view === 'grid' ? 'on' : ''}" data-view="grid" title="미리보기">▦</button>
+            <button class="vt ${state.view === 'list' ? 'on' : ''}" data-view="list" title="리스트">☰</button>
+          </div>
+          <button class="btn btn-secondary btn-sm" id="new-folder">📂 <span class="label">새 폴더</span></button>
+        </div>
         <div class="breadcrumb" id="crumbs"></div>
         <div style="flex:1"></div>
-        <div class="viewtoggle">
-          <button class="vt ${state.view === 'grid' ? 'on' : ''}" data-view="grid" title="미리보기">▦</button>
-          <button class="vt ${state.view === 'list' ? 'on' : ''}" data-view="list" title="리스트">☰</button>
-        </div>
-        <button class="btn btn-secondary btn-sm" id="new-folder">📂 <span class="label">새 폴더</span></button>
-        <button class="btn btn-primary btn-sm" id="upload-btn">⬆️ <span class="label">업로드</span></button>
+        <button class="btn btn-primary btn-sm" id="upload-btn" title="허용: ${state.allowedExt.join(' · ')}">⬆️ <span class="label">업로드</span></button>
+        <input type="file" id="file-input" multiple hidden accept="${state.allowedExt.map((e) => '.' + e).join(',')}">
       </div>
       <div class="usage-line"><span class="num">${UI.bytes(u.usedBytes)}</span><span class="muted">${u.unlimited ? '· 무제한' : (u.quotaBytes > 0 ? '/ ' + UI.bytes(u.quotaBytes) : '· 미할당')} · ${u.fileCount}개 파일</span>${!u.unlimited && u.quotaBytes > 0 ? `<span class="usage-bar" style="flex:1"><span style="width:${pct}%"></span></span>` : ''}</div>
-      <label class="dropzone" id="dropzone" for="file-input">
-        <div class="big">📥</div><div>여기로 끌어다 놓거나 클릭해서 업로드</div>
-        <div class="hint">허용: ${state.allowedExt.join(' · ')}</div>
-        <input type="file" id="file-input" multiple hidden accept="${state.allowedExt.map((e) => '.' + e).join(',')}">
-      </label>
       <div id="selbar" class="selbar hidden"></div>
       <div id="listing"></div>`;
     renderCrumbs(); renderListing(); wireContent();
@@ -230,7 +226,7 @@ const App = (() => {
     const parts = state.folder.split('/').filter(Boolean); let acc = '', html = `<span data-folder="/">🏠 홈</span>`;
     for (const p of parts) { acc += '/' + p; html += `<span class="sep">/</span><span data-folder="${UI.escapeHtml(acc)}">${UI.escapeHtml(p)}</span>`; }
     const el = document.getElementById('crumbs'); el.innerHTML = html;
-    el.querySelectorAll('[data-folder]').forEach((s) => s.addEventListener('click', () => { state.folder = s.dataset.folder; loadFiles(); renderTree(); }));
+    el.querySelectorAll('[data-folder]').forEach((s) => s.addEventListener('click', () => goTo(s.dataset.folder)));
   }
 
   // ── 정렬 ──────────────────────────────
@@ -348,16 +344,51 @@ const App = (() => {
   function wireContent() {
     document.getElementById('exit-imp')?.addEventListener('click', resetToOwn);
     document.querySelectorAll('.viewtoggle .vt').forEach((b) => b.addEventListener('click', () => { state.view = b.dataset.view; localStorage.setItem('bj_view', state.view); state.selected.clear(); renderContent(); }));
-    const input = document.getElementById('file-input'), dz = document.getElementById('dropzone');
+    const input = document.getElementById('file-input');
     document.getElementById('upload-btn').addEventListener('click', () => input.click());
-    input.addEventListener('change', () => { if (input.files.length) uploadFiles(input.files); });
-    ['dragover', 'dragenter'].forEach((ev) => dz.addEventListener(ev, (e) => { e.preventDefault(); dz.classList.add('drag'); }));
-    ['dragleave', 'drop'].forEach((ev) => dz.addEventListener(ev, (e) => { e.preventDefault(); dz.classList.remove('drag'); }));
-    dz.addEventListener('drop', (e) => { if (e.dataTransfer.files.length) uploadFiles(e.dataTransfer.files); });
+    input.addEventListener('change', () => { if (input.files.length) uploadFiles(input.files); input.value = ''; });
     document.getElementById('new-folder').addEventListener('click', newFolderModal);
+    document.getElementById('nav-back').addEventListener('click', navBack);
+    document.getElementById('nav-fwd').addEventListener('click', navForward);
+    document.getElementById('nav-up').addEventListener('click', navUp);
   }
 
-  function openFolder(path) { state.folder = path; loadFiles(); renderTree(); }
+  // ── 폴더 이동(히스토리 · 트리 동기화) ──────────────
+  function normFolder(p) { if (!p || p === '/') return '/'; return '/' + String(p).split('/').filter(Boolean).join('/'); }
+  function pathChain(folder) { const s = new Set(['/']); let acc = ''; for (const p of folder.split('/').filter(Boolean)) { acc += '/' + p; s.add(acc); } return s; }
+  function syncTreeToFolder() { state.expanded = pathChain(state.folder); } // 현재 위치의 경로만 펼침
+  function goTo(path, record = true) {
+    path = normFolder(path);
+    if (record) { const n = state.nav; if (n.stack[n.idx] !== path) { n.stack = n.stack.slice(0, n.idx + 1); n.stack.push(path); n.idx = n.stack.length - 1; } }
+    if (state.folder === path) { syncTreeToFolder(); renderTree(); return; }
+    state.folder = path; syncTreeToFolder(); loadFiles(); renderTree();
+    if (window.innerWidth <= 768 && document.getElementById('tree-sidebar')?.classList.contains('open')) toggleTree();
+  }
+  function navBack() { const n = state.nav; if (n.idx > 0) { n.idx--; goTo(n.stack[n.idx], false); } }
+  function navForward() { const n = state.nav; if (n.idx < n.stack.length - 1) { n.idx++; goTo(n.stack[n.idx], false); } }
+  function navUp() { if (state.folder === '/') return; goTo(state.folder.slice(0, state.folder.lastIndexOf('/')) || '/'); }
+  function resetNav() { state.nav = { stack: [state.folder || '/'], idx: 0 }; }
+  function openFolder(path) { goTo(path); }
+
+  // ── 전역: 화면 어디든 드롭 업로드 · 백스페이스=폴더 뒤로 ──
+  let globalsBound = false;
+  function setupGlobal() {
+    if (globalsBound) return; globalsBound = true;
+    let dragDepth = 0;
+    const overlay = () => document.getElementById('drop-overlay');
+    const hasFiles = (e) => Array.from(e.dataTransfer?.types || []).includes('Files');
+    window.addEventListener('dragenter', (e) => { if (!state.user || !hasFiles(e)) return; e.preventDefault(); dragDepth++; overlay()?.classList.remove('hidden'); });
+    window.addEventListener('dragover', (e) => { if (state.user && hasFiles(e)) e.preventDefault(); });
+    window.addEventListener('dragleave', (e) => { if (!state.user || !hasFiles(e)) return; dragDepth = Math.max(0, dragDepth - 1); if (dragDepth === 0) overlay()?.classList.add('hidden'); });
+    window.addEventListener('drop', (e) => { if (!state.user || !hasFiles(e)) return; e.preventDefault(); dragDepth = 0; overlay()?.classList.add('hidden'); if (e.dataTransfer.files.length) uploadFiles(e.dataTransfer.files); });
+    document.addEventListener('keydown', (e) => {
+      if (e.key !== 'Backspace' || !state.user) return;
+      const t = e.target;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return; // 입력 중엔 통과
+      if (document.querySelector('.modal-backdrop')) return; // 모달 열림 시 무시
+      e.preventDefault(); navBack(); // 브라우저 뒤로가기 대신 폴더 뒤로가기
+    });
+  }
 
   function wireListing() {
     const box = document.getElementById('listing');
@@ -504,15 +535,41 @@ const App = (() => {
   }
 
   function bulkMoveModal() {
-    const opts = ['/', ...state.treeFolders].map((p) => `<option value="${UI.escapeHtml(p)}">${p === '/' ? '🏠 홈(루트)' : p}</option>`).join('');
+    const items = [...state.selected.values()];
+    const movingFolders = items.filter((i) => i.type === 'folder').map((i) => i.path);
+    // 폴더 자신·하위로는 이동 불가
+    const blocked = new Set();
+    for (const mf of movingFolders) { blocked.add(mf); for (const p of state.treeFolders) if (p === mf || p.startsWith(mf + '/')) blocked.add(p); }
+    let dest = state.folder;
+    const picked = () => (dest === '/' ? '🏠 홈(최상위)' : dest);
     const m = UI.modal(`<h3>선택 항목 이동</h3>
-      <div class="field"><label>이동할 폴더</label><select class="input" id="dest">${opts}</select></div>
-      <div class="field"><label>또는 새 폴더 경로 입력 (선택)</label><input class="input" id="newpath" placeholder="예: /2026/보고서"></div>
-      <div class="modal-actions"><button class="btn btn-ghost" id="c">취소</button><button class="btn btn-primary" id="ok">이동</button></div>`);
+      <p class="muted" style="font-size:13px;margin-bottom:8px">아래에서 이동할 폴더를 선택하세요.</p>
+      <div class="folder-picker" id="picker"></div>
+      <div class="picked-bar">이동 위치: <b id="picked">${UI.escapeHtml(picked())}</b></div>
+      <div class="modal-actions"><button class="btn btn-ghost" id="c">취소</button><button class="btn btn-primary" id="ok">여기로 이동</button></div>`);
+    m.el.querySelector('.modal').classList.add('modal-wide');
+    // 펼침 상태(피커 전용) — 기본은 현재 경로까지 펼침
+    const openSet = pathChain(state.folder);
+    function drawPicker() {
+      const rootNode = buildTreeNodes(state.treeFolders);
+      const render = (node, depth) => {
+        const kids = Object.values(node.children).sort((a, b) => a.name.localeCompare(b.name, 'ko'));
+        const hasKids = kids.length > 0;
+        const isOpen = openSet.has(node.path);
+        const isBlocked = blocked.has(node.path);
+        const sel = node.path === dest ? ' sel' : '';
+        const caret = hasKids ? `<span class="pk-caret ${isOpen ? 'open' : ''}" data-tog="${UI.escapeHtml(node.path)}">▸</span>` : '<span class="pk-caret-empty"></span>';
+        let html = `<div class="pick-row${sel}${isBlocked ? ' disabled' : ''}" data-path="${UI.escapeHtml(node.path)}" style="padding-left:${4 + depth * 16}px">${caret}<span class="pk-ic">${depth === 0 ? '🏠' : '📁'}</span><span class="pk-name">${UI.escapeHtml(node.name)}</span></div>`;
+        if (hasKids && isOpen) for (const k of kids) html += render(k, depth + 1);
+        return html;
+      };
+      const box = m.q('#picker'); box.innerHTML = render(rootNode, 0);
+      box.querySelectorAll('.pk-caret[data-tog]').forEach((c) => c.addEventListener('click', (e) => { e.stopPropagation(); const p = c.dataset.tog; if (openSet.has(p)) openSet.delete(p); else openSet.add(p); drawPicker(); }));
+      box.querySelectorAll('.pick-row:not(.disabled)').forEach((r) => r.addEventListener('click', () => { dest = r.dataset.path; m.q('#picked').textContent = picked(); drawPicker(); }));
+    }
+    drawPicker();
     m.q('#c').addEventListener('click', m.close);
     m.q('#ok').addEventListener('click', async () => {
-      const dest = (m.q('#newpath').value.trim() || m.q('#dest').value).replace(/\/+$/, '') || '/';
-      const items = [...state.selected.values()];
       const files = items.filter((i) => i.type === 'file'), folders = items.filter((i) => i.type === 'folder');
       try {
         if (files.length) await API.bulkMove(files.map((f) => f.id), dest);
