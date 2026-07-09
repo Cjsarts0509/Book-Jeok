@@ -113,6 +113,9 @@ ALTER TABLE folders ADD COLUMN IF NOT EXISTS color TEXT NOT NULL DEFAULT '';
 -- users.role: 'manager'(담당자) 허용하도록 제약 갱신
 ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check;
 ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN ('user','manager','admin'));
+
+-- notices: 노출 대상 권한 (기본: 전체)
+ALTER TABLE notices ADD COLUMN IF NOT EXISTS target_roles TEXT[] NOT NULL DEFAULT ARRAY['admin','manager','user'];
 `;
 
 const DEFAULT_EXT = 'csv,xls,xlsx,xlsm,xlsb,jpg,jpeg,png,gif,ppt,pptx,doc,docx,txt';

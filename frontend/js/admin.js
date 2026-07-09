@@ -21,7 +21,7 @@ const Admin = (() => {
     root().innerHTML = `
       <div class="layout">
         <header class="appbar">
-          <a class="brand" href="index.html" title="홈으로"><img src="assets/logo.svg?v=13"><span class="brand-name">북적북적</span></a>
+          <a class="brand" href="index.html" title="홈으로"><img src="assets/logo.svg?v=14"><span class="brand-name">북적북적</span></a>
           <nav class="appbar-nav">
             ${item('users', '👥', '계정')}
             ${item('branches', '🏢', '영업점')}
@@ -325,8 +325,11 @@ const Admin = (() => {
       const now = Date.now();
       const rows = notices.map((n) => {
         const active = (!n.start_at || new Date(n.start_at).getTime() <= now) && (!n.end_at || new Date(n.end_at).getTime() >= now);
+        const roleLbl = { admin: '관리자', manager: '담당자', user: '일반' };
+        const roles = Array.isArray(n.target_roles) ? n.target_roles : ['admin', 'manager', 'user'];
+        const roleText = roles.length >= 3 ? '전체' : roles.map((r) => roleLbl[r] || r).join(', ');
         return `<tr class="fade-in">
-          <td><b>${UI.escapeHtml(n.title)}</b><br><span class="muted" style="font-size:12px">${n.start_at ? UI.date(n.start_at) : '무기한'} ~ ${n.end_at ? UI.date(n.end_at) : '무기한'}</span></td>
+          <td><b>${UI.escapeHtml(n.title)}</b><br><span class="muted" style="font-size:12px">${n.start_at ? UI.date(n.start_at) : '무기한'} ~ ${n.end_at ? UI.date(n.end_at) : '무기한'} · 👥 ${roleText}</span></td>
           <td><span class="badge ${active ? 'on' : 'off'}">${active ? '노출중' : '비노출'}</span></td>
           <td class="row-actions" style="text-align:right"><button class="btn btn-sm btn-ghost" data-en="${n.id}">✏️ 수정</button><button class="btn btn-sm btn-danger" data-dn="${n.id}">🗑️ 삭제</button></td></tr>`;
       }).join('');
@@ -364,6 +367,14 @@ const Admin = (() => {
         <div class="field" style="flex:1"><label>시작 (비우면 즉시)</label><input class="input" type="datetime-local" id="s" value="${n ? toLocalInput(n.start_at) : ''}"></div>
         <div class="field" style="flex:1"><label>종료 (비우면 무기한)</label><input class="input" type="datetime-local" id="e" value="${n ? toLocalInput(n.end_at) : ''}"></div>
       </div>
+      <div class="field"><label>노출 대상 (권한)</label>
+        <div class="role-picker" id="roles">
+          ${[['admin', '관리자'], ['manager', '담당자'], ['user', '일반']].map(([v, lbl]) => {
+            const checked = !n || !Array.isArray(n.target_roles) || n.target_roles.includes(v);
+            return `<label class="role-chip"><input type="checkbox" value="${v}" ${checked ? 'checked' : ''}> ${lbl}</label>`;
+          }).join('')}
+        </div>
+      </div>
       <div class="modal-actions"><button class="btn btn-ghost" id="c">취소</button><button class="btn btn-primary" id="ok">저장</button></div>`);
     m.el.querySelector('.modal').classList.add('modal-wide');
     const editor = m.q('#b');
@@ -385,7 +396,9 @@ const Admin = (() => {
     });
     m.q('#c').addEventListener('click', m.close);
     m.q('#ok').addEventListener('click', async () => {
-      const data = { title: m.q('#t').value.trim(), body: editor.innerHTML, startAt: m.q('#s').value ? new Date(m.q('#s').value).toISOString() : '', endAt: m.q('#e').value ? new Date(m.q('#e').value).toISOString() : '' };
+      const targetRoles = [...m.el.querySelectorAll('#roles input:checked')].map((c) => c.value);
+      if (targetRoles.length === 0) return UI.toast('노출 대상 권한을 하나 이상 선택하세요', 'error');
+      const data = { title: m.q('#t').value.trim(), body: editor.innerHTML, startAt: m.q('#s').value ? new Date(m.q('#s').value).toISOString() : '', endAt: m.q('#e').value ? new Date(m.q('#e').value).toISOString() : '', targetRoles };
       if (!data.title) return UI.toast('제목을 입력하세요', 'error');
       try { if (n) await API.editNotice(n.id, data); else await API.addNotice(data); m.close(); UI.toast('저장됨', 'success'); loadNotices(); } catch (err) { UI.toast(err.message, 'error'); }
     });

@@ -15,12 +15,14 @@ router.get('/branches', wrap(async (req, res) => {
   res.json({ branches: r.rows });
 }));
 
-// 현재 노출 기간에 해당하는 공지사항
+// 현재 노출 기간 + 내 권한이 대상인 공지사항
 router.get('/notices/active', wrap(async (req, res) => {
   const r = await query(
     `SELECT id, title, body, start_at, end_at, created_at FROM notices
      WHERE (start_at IS NULL OR start_at <= now()) AND (end_at IS NULL OR end_at >= now())
-     ORDER BY created_at DESC`
+       AND (target_roles IS NULL OR $1 = ANY(target_roles))
+     ORDER BY created_at DESC`,
+    [req.user.role]
   );
   res.json({ notices: r.rows });
 }));

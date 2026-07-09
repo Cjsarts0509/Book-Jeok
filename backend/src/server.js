@@ -24,6 +24,7 @@ app.use(cors({
     cb(new Error('CORS 정책에 의해 차단되었습니다.'));
   },
   credentials: true,
+  exposedHeaders: ['Content-Disposition'], // 브라우저 JS가 다운로드 파일명을 읽을 수 있도록
 }));
 
 app.use(express.json({ limit: '16mb' })); // 공지 리치텍스트(이미지 임베드) 대비

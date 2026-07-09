@@ -356,8 +356,15 @@ router.delete('/branches/:id', wrap(async (req, res) => {
 }));
 
 // ══════════ 공지사항 관리 ══════════
+const ALL_ROLES = ['admin', 'manager', 'user'];
+function sanitizeRoles(input) {
+  const arr = Array.isArray(input) ? input : [];
+  const roles = ALL_ROLES.filter((r) => arr.includes(r));
+  return roles.length ? roles : ALL_ROLES.slice(); // 비어있으면 전체로
+}
+
 router.get('/notices', wrap(async (req, res) => {
-  const r = await query('SELECT id, title, body, start_at, end_at, created_at FROM notices ORDER BY created_at DESC');
+  const r = await query('SELECT id, title, body, start_at, end_at, created_at, target_roles FROM notices ORDER BY created_at DESC');
   res.json({ notices: r.rows });
 }));
 router.post('/notices', wrap(async (req, res) => {
@@ -366,7 +373,8 @@ router.post('/notices', wrap(async (req, res) => {
   const body = String(req.body.body || '');
   const startAt = req.body.startAt || null;
   const endAt = req.body.endAt || null;
-  const r = await query('INSERT INTO notices (title, body, start_at, end_at) VALUES ($1,$2,$3,$4) RETURNING id', [title, body, startAt, endAt]);
+  const targetRoles = sanitizeRoles(req.body.targetRoles);
+  const r = await query('INSERT INTO notices (title, body, start_at, end_at, target_roles) VALUES ($1,$2,$3,$4,$5) RETURNING id', [title, body, startAt, endAt, targetRoles]);
   await audit(req, 'add_notice', title);
   res.status(201).json({ id: r.rows[0].id });
 }));
@@ -375,6 +383,7 @@ router.patch('/notices/:id', wrap(async (req, res) => {
   for (const [k, col] of [['title', 'title'], ['body', 'body'], ['startAt', 'start_at'], ['endAt', 'end_at']]) {
     if (req.body[k] !== undefined) { fields.push(`${col}=$${i++}`); values.push(req.body[k] === '' ? null : req.body[k]); }
   }
+  if (req.body.targetRoles !== undefined) { fields.push(`target_roles=$${i++}`); values.push(sanitizeRoles(req.body.targetRoles)); }
   if (fields.length === 0) return res.status(400).json({ error: '변경할 항목이 없습니다.' });
   values.push(req.params.id);
   const r = await query(`UPDATE notices SET ${fields.join(', ')} WHERE id=$${i} RETURNING id`, values);

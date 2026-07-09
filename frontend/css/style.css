@@ -208,6 +208,11 @@ th { background: var(--bg); font-weight: 700; color: var(--text-muted); font-siz
 .badge-new, .badge-upd { display: inline-block; margin-left: 6px; padding: 1px 7px; border-radius: 999px; font-size: 10px; font-weight: 800; letter-spacing: .3px; vertical-align: middle; line-height: 1.6; }
 .badge-new { background: #D6F7EC; color: #06795A; }
 .badge-upd { background: #FFE7B8; color: #8A5A00; }
+/* 공지 노출 대상 권한 선택 */
+.role-picker { display: flex; flex-wrap: wrap; gap: 8px; }
+.role-chip { display: inline-flex; align-items: center; gap: 6px; padding: 8px 14px; border: 1.5px solid var(--border); border-radius: 999px; font-size: 13px; font-weight: 600; cursor: pointer; user-select: none; transition: border-color .12s, background .12s; }
+.role-chip:hover { border-color: var(--primary); }
+.role-chip:has(input:checked) { border-color: var(--primary); background: var(--hover); }
 .filetable .folder-row { cursor: pointer; font-weight: 600; }
 .filetable .note-cell { cursor: pointer; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .filetable .note-cell:hover { color: var(--secondary); }

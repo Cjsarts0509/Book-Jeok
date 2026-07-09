@@ -29,7 +29,7 @@ const App = (() => {
     root().innerHTML = `
       <div class="login-screen">
         <form class="login-card" id="login-form">
-          <img src="assets/logo.svg?v=13" class="login-logo" alt="북적북적">
+          <img src="assets/logo.svg?v=14" class="login-logo" alt="북적북적">
           <div class="login-title">북적북적</div>
           <div class="login-sub">Book-Jeok · 우리끼리 나누는 파일 창고</div>
           <div class="field"><label>아이디</label><input class="input" name="username" autocomplete="username" placeholder="아이디" required></div>
@@ -53,7 +53,7 @@ const App = (() => {
       <div class="layout">
         <header class="appbar">
           <button class="icon-btn appbar-menu" id="menu-toggle" title="폴더">☰</button>
-          <div class="brand" id="brand-home" title="홈으로"><img src="assets/logo.svg?v=13"><span class="brand-name">북적북적</span></div>
+          <div class="brand" id="brand-home" title="홈으로"><img src="assets/logo.svg?v=14"><span class="brand-name">북적북적</span></div>
           ${isPriv() ? `<select class="input account-switcher" id="account-switcher"><option value="">내 파일</option></select>` : ''}
           <div class="topbar-spacer"></div>
           <nav class="appbar-nav">
@@ -448,9 +448,7 @@ const App = (() => {
     UI.toast('압축 파일 준비 중…');
     try {
       const res = await API.bulkDownload(ids, folders, state.folder, state.ownerId);
-      const cd = res.headers.get('content-disposition') || '';
-      const mt = /filename\*?=(?:UTF-8'')?["']?([^"';]+)/i.exec(cd);
-      const name = mt ? decodeURIComponent(mt[1]) : 'download.zip';
+      const name = filenameFromCD(res.headers.get('content-disposition'), 'download.zip');
       const blob = await res.blob();
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob); a.download = name; a.click();
@@ -486,10 +484,19 @@ const App = (() => {
     catch (err) { UI.toast(err.message, 'error'); }
   }
 
+  // Content-Disposition에서 파일명 추출 (filename*=UTF-8'' 우선, 없으면 filename=)
+  function filenameFromCD(cd, fallback) {
+    cd = cd || '';
+    let m = /filename\*=(?:UTF-8'')?([^;]+)/i.exec(cd);
+    if (m) { try { return decodeURIComponent(m[1].trim().replace(/^["']|["']$/g, '')); } catch { return m[1].trim(); } }
+    m = /filename="?([^";]+)"?/i.exec(cd);
+    return m ? m[1].trim() : fallback;
+  }
+
   function downloadFile(id) {
     fetch(API.downloadUrl(id), { headers: { Authorization: 'Bearer ' + API.getToken() }, credentials: 'include' })
       .then((r) => { if (!r.ok) throw new Error('다운로드 실패'); return r.blob().then((b) => ({ b, r })); })
-      .then(({ b, r }) => { const cd = r.headers.get('content-disposition') || ''; const mt = /filename\*?=(?:UTF-8'')?["']?([^"';]+)/i.exec(cd); const name = mt ? decodeURIComponent(mt[1]) : 'download'; const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = name; a.click(); URL.revokeObjectURL(a.href); })
+      .then(({ b, r }) => { const name = filenameFromCD(r.headers.get('content-disposition'), 'download'); const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = name; a.click(); URL.revokeObjectURL(a.href); })
       .catch((err) => UI.toast(err.message, 'error'));
   }
 
