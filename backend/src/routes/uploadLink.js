@@ -15,7 +15,6 @@ const { query } = require('../db');
 const { wrap } = require('../util');
 const { verifyPassword } = require('../crypto');
 const { isAllowed, allowedLabel, getAllowedExtensions } = require('../settings');
-const antivirus = require('../antivirus');
 const filetype = require('../filetype');
 
 const router = express.Router();
@@ -113,8 +112,6 @@ router.post('/:token', uploadLimiter, attemptLimiter, wrap(gate), upload.array('
     const originalName = Buffer.from(f.originalname, 'latin1').toString('utf8').replace(/[/\\]/g, '_').replace(/[\u0000-\u001f]/g, '').trim() || 'file';
     const ft = await filetype.verify(f.path, originalName);
     if (!ft.ok) { await fsp.unlink(f.path).catch(() => {}); rejected.push({ name: originalName, reason: ft.reason }); continue; }
-    const scan = await antivirus.scanFile(f.path);
-    if (!scan.ok) { await fsp.unlink(f.path).catch(() => {}); rejected.push({ name: originalName, reason: `바이러스 감지(${scan.virus})`, virus: scan.virus }); continue; }
     const name = await uniqueFileName(owner, u.folder, originalName);
     await query('INSERT INTO files (owner_id, folder, original_name, stored_name, size_bytes, mime_type, note) VALUES ($1,$2,$3,$4,$5,$6,$7)', [owner, u.folder, name, path.basename(f.path), f.size, f.mimetype, '업로드 요청으로 수신']);
     saved++; savedBytes += f.size;

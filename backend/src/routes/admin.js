@@ -309,7 +309,6 @@ router.get('/disk-info', wrap(async (req, res) => {
 
 // ══════════ 대시보드(요약·경고·추이) ══════════
 router.get('/dashboard', wrap(async (req, res) => {
-  const antivirus = require('../antivirus');
   const [uStat, fStat, total, allocated, loginsR, uploadsR, quotaR, topR, recentR] = await Promise.all([
     query("SELECT count(*)::int AS total, count(*) FILTER (WHERE is_active)::int AS active FROM users"),
     query('SELECT count(*)::int AS c, COALESCE(SUM(size_bytes),0) AS b FROM files WHERE deleted_at IS NULL'),
@@ -338,7 +337,6 @@ router.get('/dashboard', wrap(async (req, res) => {
     daily: days,
     topAccounts: topR.rows.map((r) => ({ username: r.username, displayName: r.display_name, fileCount: r.c, usedBytes: Number(r.b) })),
     recent: recentR.rows.map((r) => ({ action: r.action, detail: r.detail, username: r.username, createdAt: r.created_at })),
-    antivirus: antivirus.enabled(),
   });
 }));
 

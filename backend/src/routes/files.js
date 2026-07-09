@@ -11,7 +11,6 @@ const { query } = require('../db');
 const { authenticate } = require('../middleware/auth');
 const { audit, wrap, canAccessOwner } = require('../util');
 const { generateToken, hashPassword } = require('../crypto');
-const antivirus = require('../antivirus');
 const filetype = require('../filetype');
 const { isAllowed, allowedLabel, getAllowedExtensions } = require('../settings');
 
@@ -259,9 +258,6 @@ router.post('/upload', authenticate, wrap(resolveOwner), upload.array('file', 30
     // 매직바이트 검증: 실행파일 위장·확장자-내용 불일치 차단 (데몬 불필요)
     const ft = await filetype.verify(f.path, originalName);
     if (!ft.ok) { await fsp.unlink(f.path).catch(() => {}); rejected.push({ name: originalName, reason: ft.reason }); await audit(req, 'file_blocked', `${originalName} (${ft.reason})`); continue; }
-    // 바이러스 검사(설정 시). 탐지되면 저장하지 않고 삭제.
-    const scan = await antivirus.scanFile(f.path);
-    if (!scan.ok) { await fsp.unlink(f.path).catch(() => {}); rejected.push({ name: originalName, reason: `바이러스 감지(${scan.virus})`, virus: scan.virus }); await audit(req, 'virus_blocked', `${originalName} (${scan.virus})`); continue; }
     const name = await uniqueFileName(req.targetOwnerId, folder, originalName);
     const row = await query(
       `INSERT INTO files (owner_id, folder, original_name, stored_name, size_bytes, mime_type)
