@@ -5,12 +5,16 @@
 const express = require('express');
 const path = require('path');
 const fs = require('fs');
+const rateLimit = require('express-rate-limit');
 const config = require('../config');
 const { query } = require('../db');
 const { wrap } = require('../util');
 const { verifyPassword } = require('../crypto');
 
 const router = express.Router();
+
+// 비밀번호 무차별 대입 방어: 실패한 요청(4xx/5xx)만 카운트 → 정상 다운로드는 제한 없음
+const attemptLimiter = rateLimit({ windowMs: 10 * 60 * 1000, max: 15, skipSuccessfulRequests: true, standardHeaders: true, legacyHeaders: false, message: { error: '시도가 너무 많습니다. 잠시 후 다시 시도하세요.' } });
 
 async function resolveShare(token) {
   const r = await query(
@@ -58,7 +62,7 @@ router.get('/:token', wrap(async (req, res) => {
 }));
 
 // GET /api/share/:token/download  → 실제 파일 다운로드
-router.get('/:token/download', wrap(async (req, res) => {
+router.get('/:token/download', attemptLimiter, wrap(async (req, res) => {
   const s = await resolveShare(req.params.token);
   if (!s) return res.status(404).json({ error: '유효하지 않은 공유 링크입니다.' });
   if (s.expired) return res.status(410).json({ error: '만료된 공유 링크입니다.' });

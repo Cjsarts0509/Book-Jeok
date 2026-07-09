@@ -70,6 +70,11 @@ const API = (() => {
     createUploadRequest: (data) => req('POST', '/files/upload-requests', data),
     uploadRequests: (ownerId) => req('GET', `/files/upload-requests${ownerId ? '?ownerId=' + ownerId : ''}`),
     deleteUploadRequest: (id, ownerId) => req('DELETE', `/files/upload-requests/${id}${ownerId ? '?ownerId=' + ownerId : ''}`),
+    myShares: () => req('GET', '/files/shares'),
+    deleteShare: (id) => req('DELETE', `/files/shares/${id}`),
+    createFolderShare: (data) => req('POST', '/files/folder-shares', data),
+    folderShares: (ownerId) => req('GET', `/files/folder-shares${ownerId ? '?ownerId=' + ownerId : ''}`),
+    deleteFolderShare: (id, ownerId) => req('DELETE', `/files/folder-shares/${id}${ownerId ? '?ownerId=' + ownerId : ''}`),
     downloadUrl: (id) => `${BASE}/api/files/${id}/download`,
     // admin
     adminUsers: () => req('GET', '/admin/users'),

@@ -152,6 +152,22 @@ CREATE TABLE IF NOT EXISTS upload_requests (
   created_at     TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_upload_req_token ON upload_requests(token);
+
+-- 폴더 단위 공유(외부인이 그 폴더만 열람·다운로드, 이동/업로드 불가)
+CREATE TABLE IF NOT EXISTS folder_shares (
+  id            BIGSERIAL PRIMARY KEY,
+  owner_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  folder        TEXT NOT NULL,
+  token         VARCHAR(64) UNIQUE NOT NULL,
+  label         TEXT NOT NULL DEFAULT '',
+  password_hash TEXT,
+  disabled      BOOLEAN NOT NULL DEFAULT false,
+  expires_at    TIMESTAMPTZ,
+  view_count    INTEGER NOT NULL DEFAULT 0,
+  created_by    INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_folder_share_token ON folder_shares(token);
 `;
 
 const DEFAULT_EXT = 'csv,xls,xlsx,xlsm,xlsb,jpg,jpeg,png,gif,ppt,pptx,doc,docx,txt';

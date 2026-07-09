@@ -240,6 +240,17 @@ textarea.input { resize: vertical; }
 .up-drop { display: flex; flex-direction: column; align-items: center; justify-content: center; border: 2.5px dashed var(--border); border-radius: var(--radius); padding: 22px; text-align: center; color: var(--text-muted); cursor: pointer; margin-top: 12px; transition: border-color .2s, background .2s; }
 .up-drop.drag { border-color: var(--primary); background: var(--hover); color: var(--text); }
 
+/* 이미지 썸네일 (그리드) */
+.file-ico.thumb { width: 66px; height: 66px; margin: 0 auto 8px; border-radius: 12px; overflow: hidden; display: flex; align-items: center; justify-content: center; background: var(--bg); font-size: 30px; }
+.thumb-img { width: 100%; height: 100%; object-fit: cover; }
+
+/* 공유 폴더 열람 페이지 */
+.fs-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 4px; border-bottom: 1px solid var(--border); font-size: 14px; }
+.fs-row:last-child { border-bottom: none; }
+.fs-row[data-open] { cursor: pointer; }
+.fs-row[data-open]:hover { background: var(--hover); }
+.fs-row > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 /* 검색 결과 배너 */
 .search-banner { display: flex; align-items: center; gap: 8px; padding: 9px 12px; margin-bottom: 10px; background: #E7F5FB; border: 1px solid #B6E3F4; border-radius: var(--radius-sm); font-size: 14px; color: var(--secondary); }
 

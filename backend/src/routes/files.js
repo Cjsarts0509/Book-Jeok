@@ -621,4 +621,43 @@ router.delete('/upload-requests/:id(\\d+)', authenticate, wrap(resolveOwner), wr
   res.json({ ok: true });
 }));
 
+// ── 공유 링크 관리 (내가 만든 파일/압축 공유) ──────────
+router.get('/shares', authenticate, wrap(async (req, res) => {
+  const r = await query(
+    `SELECT s.id, s.token, s.expires_at, s.password_hash IS NOT NULL AS has_pw, s.max_downloads, s.download_count, s.created_at,
+            f.original_name AS file_name, b.display_name AS bundle_name
+     FROM share_links s LEFT JOIN files f ON f.id=s.file_id LEFT JOIN zip_bundles b ON b.id=s.bundle_id
+     WHERE s.created_by=$1 ORDER BY s.created_at DESC`, [req.user.id]);
+  res.json({ shares: r.rows.map((x) => ({ id: x.id, token: x.token, kind: x.bundle_name ? 'zip' : 'file', name: x.file_name || x.bundle_name || '(원본 삭제됨)', hasPassword: x.has_pw, maxDownloads: x.max_downloads, downloadCount: x.download_count, expiresAt: x.expires_at, createdAt: x.created_at })) });
+}));
+router.delete('/shares/:id(\\d+)', authenticate, wrap(async (req, res) => {
+  const r = await query('DELETE FROM share_links WHERE id=$1 AND created_by=$2 RETURNING id', [req.params.id, req.user.id]);
+  if (r.rowCount === 0) return res.status(404).json({ error: '공유를 찾을 수 없습니다.' });
+  await audit(req, 'delete_share', `id=${req.params.id}`);
+  res.json({ ok: true });
+}));
+
+// ── 폴더 단위 공유 (외부인 열람·다운로드 전용) ──────────
+router.post('/folder-shares', authenticate, wrap(resolveOwner), wrap(async (req, res) => {
+  const owner = req.targetOwnerId; const folder = normalizeFolder(req.body.folder);
+  await ensureFolder(owner, folder);
+  const label = String(req.body.label || '').slice(0, 100).trim() || (folder === '/' ? '홈' : folder.split('/').filter(Boolean).pop());
+  const password = String(req.body.password || '').trim(); const passwordHash = password ? await hashPassword(password) : null;
+  const days = parseInt(req.body.expiresInDays || '0', 10); const expiresAt = days > 0 ? new Date(Date.now() + days * 86400000) : null;
+  const token = generateToken(24);
+  const r = await query('INSERT INTO folder_shares (owner_id, folder, token, label, password_hash, expires_at, created_by) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id', [owner, folder, token, label, passwordHash, expiresAt, req.user.id]);
+  await audit(req, 'create_folder_share', `owner=${owner} ${folder}`);
+  res.status(201).json({ id: r.rows[0].id, token, url: `${shareWebBase(req)}/folder.html?t=${token}`, label });
+}));
+router.get('/folder-shares', authenticate, wrap(resolveOwner), wrap(async (req, res) => {
+  const r = await query('SELECT id, folder, token, label, password_hash IS NOT NULL AS has_pw, disabled, expires_at, view_count, created_at FROM folder_shares WHERE owner_id=$1 ORDER BY created_at DESC', [req.targetOwnerId]);
+  res.json({ shares: r.rows.map((x) => ({ id: x.id, folder: x.folder, label: x.label, token: x.token, hasPassword: x.has_pw, disabled: x.disabled, expiresAt: x.expires_at, viewCount: x.view_count, createdAt: x.created_at })) });
+}));
+router.delete('/folder-shares/:id(\\d+)', authenticate, wrap(resolveOwner), wrap(async (req, res) => {
+  const r = await query('DELETE FROM folder_shares WHERE id=$1 AND owner_id=$2 RETURNING id', [req.params.id, req.targetOwnerId]);
+  if (r.rowCount === 0) return res.status(404).json({ error: '공유를 찾을 수 없습니다.' });
+  await audit(req, 'delete_folder_share', `id=${req.params.id}`);
+  res.json({ ok: true });
+}));
+
 module.exports = router;

@@ -46,6 +46,7 @@ app.use('/api/files', require('./routes/files'));
 app.use('/api/admin', require('./routes/admin'));
 app.use('/api/share', require('./routes/share'));
 app.use('/api/upload-link', require('./routes/uploadLink')); // 공개 업로드 요청 링크
+app.use('/api/folder-share', require('./routes/folderShare')); // 공개 폴더 공유(읽기 전용)
 app.use('/api/meta', require('./routes/meta')); // 영업점 목록·활성 공지 (로그인 사용자 공용)
 
 // (선택) 프런트엔드를 같은 서버에서 서빙하려면 SERVE_FRONTEND=1
@@ -63,8 +64,13 @@ app.use((err, req, res, next) => {
   if (err.code === 'LIMIT_FILE_SIZE') {
     return res.status(413).json({ error: '파일 용량이 허용 한도를 초과했습니다.' });
   }
-  console.error('[error]', err.message);
-  res.status(err.status || 500).json({ error: err.message || '서버 오류가 발생했습니다.' });
+  const status = err.status || 500;
+  if (status >= 500) {
+    // 내부 오류 상세는 서버 로그에만, 클라이언트엔 일반 메시지 (정보 노출 차단)
+    console.error('[error]', err.stack || err.message);
+    return res.status(500).json({ error: '서버 오류가 발생했습니다.' });
+  }
+  res.status(status).json({ error: err.message || '요청을 처리할 수 없습니다.' });
 });
 
 // ── 시작 ────────────────────────────────────────────

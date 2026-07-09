@@ -61,6 +61,8 @@ router.get('/:token', wrap(async (req, res) => {
 }));
 
 const uploadLimiter = rateLimit({ windowMs: 10 * 60 * 1000, max: 40, standardHeaders: true, legacyHeaders: false, message: { error: '요청이 너무 많습니다. 잠시 후 다시 시도하세요.' } });
+// 비밀번호 무차별 대입 방어: 실패(4xx/5xx)만 카운트
+const attemptLimiter = rateLimit({ windowMs: 10 * 60 * 1000, max: 15, skipSuccessfulRequests: true, standardHeaders: true, legacyHeaders: false, message: { error: '시도가 너무 많습니다. 잠시 후 다시 시도하세요.' } });
 
 // 검증(존재·상태·비밀번호)을 multer 이전에 수행
 async function gate(req, res, next) {
@@ -90,7 +92,7 @@ const upload = multer({
   },
 });
 
-router.post('/:token', uploadLimiter, wrap(gate), upload.array('file', 30), wrap(async (req, res) => {
+router.post('/:token', uploadLimiter, attemptLimiter, wrap(gate), upload.array('file', 30), wrap(async (req, res) => {
   const u = req._uploadReq; const owner = u.owner_id;
   if (!req.files || !req.files.length) return res.status(400).json({ error: '업로드할 파일이 없습니다.' });
   const incoming = req.files.reduce((s, f) => s + f.size, 0);

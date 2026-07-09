@@ -34,7 +34,7 @@ const App = (() => {
     root().innerHTML = `
       <div class="login-screen">
         <form class="login-card" id="login-form">
-          <img src="assets/logo.svg?v=26" class="login-logo" alt="북적북적">
+          <img src="assets/logo.svg?v=27" class="login-logo" alt="북적북적">
           <div class="login-title">북적북적</div>
           <div class="login-sub">Book-Jeok · 우리끼리 나누는 파일 창고</div>
           <div class="field"><label>아이디</label><input class="input" name="username" autocomplete="username" placeholder="아이디" required></div>
@@ -58,11 +58,12 @@ const App = (() => {
       <div class="layout">
         <header class="appbar">
           <button class="icon-btn appbar-menu" id="menu-toggle" title="폴더">☰</button>
-          <div class="brand" id="brand-home" title="홈으로"><img src="assets/logo.svg?v=26"><span class="brand-name">북적북적</span></div>
+          <div class="brand" id="brand-home" title="홈으로"><img src="assets/logo.svg?v=27"><span class="brand-name">북적북적</span></div>
           ${isPriv() ? `<select class="input account-switcher" id="account-switcher"><option value="">내 파일</option></select>` : ''}
           <div class="topbar-spacer"></div>
           <nav class="appbar-nav">
             <div class="nav-item" data-nav="files"><span class="ico">📁</span><span class="t">내 파일</span></div>
+            <div class="nav-item" data-nav="shares"><span class="ico">🔗</span><span class="t">공유</span></div>
             <div class="nav-item" data-nav="trash"><span class="ico">🗑️</span><span class="t">휴지통</span></div>
             ${admin ? '<a class="nav-item" href="admin.html"><span class="ico">⚙️</span><span class="t">관리자</span></a>' : ''}
             <div class="nav-item" data-nav="help"><span class="ico">❓</span><span class="t">도움말</span></div>
@@ -83,7 +84,7 @@ const App = (() => {
       <div class="drop-overlay hidden" id="drop-overlay"><div class="drop-inner"><div class="drop-ic">📥</div>여기에 놓아 업로드<div class="drop-sub">현재 폴더로 올라갑니다</div></div></div>`;
     root().querySelectorAll('.appbar-nav [data-nav]').forEach((el) => el.addEventListener('click', () => {
       const n = el.dataset.nav;
-      if (n === 'logout') doLogout(); else if (n === 'password') changePasswordModal(); else if (n === 'files') resetToOwn(); else if (n === 'help') helpModal(); else if (n === 'trash') trashModal();
+      if (n === 'logout') doLogout(); else if (n === 'password') changePasswordModal(); else if (n === 'files') resetToOwn(); else if (n === 'help') helpModal(); else if (n === 'trash') trashModal(); else if (n === 'shares') shareManageModal();
     }));
     document.getElementById('menu-toggle').addEventListener('click', toggleTree);
     document.getElementById('tree-backdrop').addEventListener('click', toggleTree);
@@ -295,13 +296,14 @@ const App = (() => {
     const box = document.getElementById('listing');
     if (state.folders.length === 0 && state.files.length === 0) { box.innerHTML = `<div class="empty"><div class="big">🗂️</div>아직 파일이 없어요. 첫 파일을 올려보세요!</div>`; return; }
     box.innerHTML = state.view === 'grid' ? gridHTML() : listHTML();
-    wireListing(); updateSelbar();
+    wireListing(); updateSelbar(); if (state.view === 'grid') loadThumbs();
   }
 
   function gridHTML() {
     const folders = sortItems(state.folders, true).map((f) => `
       <div class="file-card fade-in${state.selected.has(`folder:${f.path}`) ? ' sel' : ''}" data-folder-card="${UI.escapeHtml(f.path)}" data-row-key="folder:${UI.escapeHtml(f.path)}" data-drop-folder="${UI.escapeHtml(f.path)}" draggable="true" title="더블클릭하여 열기">
         <div class="file-actions">
+          <button class="icon-btn" data-fshare="${UI.escapeHtml(f.path)}" title="폴더 공유(읽기전용)">🔗</button>
           <button class="icon-btn" data-freq="${UI.escapeHtml(f.path)}" title="업로드 요청 링크">📥</button>
           <button class="icon-btn" data-fedit="${UI.escapeHtml(f.path)}" title="폴더 설정">⚙️</button>
           <button class="icon-btn" data-fnote="${UI.escapeHtml(f.path)}" title="비고">📝</button>
@@ -322,7 +324,7 @@ const App = (() => {
           <button class="icon-btn" data-dl="${f.id}" title="다운로드">⬇️</button>
           <button class="icon-btn" data-del="${f.id}" title="삭제">🗑️</button>
         </div>
-        <div class="file-ico">${UI.fileIcon(f.name)}</div>
+        <div class="file-ico${isImage(f.name) ? ' thumb' : ''}"${isImage(f.name) ? ` data-thumb="${f.id}"` : ''}>${isImage(f.name) ? '🖼️' : UI.fileIcon(f.name)}</div>
         <div class="file-name">${UI.escapeHtml(f.name)}${updateBadge(f, false)}</div>
         <div class="file-meta num">${UI.bytes(f.size)} · ${UI.date(f.createdAt)}</div>
         ${f.note ? `<div class="file-note" title="${UI.escapeHtml(f.note)}">📝 ${UI.escapeHtml(f.note)}</div>` : ''}
@@ -341,7 +343,7 @@ const App = (() => {
         <td class="num muted" data-label="등록">${f.createdAt ? UI.date(f.createdAt) : '—'}</td>
         <td class="num muted" data-label="수정">${f.noteUpdatedAt ? UI.date(f.noteUpdatedAt) : '—'}</td>
         <td class="note-cell" data-fnote="${UI.escapeHtml(f.path)}" title="클릭하여 비고 편집">${f.note ? UI.escapeHtml(f.note) : '<span class="muted">+ 비고</span>'}</td>
-        <td class="row-actions"><button class="icon-btn" data-freq="${UI.escapeHtml(f.path)}" title="업로드 요청 링크">📥</button><button class="icon-btn" data-fedit="${UI.escapeHtml(f.path)}" title="폴더 설정">⚙️</button></td>
+        <td class="row-actions"><button class="icon-btn" data-fshare="${UI.escapeHtml(f.path)}" title="폴더 공유(읽기전용)">🔗</button><button class="icon-btn" data-freq="${UI.escapeHtml(f.path)}" title="업로드 요청 링크">📥</button><button class="icon-btn" data-fedit="${UI.escapeHtml(f.path)}" title="폴더 설정">⚙️</button></td>
       </tr>`;
     }).join('');
     const files = sortItems(filteredFiles(), false).map((f) => {
@@ -536,6 +538,7 @@ const App = (() => {
     box.querySelectorAll('[data-fnote]').forEach((el) => el.addEventListener('click', (e) => { e.stopPropagation(); folderNoteModal(el.dataset.fnote); }));
     box.querySelectorAll('[data-fedit]').forEach((el) => el.addEventListener('click', (e) => { e.stopPropagation(); folderSettingsModal(el.dataset.fedit); }));
     box.querySelectorAll('[data-freq]').forEach((el) => el.addEventListener('click', (e) => { e.stopPropagation(); uploadRequestModal(el.dataset.freq); }));
+    box.querySelectorAll('[data-fshare]').forEach((el) => el.addEventListener('click', (e) => { e.stopPropagation(); folderShareModal(el.dataset.fshare); }));
     box.querySelectorAll('[data-fdel]').forEach((el) => el.addEventListener('click', (e) => { e.stopPropagation(); deleteFolder(el.dataset.fdel); }));
     // 체크박스
     box.querySelectorAll('.rowcheck').forEach((c) => {
@@ -702,6 +705,23 @@ const App = (() => {
     if (m) { try { return decodeURIComponent(m[1].trim().replace(/^["']|["']$/g, '')); } catch { return m[1].trim(); } }
     m = /filename="?([^";]+)"?/i.exec(cd);
     return m ? m[1].trim() : fallback;
+  }
+
+  // ── 이미지 썸네일 (그리드 뷰, 지연 로딩) ──────────
+  const thumbCache = new Map(); // fileId -> objectURL
+  const isImage = (name) => ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg', 'ico'].includes((name.split('.').pop() || '').toLowerCase());
+  function loadThumbs() {
+    const els = document.querySelectorAll('#listing [data-thumb]'); if (!els.length || !('IntersectionObserver' in window)) return;
+    const setImg = (el, url) => { el.innerHTML = `<img class="thumb-img" alt="" src="${url}">`; };
+    const io = new IntersectionObserver((ents) => {
+      ents.forEach((en) => {
+        if (!en.isIntersecting) return; const el = en.target; io.unobserve(el); const id = el.dataset.thumb;
+        if (thumbCache.has(id)) return setImg(el, thumbCache.get(id));
+        fetch(API.downloadUrl(id), { headers: { Authorization: 'Bearer ' + API.getToken() }, credentials: 'include' })
+          .then((r) => r.ok ? r.blob() : Promise.reject()).then((b) => { const u = URL.createObjectURL(b); thumbCache.set(id, u); setImg(el, u); }).catch(() => {});
+      });
+    }, { rootMargin: '150px' });
+    els.forEach((el) => io.observe(el));
   }
 
   // ── 파일 미리보기 ──────────────────────────
@@ -914,6 +934,75 @@ const App = (() => {
       } catch (e) { UI.toast(e.message, 'error'); }
     });
     refresh();
+  }
+
+  // 폴더 단위 공유(읽기 전용) 링크: 생성 + 목록 + 취소
+  function folderShareModal(folder) {
+    const fname = folder === '/' ? '홈(최상위)' : folder.split('/').filter(Boolean).pop();
+    const m = UI.modal(`<h3>🔗 폴더 공유 (읽기 전용)</h3>
+      <p class="muted" style="font-size:13px;margin-bottom:10px"><b>${UI.escapeHtml(fname)}</b> 폴더와 그 하위를 외부인이 <b>다운로드만</b> 할 수 있는 링크입니다. (업로드·이동·다른 폴더 접근 불가)</p>
+      <div class="field"><label>링크 이름(외부에 표시)</label><input class="input" id="fs-label" value="${UI.escapeHtml(fname)}"></div>
+      <div style="display:flex;gap:10px">
+        <div class="field" style="flex:1"><label>만료</label><select class="input" id="fs-exp"><option value="0">무기한</option><option value="1">1일</option><option value="7" selected>7일</option><option value="30">30일</option></select></div>
+        <div class="field" style="flex:1"><label>비밀번호 (선택)</label><input class="input" id="fs-pw" type="text" placeholder="비우면 없음"></div>
+      </div>
+      <div style="text-align:right"><button class="btn btn-primary btn-sm" id="fs-gen">＋ 링크 생성</button></div>
+      <div id="fs-result"></div>
+      <hr class="manual-hr" style="margin:16px 0 12px">
+      <div class="muted" style="font-size:12px;margin-bottom:6px">이 폴더의 기존 공유</div>
+      <div id="fs-list"><p class="muted" style="font-size:13px">불러오는 중…</p></div>
+      <div class="modal-actions"><button class="btn btn-ghost" id="fs-close">닫기</button></div>`);
+    m.el.querySelector('.modal').classList.add('modal-wide');
+    m.q('#fs-close').addEventListener('click', m.close);
+    async function refresh() {
+      try {
+        const { shares } = await API.folderShares(state.ownerId);
+        const mine = shares.filter((r) => r.folder === folder);
+        m.q('#fs-list').innerHTML = mine.length ? mine.map((r) => `<div class="ur-row"><div style="flex:1;min-width:0"><b>${UI.escapeHtml(r.label)}</b> <span class="muted" style="font-size:12px">${[r.hasPassword ? '🔒' : '', r.expiresAt ? UI.date(r.expiresAt) + '까지' : '무기한', '조회 ' + r.viewCount].join(' · ')}</span></div>
+          <button class="btn btn-sm btn-ghost" data-copy="${UI.escapeHtml(location.origin + '/folder.html?t=' + r.token)}">📋</button><button class="btn btn-sm btn-danger" data-del="${r.id}">취소</button></div>`).join('') : '<p class="muted" style="font-size:13px">아직 없습니다.</p>';
+        m.el.querySelectorAll('[data-copy]').forEach((b) => b.addEventListener('click', () => { navigator.clipboard?.writeText(b.dataset.copy); UI.toast('링크 복사됨', 'success'); }));
+        m.el.querySelectorAll('[data-del]').forEach((b) => b.addEventListener('click', async () => { try { await API.deleteFolderShare(b.dataset.del, state.ownerId); UI.toast('취소됨', 'success'); refresh(); } catch (e) { UI.toast(e.message, 'error'); } }));
+      } catch (e) { m.q('#fs-list').innerHTML = `<p class="muted" style="color:var(--danger)">${UI.escapeHtml(e.message)}</p>`; }
+    }
+    m.q('#fs-gen').addEventListener('click', async () => {
+      try {
+        const r = await API.createFolderShare({ folder, ownerId: state.ownerId, label: m.q('#fs-label').value.trim(), expiresInDays: parseInt(m.q('#fs-exp').value, 10) || 0, password: m.q('#fs-pw').value.trim() });
+        m.animate(() => { m.q('#fs-result').innerHTML = `<div class="field" style="margin-top:10px"><label>공유 링크</label><input class="input" id="fs-lnk" readonly value="${UI.escapeHtml(r.url)}"></div><button class="btn btn-secondary btn-sm" id="fs-copy">📋 복사</button>`; });
+        m.q('#fs-lnk').select();
+        m.q('#fs-copy').addEventListener('click', () => { m.q('#fs-lnk').select(); navigator.clipboard?.writeText(r.url); UI.toast('링크 복사됨', 'success'); });
+        refresh();
+      } catch (e) { UI.toast(e.message, 'error'); }
+    });
+    refresh();
+  }
+
+  // 공유 링크 관리 (내가 만든 파일/압축/폴더 공유)
+  function shareManageModal() {
+    const m = UI.modal(`<h3>🔗 공유 관리</h3><div id="sm-body"><p class="muted">불러오는 중…</p></div><div class="modal-actions"><button class="btn btn-primary" id="sm-close">닫기</button></div>`);
+    m.el.querySelector('.modal').classList.add('modal-wide');
+    m.q('#sm-close').addEventListener('click', m.close);
+    async function load() {
+      try {
+        const [a, b] = await Promise.all([API.myShares(), API.folderShares(state.ownerId)]);
+        const kindIco = { file: '📄', zip: '🗜️' };
+        const fileRows = a.shares.map((s) => {
+          const meta = [s.hasPassword ? '🔒' : '', s.maxDownloads != null ? `${s.downloadCount}/${s.maxDownloads}회` : `${s.downloadCount}회`, s.expiresAt ? UI.date(s.expiresAt) + '까지' : '무기한'].filter(Boolean).join(' · ');
+          return `<div class="ur-row"><div style="flex:1;min-width:0">${kindIco[s.kind] || '📄'} <b>${UI.escapeHtml(s.name)}</b><br><span class="muted" style="font-size:11px">${meta}</span></div>
+            <button class="btn btn-sm btn-ghost" data-copy="${UI.escapeHtml(location.origin + '/share.html?t=' + s.token)}">📋</button><button class="btn btn-sm btn-danger" data-dels="${s.id}">폐기</button></div>`;
+        }).join('') || '<p class="muted" style="font-size:13px">파일/압축 공유가 없습니다.</p>';
+        const folderRows = b.shares.map((s) => {
+          const meta = [s.hasPassword ? '🔒' : '', s.expiresAt ? UI.date(s.expiresAt) + '까지' : '무기한', '조회 ' + s.viewCount].filter(Boolean).join(' · ');
+          return `<div class="ur-row"><div style="flex:1;min-width:0">📁 <b>${UI.escapeHtml(s.label)}</b> <span class="muted" style="font-size:11px">${UI.escapeHtml(s.folder)}</span><br><span class="muted" style="font-size:11px">${meta}</span></div>
+            <button class="btn btn-sm btn-ghost" data-copy="${UI.escapeHtml(location.origin + '/folder.html?t=' + s.token)}">📋</button><button class="btn btn-sm btn-danger" data-delf="${s.id}">폐기</button></div>`;
+        }).join('') || '<p class="muted" style="font-size:13px">폴더 공유가 없습니다.</p>';
+        m.q('#sm-body').innerHTML = `<div class="muted" style="font-size:12px;margin-bottom:4px">파일 · 압축 공유</div>${fileRows}
+          <hr class="manual-hr" style="margin:14px 0 10px"><div class="muted" style="font-size:12px;margin-bottom:4px">폴더 공유(읽기 전용)</div>${folderRows}`;
+        m.el.querySelectorAll('[data-copy]').forEach((x) => x.addEventListener('click', () => { navigator.clipboard?.writeText(x.dataset.copy); UI.toast('링크 복사됨', 'success'); }));
+        m.el.querySelectorAll('[data-dels]').forEach((x) => x.addEventListener('click', async () => { try { await API.deleteShare(x.dataset.dels); UI.toast('폐기됨', 'success'); load(); } catch (e) { UI.toast(e.message, 'error'); } }));
+        m.el.querySelectorAll('[data-delf]').forEach((x) => x.addEventListener('click', async () => { try { await API.deleteFolderShare(x.dataset.delf, state.ownerId); UI.toast('폐기됨', 'success'); load(); } catch (e) { UI.toast(e.message, 'error'); } }));
+      } catch (e) { m.q('#sm-body').innerHTML = `<p class="muted" style="color:var(--danger)">${UI.escapeHtml(e.message)}</p>`; }
+    }
+    load();
   }
 
   // 공유 옵션(만료·비밀번호·횟수) 공통 필드/값/결과
