@@ -31,19 +31,25 @@ const UI = (() => {
     return `${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, '0')}.${String(d.getDate()).padStart(2, '0')}`;
   }
 
-  const ICONS = {
-    pdf: '📕', doc: '📘', docx: '📘', xls: '📗', xlsx: '📗', csv: '📊',
-    ppt: '📙', pptx: '📙', txt: '📄', md: '📄',
-    jpg: '🖼️', jpeg: '🖼️', png: '🖼️', gif: '🖼️', webp: '🖼️', svg: '🖼️',
-    mp4: '🎬', mov: '🎬', avi: '🎬', mkv: '🎬',
-    mp3: '🎵', wav: '🎵', flac: '🎵',
-    zip: '🗜️', rar: '🗜️', '7z': '🗜️', tar: '🗜️', gz: '🗜️',
-    hwp: '📝', hwpx: '📝',
-  };
-  function fileIcon(name) {
-    const ext = (name.split('.').pop() || '').toLowerCase();
-    return ICONS[ext] || '📄';
-  }
+  // 대표 확장자 카탈로그 (관리자 선택 UI · 필터 · 아이콘 공용)
+  const EXT_CATALOG = [
+    { group: '문서', icon: '📄', exts: ['pdf', 'doc', 'docx', 'hwp', 'hwpx', 'txt', 'md', 'rtf', 'odt', 'pages'] },
+    { group: '스프레드시트', icon: '📗', exts: ['xls', 'xlsx', 'xlsm', 'xlsb', 'csv', 'ods', 'numbers'] },
+    { group: '프레젠테이션', icon: '📙', exts: ['ppt', 'pptx', 'odp', 'key'] },
+    { group: '이미지', icon: '🖼️', exts: ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'tiff', 'tif', 'svg', 'heic', 'ico', 'psd', 'ai'] },
+    { group: '동영상', icon: '🎬', exts: ['mp4', 'mov', 'avi', 'mkv', 'wmv', 'flv', 'webm', 'm4v', 'mpg', 'mpeg', '3gp'] },
+    { group: '오디오', icon: '🎵', exts: ['mp3', 'wav', 'flac', 'aac', 'ogg', 'm4a', 'wma', 'opus', 'aiff', 'mid'] },
+    { group: '압축', icon: '🗜️', exts: ['zip', 'rar', '7z', 'tar', 'gz', 'bz2', 'xz', 'tgz', 'iso', 'alz'] },
+    { group: '코드/웹', icon: '📜', exts: ['html', 'css', 'js', 'ts', 'jsx', 'tsx', 'json', 'xml', 'yml', 'yaml', 'py', 'java', 'c', 'cpp', 'cs', 'go', 'rb', 'php', 'sh', 'sql', 'kt', 'swift', 'rs', 'vue'] },
+    { group: '실행/설치', icon: '⚙️', exts: ['exe', 'msi', 'apk', 'dmg', 'deb', 'app', 'bat', 'jar'] },
+    { group: '폰트', icon: '🔤', exts: ['ttf', 'otf', 'woff', 'woff2', 'eot'] },
+    { group: '기타', icon: '🗂️', exts: ['epub', 'torrent', 'db', 'sqlite', 'log', 'dat', 'bak', 'ini', 'cfg', 'env'] },
+  ];
+  const ICON_OVERRIDE = { pdf: '📕', doc: '📘', docx: '📘', hwp: '📝', hwpx: '📝', csv: '📊', md: '📄', txt: '📄' };
+  const EXT_ICONS = {};
+  for (const g of EXT_CATALOG) for (const e of g.exts) EXT_ICONS[e] = ICON_OVERRIDE[e] || g.icon;
+  const extIcon = (ext) => EXT_ICONS[String(ext || '').toLowerCase()] || '📄';
+  function fileIcon(name) { return extIcon((name.split('.').pop() || '')); }
 
   function escapeHtml(s) {
     return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -111,5 +117,5 @@ const UI = (() => {
     });
   }
 
-  return { toast, bytes, date, fileIcon, escapeHtml, isRecent, modal, confirm };
+  return { toast, bytes, date, fileIcon, extIcon, EXT_CATALOG, escapeHtml, isRecent, modal, confirm };
 })();

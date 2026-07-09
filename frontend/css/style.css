@@ -200,6 +200,30 @@ textarea.input { resize: vertical; }
 .searchbox .input { height: 34px; width: 170px; padding: 6px 12px; }
 #usage-report { padding: 6px 8px; }
 
+/* 선택바 비활성(선택 없음) */
+.selbar.empty { background: var(--bg); border-color: var(--border); animation: none; }
+.selbar.empty b { color: var(--text-muted); font-weight: 600; }
+
+/* 확장자 필터 드롭다운 */
+.extfilter { position: relative; }
+#extfilter-btn.on { border-color: var(--primary); background: var(--hover); }
+.extfilter-panel { position: absolute; top: calc(100% + 6px); left: 0; z-index: 30; width: 300px; max-width: 82vw; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-lg); padding: 12px; }
+.ext-panel-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; font-size: 13px; }
+.ext-chip-grid { display: flex; flex-wrap: wrap; gap: 6px; max-height: 260px; overflow-y: auto; }
+.ext-chip { display: inline-flex; align-items: center; gap: 4px; padding: 5px 10px; border: 1.5px solid var(--border); border-radius: 999px; font-size: 12.5px; cursor: pointer; user-select: none; }
+.ext-chip input { display: none; }
+.ext-chip.on { border-color: var(--primary); background: var(--hover); font-weight: 600; }
+.ext-chip .ei, .ext-opt .ei { font-size: 14px; }
+
+/* 관리자 확장자 선택 그리드 */
+.ext-group { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px; margin-bottom: 12px; }
+.ext-group-head { display: flex; align-items: center; justify-content: space-between; font-weight: 700; margin-bottom: 8px; font-size: 14px; }
+.ext-grid { display: flex; flex-wrap: wrap; gap: 8px; }
+.ext-opt { display: inline-flex; align-items: center; gap: 5px; padding: 7px 12px; border: 1.5px solid var(--border); border-radius: var(--radius-sm); font-size: 13px; cursor: pointer; user-select: none; transition: border-color .12s, background .12s; }
+.ext-opt input { display: none; }
+.ext-opt:hover { border-color: var(--primary); }
+.ext-opt.on { border-color: var(--primary); background: var(--hover); font-weight: 600; }
+
 /* 검색 결과 배너 */
 .search-banner { display: flex; align-items: center; gap: 8px; padding: 9px 12px; margin-bottom: 10px; background: #E7F5FB; border: 1px solid #B6E3F4; border-radius: var(--radius-sm); font-size: 14px; color: var(--secondary); }
 

@@ -21,7 +21,7 @@ const Admin = (() => {
     root().innerHTML = `
       <div class="layout">
         <header class="appbar">
-          <a class="brand" href="index.html" title="홈으로"><img src="assets/logo.svg?v=23"><span class="brand-name">북적북적</span></a>
+          <a class="brand" href="index.html" title="홈으로"><img src="assets/logo.svg?v=24"><span class="brand-name">북적북적</span></a>
           <nav class="appbar-nav">
             ${item('users', '👥', '계정')}
             ${item('branches', '🏢', '영업점')}
@@ -415,14 +415,35 @@ const Admin = (() => {
     view.innerHTML = '<div class="empty"><div class="big">⏳</div>불러오는 중…</div>';
     try {
       const { extensions } = await API.getExtensions();
+      const on = new Set(extensions.map((e) => e.toLowerCase()));
+      // 카탈로그에 없는 커스텀 확장자도 유지
+      const known = new Set(UI.EXT_CATALOG.flatMap((g) => g.exts));
+      const custom = extensions.filter((e) => !known.has(e.toLowerCase()));
+      const groups = UI.EXT_CATALOG.map((g) => `
+        <div class="ext-group">
+          <div class="ext-group-head"><span>${g.icon} ${g.group}</span>
+            <button type="button" class="btn btn-sm btn-ghost ext-grp-toggle" data-grp="${g.exts.join(',')}">그룹 전체</button></div>
+          <div class="ext-grid">${g.exts.map((e) => `
+            <label class="ext-opt${on.has(e) ? ' on' : ''}"><input type="checkbox" value="${e}" ${on.has(e) ? 'checked' : ''}><span class="ei">${UI.extIcon(e)}</span> .${e}</label>`).join('')}</div>
+        </div>`).join('');
       view.innerHTML = `
-        <div class="card" style="max-width:640px">
-          <p class="muted" style="margin-bottom:12px">업로드를 허용할 파일 확장자를 입력하세요. 쉼표 또는 공백으로 구분하며, 점(.)은 있어도 없어도 됩니다. 예: <code>.txt, .csv, xlsx</code></p>
-          <div class="field"><label>허용 확장자</label><textarea class="input" id="ext" rows="4">${extensions.join(', ')}</textarea></div>
-          <div style="display:flex;gap:10px;justify-content:flex-end"><button class="btn btn-primary" id="save-ext">저장</button></div>
-        </div>`;
+        <div class="toolbar"><span class="muted" style="font-size:13px">업로드를 허용할 확장자를 선택하세요. 현재 <b id="ext-count">${on.size}</b>종 허용 중.</span><div style="flex:1"></div><button class="btn btn-primary" id="save-ext">저장</button></div>
+        ${groups}
+        <div class="ext-group"><div class="ext-group-head"><span>➕ 직접 추가 (쉼표/공백 구분)</span></div>
+          <input class="input" id="ext-custom" placeholder="예: dwg, psb" value="${UI.escapeHtml(custom.join(', '))}"></div>`;
+      const view2 = document.getElementById('view');
+      const recount = () => { document.getElementById('ext-count').textContent = view2.querySelectorAll('.ext-opt input:checked').length; };
+      view2.querySelectorAll('.ext-opt input').forEach((c) => c.addEventListener('change', () => { c.closest('.ext-opt').classList.toggle('on', c.checked); recount(); }));
+      view2.querySelectorAll('.ext-grp-toggle').forEach((b) => b.addEventListener('click', () => {
+        const exts = b.dataset.grp.split(','); const boxes = exts.map((e) => view2.querySelector(`.ext-opt input[value="${e}"]`));
+        const allOn = boxes.every((x) => x.checked); boxes.forEach((x) => { x.checked = !allOn; x.closest('.ext-opt').classList.toggle('on', !allOn); }); recount();
+      }));
       document.getElementById('save-ext').addEventListener('click', async () => {
-        try { const r = await API.setExtensions(document.getElementById('ext').value); UI.toast(`저장됨 (${r.extensions.length}종)`, 'success'); loadExt(); } catch (err) { UI.toast(err.message, 'error'); }
+        const picked = [...view2.querySelectorAll('.ext-opt input:checked')].map((c) => c.value);
+        const extra = (document.getElementById('ext-custom').value || '').split(/[\s,]+/).map((s) => s.trim().replace(/^\./, '').toLowerCase()).filter(Boolean);
+        const all = [...new Set([...picked, ...extra])];
+        if (!all.length) return UI.toast('최소 1개 이상 선택하세요', 'error');
+        try { const r = await API.setExtensions(all); UI.toast(`저장됨 (${r.extensions.length}종)`, 'success'); loadExt(); } catch (err) { UI.toast(err.message, 'error'); }
       });
     } catch (err) { view.innerHTML = `<div class="empty">⚠️ ${UI.escapeHtml(err.message)}</div>`; }
   }

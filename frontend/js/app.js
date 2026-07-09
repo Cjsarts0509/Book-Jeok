@@ -13,6 +13,7 @@ const App = (() => {
     nav: { stack: ['/'], idx: 0 }, // 폴더 이동 히스토리(뒤로/앞으로)
     search: { on: false, q: '' }, // 이름 검색 모드
     anchor: null, drag: null, // 선택 앵커 / 드래그 중 항목
+    extFilter: new Set(), // 확장자 필터(비어있으면 전체)
   };
   const root = () => document.getElementById('app');
   const isPriv = () => state.user && (state.user.role === 'admin' || state.user.role === 'manager');
@@ -33,7 +34,7 @@ const App = (() => {
     root().innerHTML = `
       <div class="login-screen">
         <form class="login-card" id="login-form">
-          <img src="assets/logo.svg?v=23" class="login-logo" alt="북적북적">
+          <img src="assets/logo.svg?v=24" class="login-logo" alt="북적북적">
           <div class="login-title">북적북적</div>
           <div class="login-sub">Book-Jeok · 우리끼리 나누는 파일 창고</div>
           <div class="field"><label>아이디</label><input class="input" name="username" autocomplete="username" placeholder="아이디" required></div>
@@ -57,7 +58,7 @@ const App = (() => {
       <div class="layout">
         <header class="appbar">
           <button class="icon-btn appbar-menu" id="menu-toggle" title="폴더">☰</button>
-          <div class="brand" id="brand-home" title="홈으로"><img src="assets/logo.svg?v=23"><span class="brand-name">북적북적</span></div>
+          <div class="brand" id="brand-home" title="홈으로"><img src="assets/logo.svg?v=24"><span class="brand-name">북적북적</span></div>
           ${isPriv() ? `<select class="input account-switcher" id="account-switcher"><option value="">내 파일</option></select>` : ''}
           <div class="topbar-spacer"></div>
           <nav class="appbar-nav">
@@ -226,6 +227,10 @@ const App = (() => {
             <input class="input" id="search-input" type="search" placeholder="이름 검색…" autocomplete="off">
             <button class="btn btn-secondary btn-sm" type="submit" title="검색">🔎 <span class="label">조회</span></button>
           </form>
+          <div class="extfilter" id="extfilter">
+            <button type="button" class="btn btn-secondary btn-sm${state.extFilter.size ? ' on' : ''}" id="extfilter-btn" title="확장자 필터">🧩 <span class="label">확장자</span><span id="extfilter-count">${state.extFilter.size ? ` (${state.extFilter.size})` : ''}</span></button>
+            <div class="extfilter-panel hidden" id="extfilter-panel"></div>
+          </div>
         </div>
         <div class="head-right">
           <div class="breadcrumb" id="crumbs"></div>
@@ -233,7 +238,7 @@ const App = (() => {
         </div>
       </div>
       ${state.search.on ? `<div class="search-banner">🔎 <b>${UI.escapeHtml(state.search.q)}</b> 검색 결과 · ${state.folders.length + state.files.length}건<div style="flex:1"></div><button class="btn btn-sm btn-ghost" id="search-exit">✕ 검색 나가기</button></div>` : ''}
-      <div id="selbar" class="selbar hidden"></div>
+      <div id="selbar" class="selbar empty"></div>
       <div id="listing"></div>`;
     renderCrumbs(); renderListing(); wireContent();
   }
@@ -306,7 +311,7 @@ const App = (() => {
         <div class="file-meta num">${UI.bytes(f.size)} · ${f.createdAt ? UI.date(f.createdAt) : '폴더'}</div>
         ${f.note ? `<div class="file-note" title="${UI.escapeHtml(f.note)}">📝 ${UI.escapeHtml(f.note)}</div>` : ''}
       </div>`).join('');
-    const files = sortItems(state.files, false).map((f) => `
+    const files = sortItems(filteredFiles(), false).map((f) => `
       <div class="file-card fade-in${state.selected.has(`file:${f.id}`) ? ' sel' : ''}" data-file="${f.id}" data-row-key="file:${f.id}" draggable="true">
         <div class="file-actions">
           <button class="icon-btn" data-share="${f.id}" title="공유링크">🔗</button>
@@ -337,7 +342,7 @@ const App = (() => {
         <td class="row-actions"><button class="icon-btn" data-fedit="${UI.escapeHtml(f.path)}" title="폴더 설정">⚙️</button></td>
       </tr>`;
     }).join('');
-    const files = sortItems(state.files, false).map((f) => {
+    const files = sortItems(filteredFiles(), false).map((f) => {
       const key = `file:${f.id}`;
       return `<tr data-file="${f.id}" data-row-key="${UI.escapeHtml(key)}" draggable="true" class="${isSel(key) ? 'sel' : ''}">
         <td><input type="checkbox" class="rowcheck" data-sel-file="${f.id}" data-name="${UI.escapeHtml(f.name)}" ${isSel(key) ? 'checked' : ''}></td>
@@ -350,8 +355,9 @@ const App = (() => {
       </tr>`;
     }).join('');
     const th = (key, label, style = '') => `<th class="sortable${state.sort.key === key ? ' sorted' : ''}" data-sort="${key}"${style ? ` style="${style}"` : ''}>${label}${sortArrow(key)}</th>`;
-    const total = state.folders.length + state.files.length;
-    const allSel = total > 0 && state.folders.every((f) => isSel(`folder:${f.path}`)) && state.files.every((f) => isSel(`file:${f.id}`));
+    const vf = filteredFiles();
+    const total = state.folders.length + vf.length;
+    const allSel = total > 0 && state.folders.every((f) => isSel(`folder:${f.path}`)) && vf.every((f) => isSel(`file:${f.id}`));
     return `<div class="table-wrap fade-in"><table class="filetable">
       <thead><tr><th style="width:34px"><input type="checkbox" id="check-all" title="전체선택/해제" ${allSel ? 'checked' : ''}></th>${th('name', '이름')}${th('size', '크기', 'width:84px')}${th('createdAt', '등록일', 'width:96px')}${th('updatedAt', '수정일', 'width:96px')}${th('note', '비고')}<th style="width:70px"></th></tr></thead>
       <tbody>${folders}${files}</tbody></table></div>`;
@@ -372,6 +378,30 @@ const App = (() => {
     si.value = state.search.q;
     sf.addEventListener('submit', (e) => { e.preventDefault(); doSearch(si.value); });
     document.getElementById('search-exit')?.addEventListener('click', clearSearch);
+    // 확장자 필터
+    const efb = document.getElementById('extfilter-btn'), panel = document.getElementById('extfilter-panel');
+    efb.addEventListener('click', (e) => { e.stopPropagation(); if (panel.classList.contains('hidden')) buildExtFilterPanel(); panel.classList.toggle('hidden'); });
+    document.addEventListener('click', (e) => { if (!e.target.closest('#extfilter')) panel.classList.add('hidden'); });
+  }
+
+  // ── 확장자 필터 ──────────────────────────
+  const extOf = (name) => (name.split('.').pop() || '').toLowerCase();
+  function filteredFiles() { return state.extFilter.size ? state.files.filter((f) => state.extFilter.has(extOf(f.name))) : state.files; }
+  function updateExtCount() {
+    const c = document.getElementById('extfilter-count'), b = document.getElementById('extfilter-btn');
+    if (c) c.textContent = state.extFilter.size ? ` (${state.extFilter.size})` : '';
+    if (b) b.classList.toggle('on', state.extFilter.size > 0);
+  }
+  function buildExtFilterPanel() {
+    const panel = document.getElementById('extfilter-panel'); if (!panel) return;
+    const chips = state.allowedExt.map((e) => `<label class="ext-chip${state.extFilter.has(e) ? ' on' : ''}"><input type="checkbox" value="${e}" ${state.extFilter.has(e) ? 'checked' : ''}><span class="ei">${UI.extIcon(e)}</span> .${UI.escapeHtml(e)}</label>`).join('');
+    panel.innerHTML = `<div class="ext-panel-head"><b>확장자 필터</b><button class="btn btn-sm btn-ghost" id="ext-clear">전체 해제</button></div><div class="ext-chip-grid">${chips || '<span class="muted">허용 확장자가 없습니다.</span>'}</div>`;
+    panel.querySelectorAll('input[type=checkbox]').forEach((c) => c.addEventListener('change', () => {
+      if (c.checked) state.extFilter.add(c.value); else state.extFilter.delete(c.value);
+      c.closest('.ext-chip').classList.toggle('on', c.checked);
+      state.selected.clear(); state.anchor = null; updateExtCount(); renderListing();
+    }));
+    panel.querySelector('#ext-clear')?.addEventListener('click', () => { state.extFilter.clear(); buildExtFilterPanel(); updateExtCount(); state.selected.clear(); renderListing(); });
   }
 
   // ── 이름 검색 ──────────────────────────
@@ -432,7 +462,7 @@ const App = (() => {
   // ── 선택 모델(클릭/Ctrl/Shift) · 드래그 이동 ──────────
   function orderedItems() {
     const fol = sortItems(state.folders, true).map((f) => ({ key: `folder:${f.path}`, item: { type: 'folder', path: f.path, name: f.name } }));
-    const fil = sortItems(state.files, false).map((f) => ({ key: `file:${f.id}`, item: { type: 'file', id: String(f.id), name: f.name } }));
+    const fil = sortItems(filteredFiles(), false).map((f) => ({ key: `file:${f.id}`, item: { type: 'file', id: String(f.id), name: f.name } }));
     return [...fol, ...fil];
   }
   function applySelectionClasses() {
@@ -519,30 +549,19 @@ const App = (() => {
     if (all) all.addEventListener('change', () => { if (all.checked) selectAllItems(); else { state.selected.clear(); applySelectionClasses(); } });
   }
 
+  // 선택바: 항상 표시, 선택이 없으면 비활성
   function updateSelbar() {
     const bar = document.getElementById('selbar'); if (!bar) return;
-    if (state.selected.size === 0) {
-      // 부드럽게 닫힘
-      if (!bar.classList.contains('hidden') && !bar.classList.contains('closing')) {
-        bar.classList.add('closing');
-        setTimeout(() => { bar.classList.add('hidden'); bar.classList.remove('closing'); }, 200);
-      }
-      return;
-    }
+    const n = state.selected.size, dis = n === 0;
     bar.classList.remove('hidden', 'closing');
-    bar.innerHTML = `<b>${state.selected.size}개 선택</b><div style="flex:1"></div>
-      <button class="btn btn-sm btn-ghost" id="sel-rename" ${state.selected.size !== 1 ? 'disabled' : ''}>✏️ 이름변경</button>
-      <button class="btn btn-sm btn-primary" id="sel-dl">⬇️ 다운로드(ZIP)</button>
-      <button class="btn btn-sm btn-secondary" id="sel-move">📂 폴더이동</button>
-      <button class="btn btn-sm btn-danger" id="sel-del">🗑️ 삭제</button>
-      <button class="btn btn-sm btn-ghost" id="sel-clear">선택해제</button>`;
-    bar.querySelector('#sel-clear').addEventListener('click', () => {
-      state.selected.clear();
-      document.querySelectorAll('#listing tr.sel').forEach((tr) => tr.classList.remove('sel'));
-      document.querySelectorAll('#listing .rowcheck').forEach((c) => { c.checked = false; });
-      const all = document.getElementById('check-all'); if (all) all.checked = false;
-      updateSelbar();
-    });
+    bar.classList.toggle('empty', dis);
+    bar.innerHTML = `<b>${n > 0 ? `${n}개 선택` : '항목을 선택하세요'}</b><div style="flex:1"></div>
+      <button class="btn btn-sm btn-ghost" id="sel-rename" ${n !== 1 ? 'disabled' : ''}>✏️ 이름변경</button>
+      <button class="btn btn-sm btn-primary" id="sel-dl" ${dis ? 'disabled' : ''}>⬇️ 다운로드(ZIP)</button>
+      <button class="btn btn-sm btn-secondary" id="sel-move" ${dis ? 'disabled' : ''}>📂 폴더이동</button>
+      <button class="btn btn-sm btn-danger" id="sel-del" ${dis ? 'disabled' : ''}>🗑️ 삭제</button>
+      <button class="btn btn-sm btn-ghost" id="sel-clear" ${dis ? 'disabled' : ''}>선택해제</button>`;
+    bar.querySelector('#sel-clear').addEventListener('click', () => { state.selected.clear(); applySelectionClasses(); });
     bar.querySelector('#sel-del').addEventListener('click', bulkDelete);
     bar.querySelector('#sel-dl').addEventListener('click', bulkDownload);
     bar.querySelector('#sel-move').addEventListener('click', bulkMoveModal);
