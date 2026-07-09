@@ -16,6 +16,7 @@ const { wrap } = require('../util');
 const { verifyPassword } = require('../crypto');
 const { isAllowed, allowedLabel, getAllowedExtensions } = require('../settings');
 const antivirus = require('../antivirus');
+const filetype = require('../filetype');
 
 const router = express.Router();
 const userDir = (ownerId) => path.join(config.storageRoot, String(ownerId));
@@ -110,14 +111,16 @@ router.post('/:token', uploadLimiter, attemptLimiter, wrap(gate), upload.array('
   let saved = 0; let savedBytes = 0; const rejected = [];
   for (const f of req.files) {
     const originalName = Buffer.from(f.originalname, 'latin1').toString('utf8').replace(/[/\\]/g, '_').replace(/[\u0000-\u001f]/g, '').trim() || 'file';
+    const ft = await filetype.verify(f.path, originalName);
+    if (!ft.ok) { await fsp.unlink(f.path).catch(() => {}); rejected.push({ name: originalName, reason: ft.reason }); continue; }
     const scan = await antivirus.scanFile(f.path);
-    if (!scan.ok) { await fsp.unlink(f.path).catch(() => {}); rejected.push({ name: originalName, virus: scan.virus }); continue; }
+    if (!scan.ok) { await fsp.unlink(f.path).catch(() => {}); rejected.push({ name: originalName, reason: `바이러스 감지(${scan.virus})`, virus: scan.virus }); continue; }
     const name = await uniqueFileName(owner, u.folder, originalName);
     await query('INSERT INTO files (owner_id, folder, original_name, stored_name, size_bytes, mime_type, note) VALUES ($1,$2,$3,$4,$5,$6,$7)', [owner, u.folder, name, path.basename(f.path), f.size, f.mimetype, '업로드 요청으로 수신']);
     saved++; savedBytes += f.size;
   }
   if (saved) await query('UPDATE upload_requests SET uploaded_count = uploaded_count + $2, uploaded_bytes = uploaded_bytes + $3 WHERE id=$1', [u.id, saved, savedBytes]);
-  if (saved === 0 && rejected.length) return res.status(422).json({ error: `바이러스가 감지되어 차단되었습니다: ${rejected.map((r) => r.virus).join(', ')}` });
+  if (saved === 0 && rejected.length) return res.status(422).json({ error: `업로드가 차단되었습니다: ${rejected.map((r) => r.reason).join(', ')}` });
   res.status(201).json({ uploaded: saved, rejected });
 }));
 

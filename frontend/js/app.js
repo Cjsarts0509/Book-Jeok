@@ -701,7 +701,7 @@ const App = (() => {
     UI.toast(`${fileList.length}개 업로드 중…`);
     try {
       const r = await API.upload(fd, state.ownerId);
-      if (r && r.rejected && r.rejected.length) UI.toast(`⚠️ 바이러스 감지로 ${r.rejected.length}개 차단됨`, 'error');
+      if (r && r.rejected && r.rejected.length) UI.toast(`⚠️ ${r.rejected.length}개 차단됨 (${r.rejected.map((x) => x.reason || '보안 정책').join(' · ')})`, 'error');
       if (!r || !r.rejected || r.rejected.length < fileList.length) UI.toast('업로드 완료 ✅', 'success');
       loadAll();
     } catch (err) { UI.toast(err.message, 'error'); }
