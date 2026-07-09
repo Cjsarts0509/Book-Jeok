@@ -35,7 +35,7 @@ const App = (() => {
     root().innerHTML = `
       <div class="login-screen">
         <form class="login-card" id="login-form">
-          <img src="assets/logo.svg?v=29" class="login-logo" alt="북적북적">
+          <img src="assets/logo.svg?v=30" class="login-logo" alt="북적북적">
           <div class="login-title">북적북적</div>
           <div class="login-sub">Book-Jeok · 우리끼리 나누는 파일 창고</div>
           <div class="field"><label>아이디</label><input class="input" name="username" autocomplete="username" placeholder="아이디" required></div>
@@ -59,7 +59,7 @@ const App = (() => {
       <div class="layout">
         <header class="appbar">
           <button class="icon-btn appbar-menu" id="menu-toggle" title="폴더">☰</button>
-          <div class="brand" id="brand-home" title="홈으로"><img src="assets/logo.svg?v=29"><span class="brand-name">북적북적</span></div>
+          <div class="brand" id="brand-home" title="홈으로"><img src="assets/logo.svg?v=30"><span class="brand-name">북적북적</span></div>
           ${isPriv() ? `<select class="input account-switcher" id="account-switcher"><option value="">내 파일</option></select>` : ''}
           <div class="topbar-spacer"></div>
           <nav class="appbar-nav">
@@ -992,7 +992,7 @@ const App = (() => {
     m.q('#sm-close').addEventListener('click', m.close);
     async function load() {
       try {
-        const [a, b] = await Promise.all([API.myShares(), API.folderShares(state.ownerId)]);
+        const [a, b, c] = await Promise.all([API.myShares(), API.folderShares(state.ownerId), API.uploadRequests(state.ownerId)]);
         const kindIco = { file: '📄', zip: '🗜️' };
         const fileRows = a.shares.map((s) => {
           const meta = [s.hasPassword ? '🔒' : '', s.maxDownloads != null ? `${s.downloadCount}/${s.maxDownloads}회` : `${s.downloadCount}회`, s.expiresAt ? UI.date(s.expiresAt) + '까지' : '무기한'].filter(Boolean).join(' · ');
@@ -1004,11 +1004,19 @@ const App = (() => {
           return `<div class="ur-row"><div style="flex:1;min-width:0">📁 <b>${UI.escapeHtml(s.label)}</b> <span class="muted" style="font-size:11px">${UI.escapeHtml(s.folder)}</span><br><span class="muted" style="font-size:11px">${meta}</span></div>
             <button class="btn btn-sm btn-ghost" data-copy="${UI.escapeHtml(location.origin + '/folder.html?t=' + s.token)}">📋</button><button class="btn btn-sm btn-danger" data-delf="${s.id}">폐기</button></div>`;
         }).join('') || '<p class="muted" style="font-size:13px">폴더 공유가 없습니다.</p>';
+        const reqRows = c.requests.map((r) => {
+          const cap = [r.maxFiles ? `${r.uploadedCount}/${r.maxFiles}개` : `${r.uploadedCount}개`, r.maxBytes ? `${UI.bytes(r.uploadedBytes)}/${UI.bytes(r.maxBytes)}` : UI.bytes(r.uploadedBytes)].join(' · ');
+          const meta = [r.hasPassword ? '🔒' : '', r.disabled ? '중지' : '', r.expiresAt ? UI.date(r.expiresAt) + '까지' : '무기한', '받음 ' + cap].filter(Boolean).join(' · ');
+          return `<div class="ur-row"><div style="flex:1;min-width:0">📥 <b>${UI.escapeHtml(r.label)}</b> <span class="muted" style="font-size:11px">${UI.escapeHtml(r.folder)}</span><br><span class="muted" style="font-size:11px">${meta}</span></div>
+            <button class="btn btn-sm btn-ghost" data-copy="${UI.escapeHtml(location.origin + '/upload.html?t=' + r.token)}">📋</button><button class="btn btn-sm btn-danger" data-delu="${r.id}">폐기</button></div>`;
+        }).join('') || '<p class="muted" style="font-size:13px">업로드 요청 링크가 없습니다.</p>';
         m.q('#sm-body').innerHTML = `<div class="muted" style="font-size:12px;margin-bottom:4px">파일 · 압축 공유</div>${fileRows}
-          <hr class="manual-hr" style="margin:14px 0 10px"><div class="muted" style="font-size:12px;margin-bottom:4px">폴더 공유(읽기 전용)</div>${folderRows}`;
+          <hr class="manual-hr" style="margin:14px 0 10px"><div class="muted" style="font-size:12px;margin-bottom:4px">폴더 공유(읽기 전용)</div>${folderRows}
+          <hr class="manual-hr" style="margin:14px 0 10px"><div class="muted" style="font-size:12px;margin-bottom:4px">업로드 요청(외부 업로드)</div>${reqRows}`;
         m.el.querySelectorAll('[data-copy]').forEach((x) => x.addEventListener('click', () => { navigator.clipboard?.writeText(x.dataset.copy); UI.toast('링크 복사됨', 'success'); }));
         m.el.querySelectorAll('[data-dels]').forEach((x) => x.addEventListener('click', async () => { try { await API.deleteShare(x.dataset.dels); UI.toast('폐기됨', 'success'); load(); } catch (e) { UI.toast(e.message, 'error'); } }));
         m.el.querySelectorAll('[data-delf]').forEach((x) => x.addEventListener('click', async () => { try { await API.deleteFolderShare(x.dataset.delf, state.ownerId); UI.toast('폐기됨', 'success'); load(); } catch (e) { UI.toast(e.message, 'error'); } }));
+        m.el.querySelectorAll('[data-delu]').forEach((x) => x.addEventListener('click', async () => { try { await API.deleteUploadRequest(x.dataset.delu, state.ownerId); UI.toast('폐기됨', 'success'); load(); } catch (e) { UI.toast(e.message, 'error'); } }));
       } catch (e) { m.q('#sm-body').innerHTML = `<p class="muted" style="color:var(--danger)">${UI.escapeHtml(e.message)}</p>`; }
     }
     load();

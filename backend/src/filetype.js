@@ -59,6 +59,21 @@ const CHECK = {
   '7z': (b) => at(b, [0x37, 0x7A, 0xBC, 0xAF]),
 };
 
+// 내용에서 '명백한 이진 형식'을 식별(위장 탐지용). 텍스트/미확인은 null.
+// 짧은(2바이트) 시그니처는 텍스트 오탐 위험이 있어 제외하고, 길고 고유한 것만 사용.
+function detectBinary(head) {
+  if (at(head, [0x50, 0x4B, 0x03, 0x04]) || at(head, [0x50, 0x4B, 0x05, 0x06]) || at(head, [0x50, 0x4B, 0x07, 0x08])) return '압축/오피스 문서(ZIP)';
+  if (at(head, OLE2)) return '구형 오피스/한글 문서(OLE2)';
+  if (at(head, [0x25, 0x50, 0x44, 0x46])) return 'PDF';
+  if (at(head, [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])) return 'PNG 이미지';
+  if (at(head, [0xFF, 0xD8, 0xFF])) return 'JPEG 이미지';
+  if (at(head, [0x47, 0x49, 0x46, 0x38])) return 'GIF 이미지';
+  if (at(head, [0x52, 0x61, 0x72, 0x21, 0x1A, 0x07])) return 'RAR 압축';
+  if (at(head, [0x37, 0x7A, 0xBC, 0xAF, 0x27, 0x1C])) return '7z 압축';
+  if (at(head, [0x52, 0x49, 0x46, 0x46]) && at(head, [0x57, 0x45, 0x42, 0x50], 8)) return 'WEBP 이미지';
+  return null;
+}
+
 // 반환: { ok:true } 또는 { ok:false, reason:'..' }
 async function verify(filePath, declaredName) {
   const head = await readHead(filePath);
@@ -69,11 +84,16 @@ async function verify(filePath, declaredName) {
     if (at(head, e.sig)) return { ok: false, reason: `실행 파일로 확인됨(${e.label})` };
   }
 
-  // 2) 확장자-내용 일치 검사 (시그니처가 확실한 형식만)
   const ext = String(declaredName || '').split('.').pop().toLowerCase();
   const check = CHECK[ext];
-  if (!check) return { ok: true }; // 검사 대상 아님 → 통과
-  if (!check(head)) return { ok: false, reason: `내용이 .${ext} 형식과 일치하지 않음` };
+  if (check) {
+    // 2a) 시그니처가 확실한 형식: 선언 확장자와 실제 내용이 맞아야 함
+    if (!check(head)) return { ok: false, reason: `내용이 .${ext} 형식과 일치하지 않음` };
+  } else {
+    // 2b) 시그니처 없는 형식(txt/csv 등): 내용이 명백한 이진 형식이면 위장으로 간주
+    const bin = detectBinary(head);
+    if (bin) return { ok: false, reason: `실제 내용은 ${bin} 형식입니다(.${ext}로 위장)` };
+  }
   return { ok: true };
 }
 
