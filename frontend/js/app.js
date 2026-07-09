@@ -9,6 +9,7 @@ const App = (() => {
     selected: new Map(), // key -> {type:'file'|'folder', id, path, name}
     treeStyles: {},      // path -> {icon, color}
     expanded: new Set(['/']), // 펼쳐진 폴더 경로 (기본: 루트만 = 최상위만 보임)
+    sort: { key: 'name', dir: 'asc' }, // 리스트 정렬 기준
   };
   const root = () => document.getElementById('app');
   const isPriv = () => state.user && (state.user.role === 'admin' || state.user.role === 'manager');
@@ -28,7 +29,7 @@ const App = (() => {
     root().innerHTML = `
       <div class="login-screen">
         <form class="login-card" id="login-form">
-          <img src="assets/logo.svg?v=11" class="login-logo" alt="북적북적">
+          <img src="assets/logo.svg?v=12" class="login-logo" alt="북적북적">
           <div class="login-title">북적북적</div>
           <div class="login-sub">Book-Jeok · 우리끼리 나누는 파일 창고</div>
           <div class="field"><label>아이디</label><input class="input" name="username" autocomplete="username" placeholder="아이디" required></div>
@@ -52,7 +53,7 @@ const App = (() => {
       <div class="layout">
         <header class="appbar">
           <button class="icon-btn appbar-menu" id="menu-toggle" title="폴더">☰</button>
-          <div class="brand" id="brand-home" title="홈으로"><img src="assets/logo.svg?v=11"><span class="brand-name">북적북적</span></div>
+          <div class="brand" id="brand-home" title="홈으로"><img src="assets/logo.svg?v=12"><span class="brand-name">북적북적</span></div>
           ${isPriv() ? `<select class="input account-switcher" id="account-switcher"><option value="">내 파일</option></select>` : ''}
           <div class="topbar-spacer"></div>
           <nav class="appbar-nav">
@@ -173,9 +174,9 @@ const App = (() => {
       const active = node.path === state.folder ? ' active' : '';
       const st = folderStyle(node.path);
       const icon = depth === 0 ? '🏠' : (st.icon || '📁');
-      const colorStyle = st.color ? `border-left:3px solid ${st.color};` : '';
+      const icoStyle = (depth > 0 && st.color) ? folderIcoStyle(st.color) : '';
       const caret = hasKids ? `<span class="tcaret ${isOpen ? 'open' : ''}" data-toggle="${UI.escapeHtml(node.path)}">▸</span>` : '<span class="tcaret-empty"></span>';
-      let html = `<div class="tree-item${active}" data-folder="${UI.escapeHtml(node.path)}" style="padding-left:${6 + depth * 14}px;${colorStyle}">${caret}<span class="tico">${icon}</span><span class="tname">${UI.escapeHtml(node.name)}</span></div>`;
+      let html = `<div class="tree-item${active}" data-folder="${UI.escapeHtml(node.path)}" style="padding-left:${6 + depth * 14}px;">${caret}<span class="tico${icoStyle ? ' tint' : ''}" style="${icoStyle}">${icon}</span><span class="tname">${UI.escapeHtml(node.name)}</span></div>`;
       if (hasKids && isOpen) for (const k of kids) html += render(k, depth + 1);
       return html;
     };
@@ -231,6 +232,47 @@ const App = (() => {
     el.querySelectorAll('[data-folder]').forEach((s) => s.addEventListener('click', () => { state.folder = s.dataset.folder; loadFiles(); renderTree(); }));
   }
 
+  // ── 정렬 ──────────────────────────────
+  const SORT_KEYS = { name: '이름', size: '크기', createdAt: '등록일', updatedAt: '수정일', note: '비고' };
+  function sortVal(f, key, isFolder) {
+    switch (key) {
+      case 'size': return Number(f.size) || 0;
+      case 'createdAt': return f.createdAt ? new Date(f.createdAt).getTime() : 0;
+      case 'updatedAt': return new Date((isFolder ? f.noteUpdatedAt : f.updatedAt) || f.createdAt || 0).getTime();
+      case 'note': return (f.note || '').toLowerCase();
+      default: return (f.name || '').toLowerCase();
+    }
+  }
+  function sortItems(arr, isFolder) {
+    const { key, dir } = state.sort;
+    const s = [...arr].sort((a, b) => {
+      const va = sortVal(a, key, isFolder), vb = sortVal(b, key, isFolder);
+      const c = (typeof va === 'string') ? va.localeCompare(vb, 'ko') : (va - vb);
+      return dir === 'desc' ? -c : c;
+    });
+    return s;
+  }
+  function toggleSort(key) {
+    if (state.sort.key === key) state.sort.dir = state.sort.dir === 'asc' ? 'desc' : 'asc';
+    else state.sort = { key, dir: 'asc' };
+    renderListing();
+  }
+  const sortArrow = (key) => state.sort.key === key ? (state.sort.dir === 'asc' ? ' ▲' : ' ▼') : '';
+
+  // ── 업데이트 태그 (최근 추가/수정) ──────
+  function updateBadge(f, isFolder) {
+    const created = f.createdAt ? new Date(f.createdAt).getTime() : 0;
+    const upd = new Date((isFolder ? f.noteUpdatedAt : f.updatedAt) || 0).getTime();
+    if (upd && upd - created > 60000 && UI.isRecent(upd)) return '<span class="badge-upd" title="최근 수정됨">수정</span>';
+    if (created && UI.isRecent(created)) return '<span class="badge-new" title="최근 추가됨">NEW</span>';
+    return '';
+  }
+
+  // 폴더 색상 → 아이콘에 입히기 (테두리 대신)
+  function folderIcoStyle(color) {
+    return color ? `background:${color}22;box-shadow:inset 0 0 0 1.6px ${color};` : '';
+  }
+
   function renderListing() {
     const box = document.getElementById('listing');
     if (state.folders.length === 0 && state.files.length === 0) { box.innerHTML = `<div class="empty"><div class="big">🗂️</div>아직 파일이 없어요. 첫 파일을 올려보세요!</div>`; return; }
@@ -239,19 +281,19 @@ const App = (() => {
   }
 
   function gridHTML() {
-    const folders = state.folders.map((f) => `
-      <div class="file-card fade-in" data-folder-card="${UI.escapeHtml(f.path)}" title="더블클릭하여 열기" style="${f.color ? `border-color:${f.color};box-shadow:inset 0 3px 0 ${f.color}` : ''}">
+    const folders = sortItems(state.folders, true).map((f) => `
+      <div class="file-card fade-in" data-folder-card="${UI.escapeHtml(f.path)}" title="더블클릭하여 열기">
         <div class="file-actions">
           <button class="icon-btn" data-fedit="${UI.escapeHtml(f.path)}" title="폴더 설정">⚙️</button>
           <button class="icon-btn" data-fnote="${UI.escapeHtml(f.path)}" title="비고">📝</button>
           <button class="icon-btn" data-fdel="${UI.escapeHtml(f.path)}" title="삭제">🗑️</button>
         </div>
-        <div class="file-ico">${f.icon || '📁'}</div>
-        <div class="file-name">${UI.escapeHtml(f.name)}</div>
+        <div class="file-ico${f.color ? ' tint' : ''}" style="${folderIcoStyle(f.color)}">${f.icon || '📁'}</div>
+        <div class="file-name">${UI.escapeHtml(f.name)}${updateBadge(f, true)}</div>
         <div class="file-meta num">${UI.bytes(f.size)} · ${f.createdAt ? UI.date(f.createdAt) : '폴더'}</div>
         ${f.note ? `<div class="file-note" title="${UI.escapeHtml(f.note)}">📝 ${UI.escapeHtml(f.note)}</div>` : ''}
       </div>`).join('');
-    const files = state.files.map((f) => `
+    const files = sortItems(state.files, false).map((f) => `
       <div class="file-card fade-in" data-file="${f.id}">
         <div class="file-actions">
           <button class="icon-btn" data-share="${f.id}" title="공유링크">🔗</button>
@@ -261,7 +303,7 @@ const App = (() => {
           <button class="icon-btn" data-del="${f.id}" title="삭제">🗑️</button>
         </div>
         <div class="file-ico">${UI.fileIcon(f.name)}</div>
-        <div class="file-name">${UI.escapeHtml(f.name)}</div>
+        <div class="file-name">${UI.escapeHtml(f.name)}${updateBadge(f, false)}</div>
         <div class="file-meta num">${UI.bytes(f.size)} · ${UI.date(f.createdAt)}</div>
         ${f.note ? `<div class="file-note" title="${UI.escapeHtml(f.note)}">📝 ${UI.escapeHtml(f.note)}</div>` : ''}
       </div>`).join('');
@@ -270,11 +312,11 @@ const App = (() => {
 
   function listHTML() {
     const isSel = (key) => state.selected.has(key);
-    const folders = state.folders.map((f) => {
+    const folders = sortItems(state.folders, true).map((f) => {
       const key = `folder:${f.path}`;
-      return `<tr data-folder-row="${UI.escapeHtml(f.path)}" class="${isSel(key) ? 'sel' : ''}" style="${f.color ? `box-shadow:inset 4px 0 0 ${f.color}` : ''}">
+      return `<tr data-folder-row="${UI.escapeHtml(f.path)}" class="${isSel(key) ? 'sel' : ''}">
         <td><input type="checkbox" class="rowcheck" data-sel-folder="${UI.escapeHtml(f.path)}" data-name="${UI.escapeHtml(f.name)}" ${isSel(key) ? 'checked' : ''}></td>
-        <td class="open-cell" data-open="${UI.escapeHtml(f.path)}" title="더블클릭하여 열기"><span class="ic">${f.icon || '📁'}</span> ${UI.escapeHtml(f.name)}</td>
+        <td class="open-cell" data-open="${UI.escapeHtml(f.path)}" title="더블클릭하여 열기"><span class="ic${f.color ? ' tint' : ''}" style="${folderIcoStyle(f.color)}">${f.icon || '📁'}</span> ${UI.escapeHtml(f.name)}${updateBadge(f, true)}</td>
         <td class="num muted">${UI.bytes(f.size)}</td>
         <td class="num muted">${f.createdAt ? UI.date(f.createdAt) : '—'}</td>
         <td class="num muted">${f.noteUpdatedAt ? UI.date(f.noteUpdatedAt) : '—'}</td>
@@ -282,11 +324,11 @@ const App = (() => {
         <td class="row-actions"><button class="icon-btn" data-fedit="${UI.escapeHtml(f.path)}" title="폴더 설정">⚙️</button></td>
       </tr>`;
     }).join('');
-    const files = state.files.map((f) => {
+    const files = sortItems(state.files, false).map((f) => {
       const key = `file:${f.id}`;
       return `<tr data-file="${f.id}" class="${isSel(key) ? 'sel' : ''}">
         <td><input type="checkbox" class="rowcheck" data-sel-file="${f.id}" data-name="${UI.escapeHtml(f.name)}" ${isSel(key) ? 'checked' : ''}></td>
-        <td><span class="ic">${UI.fileIcon(f.name)}</span> ${UI.escapeHtml(f.name)}</td>
+        <td><span class="ic">${UI.fileIcon(f.name)}</span> ${UI.escapeHtml(f.name)}${updateBadge(f, false)}</td>
         <td class="num muted">${UI.bytes(f.size)}</td>
         <td class="num muted">${UI.date(f.createdAt)}</td>
         <td class="num muted">${UI.date(f.updatedAt || f.createdAt)}</td>
@@ -294,8 +336,9 @@ const App = (() => {
         <td class="row-actions"><button class="icon-btn" data-share="${f.id}" title="공유">🔗</button><button class="icon-btn" data-dl="${f.id}" title="다운로드">⬇️</button></td>
       </tr>`;
     }).join('');
+    const th = (key, label, style = '') => `<th class="sortable${state.sort.key === key ? ' sorted' : ''}" data-sort="${key}"${style ? ` style="${style}"` : ''}>${label}${sortArrow(key)}</th>`;
     return `<div class="table-wrap fade-in"><table class="filetable">
-      <thead><tr><th style="width:34px"><input type="checkbox" id="check-all"></th><th>이름</th><th style="width:84px">크기</th><th style="width:96px">등록일</th><th style="width:96px">수정일</th><th>비고</th><th style="width:70px"></th></tr></thead>
+      <thead><tr><th style="width:34px"><input type="checkbox" id="check-all"></th>${th('name', '이름')}${th('size', '크기', 'width:84px')}${th('createdAt', '등록일', 'width:96px')}${th('updatedAt', '수정일', 'width:96px')}${th('note', '비고')}<th style="width:70px"></th></tr></thead>
       <tbody>${folders}${files}</tbody></table></div>`;
   }
 
@@ -335,6 +378,8 @@ const App = (() => {
       if (c.checked) state.selected.set(key, item); else state.selected.delete(key);
       c.closest('tr').classList.toggle('sel', c.checked); updateSelbar();
     }));
+    // 칼럼 정렬 (헤더 클릭)
+    box.querySelectorAll('th.sortable').forEach((th) => th.addEventListener('click', () => toggleSort(th.dataset.sort)));
     const all = document.getElementById('check-all');
     if (all) all.addEventListener('change', () => {
       state.selected.clear();

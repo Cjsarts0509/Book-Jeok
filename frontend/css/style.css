@@ -105,6 +105,7 @@ textarea.input { resize: vertical; }
 .tree-item:hover { background: var(--hover); }
 .tree-item.active { background: var(--primary); color: var(--text); font-weight: 700; }
 .tree-item .tico { flex: 0 0 auto; }
+.tree-item .tico.tint { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 6px; font-size: 13px; }
 .tree-item .tname { overflow: hidden; text-overflow: ellipsis; }
 .tcaret { flex: 0 0 auto; width: 16px; text-align: center; font-size: 11px; color: var(--text-muted); transition: transform .15s; cursor: pointer; border-radius: 4px; }
 .tcaret:hover { background: rgba(0,0,0,.06); }
@@ -195,6 +196,18 @@ th { background: var(--bg); font-weight: 700; color: var(--text-muted); font-siz
 .filetable td { vertical-align: middle; }
 .filetable td.num { white-space: nowrap; }   /* 크기·날짜 줄바꿈 방지 → 행 높이 통일 */
 .filetable .ic { margin-right: 4px; }
+/* 정렬 가능한 헤더 */
+.filetable th.sortable { cursor: pointer; user-select: none; white-space: nowrap; transition: background .12s, color .12s; }
+.filetable th.sortable:hover { color: var(--text); background: var(--hover); }
+.filetable th.sorted { color: var(--secondary); }
+/* 폴더 색상을 아이콘에 입히기 */
+.ic.tint, .file-ico.tint { border-radius: 8px; }
+.filetable .ic.tint { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: 7px; margin-right: 6px; vertical-align: middle; font-size: 15px; }
+.file-ico.tint { width: 66px; height: 66px; display: flex; align-items: center; justify-content: center; margin: 0 auto 8px; border-radius: 16px; }
+/* 업데이트 태그 */
+.badge-new, .badge-upd { display: inline-block; margin-left: 6px; padding: 1px 7px; border-radius: 999px; font-size: 10px; font-weight: 800; letter-spacing: .3px; vertical-align: middle; line-height: 1.6; }
+.badge-new { background: #D6F7EC; color: #06795A; }
+.badge-upd { background: #FFE7B8; color: #8A5A00; }
 .filetable .folder-row { cursor: pointer; font-weight: 600; }
 .filetable .note-cell { cursor: pointer; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .filetable .note-cell:hover { color: var(--secondary); }

@@ -49,6 +49,13 @@ const UI = (() => {
     return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   }
 
+  // 최근성 판단 (기본 7일 이내)
+  function isRecent(iso, days = 7) {
+    if (!iso) return false;
+    const t = new Date(iso).getTime();
+    return !!t && (Date.now() - t) < days * 86400000;
+  }
+
   // 간단 모달
   function modal(html, { onClose } = {}) {
     const backdrop = document.createElement('div');
@@ -104,5 +111,5 @@ const UI = (() => {
     });
   }
 
-  return { toast, bytes, date, fileIcon, escapeHtml, modal, confirm };
+  return { toast, bytes, date, fileIcon, escapeHtml, isRecent, modal, confirm };
 })();
