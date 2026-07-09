@@ -5,18 +5,18 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="theme-color" content="#FFD166">
   <title>파일 업로드 · 북적북적</title>
-  <link rel="icon" href="assets/logo.svg?v=28" type="image/svg+xml">
-  <link rel="stylesheet" href="css/style.css?v=28">
+  <link rel="icon" href="assets/logo.svg?v=29" type="image/svg+xml">
+  <link rel="stylesheet" href="css/style.css?v=29">
 </head>
 <body>
   <div class="login-screen">
     <div class="login-card" style="max-width:460px">
-      <img src="assets/logo.svg?v=28" class="login-logo" alt="북적북적">
+      <img src="assets/logo.svg?v=29" class="login-logo" alt="북적북적">
       <div class="login-title">파일 업로드</div>
       <div id="up-view" style="width:100%;margin-top:8px"><p class="muted" style="text-align:center">불러오는 중…</p></div>
     </div>
   </div>
-  <script src="config.js?v=28"></script>
+  <script src="config.js?v=29"></script>
   <script>
   (function () {
     const BASE = (window.BOOKJEOK_API || '').replace(/\/$/, '');
@@ -85,7 +85,8 @@
         const r = await fetch(`${BASE}/api/upload-link/${encodeURIComponent(token)}`, { method: 'POST', headers: pwEl && pwEl.value ? { 'x-upload-password': pwEl.value } : {}, body: fd });
         const d = await r.json().catch(() => ({}));
         if (!r.ok) throw new Error(d.error || '업로드 실패');
-        msg.style.color = 'var(--accent)'; msg.textContent = `✅ ${d.uploaded}개 업로드 완료! 감사합니다.`;
+        const rej = (d.rejected && d.rejected.length) ? ` · 바이러스 ${d.rejected.length}개 차단됨` : '';
+        msg.style.color = 'var(--accent)'; msg.textContent = `✅ ${d.uploaded}개 업로드 완료! 감사합니다.${rej}`;
         load();
       } catch (e) { msg.style.color = 'var(--danger)'; msg.textContent = e.message; go.disabled = false; }
     }

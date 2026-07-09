@@ -83,6 +83,7 @@ const API = (() => {
     resetPassword: (id, password) => req('PATCH', `/admin/users/${id}/password`, { password }),
     updateUser: (id, data) => req('PATCH', `/admin/users/${id}`, data),
     deleteUser: (id) => req('DELETE', `/admin/users/${id}`),
+    dashboard: () => req('GET', '/admin/dashboard'),
     dbStatus: () => req('GET', '/admin/db-status'),
     audit: (limit = 50) => req('GET', `/admin/audit?limit=${limit}`),
     // trash

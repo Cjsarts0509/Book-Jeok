@@ -15,6 +15,7 @@ const { query } = require('../db');
 const { wrap } = require('../util');
 const { verifyPassword } = require('../crypto');
 const { isAllowed, allowedLabel, getAllowedExtensions } = require('../settings');
+const antivirus = require('../antivirus');
 
 const router = express.Router();
 const userDir = (ownerId) => path.join(config.storageRoot, String(ownerId));
@@ -106,15 +107,18 @@ router.post('/:token', uploadLimiter, attemptLimiter, wrap(gate), upload.array('
     if (quota === 0 || Number(used.rows[0].s) + incoming > quota) { await cleanup(); return res.status(413).json({ error: '이 폴더의 저장 공간이 부족합니다.' }); }
   }
   await ensureFolder(owner, u.folder);
-  let saved = 0;
+  let saved = 0; let savedBytes = 0; const rejected = [];
   for (const f of req.files) {
     const originalName = Buffer.from(f.originalname, 'latin1').toString('utf8').replace(/[/\\]/g, '_').replace(/[\u0000-\u001f]/g, '').trim() || 'file';
+    const scan = await antivirus.scanFile(f.path);
+    if (!scan.ok) { await fsp.unlink(f.path).catch(() => {}); rejected.push({ name: originalName, virus: scan.virus }); continue; }
     const name = await uniqueFileName(owner, u.folder, originalName);
     await query('INSERT INTO files (owner_id, folder, original_name, stored_name, size_bytes, mime_type, note) VALUES ($1,$2,$3,$4,$5,$6,$7)', [owner, u.folder, name, path.basename(f.path), f.size, f.mimetype, '업로드 요청으로 수신']);
-    saved++;
+    saved++; savedBytes += f.size;
   }
-  await query('UPDATE upload_requests SET uploaded_count = uploaded_count + $2, uploaded_bytes = uploaded_bytes + $3 WHERE id=$1', [u.id, saved, incoming]);
-  res.status(201).json({ uploaded: saved });
+  if (saved) await query('UPDATE upload_requests SET uploaded_count = uploaded_count + $2, uploaded_bytes = uploaded_bytes + $3 WHERE id=$1', [u.id, saved, savedBytes]);
+  if (saved === 0 && rejected.length) return res.status(422).json({ error: `바이러스가 감지되어 차단되었습니다: ${rejected.map((r) => r.virus).join(', ')}` });
+  res.status(201).json({ uploaded: saved, rejected });
 }));
 
 module.exports = router;

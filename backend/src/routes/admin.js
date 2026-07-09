@@ -307,6 +307,41 @@ router.get('/disk-info', wrap(async (req, res) => {
   res.json({ totalBytes: total, allocatedBytes: allocated, availableBytes: Math.max(0, total - allocated) });
 }));
 
+// ══════════ 대시보드(요약·경고·추이) ══════════
+router.get('/dashboard', wrap(async (req, res) => {
+  const antivirus = require('../antivirus');
+  const [uStat, fStat, total, allocated, loginsR, uploadsR, quotaR, topR, recentR] = await Promise.all([
+    query("SELECT count(*)::int AS total, count(*) FILTER (WHERE is_active)::int AS active FROM users"),
+    query('SELECT count(*)::int AS c, COALESCE(SUM(size_bytes),0) AS b FROM files WHERE deleted_at IS NULL'),
+    diskTotalBytes(), allocatedBytes(),
+    query("SELECT to_char(date_trunc('day',created_at),'MM-DD') AS d, count(*)::int AS c FROM audit_log WHERE action='login' AND created_at > now()-interval '13 days' GROUP BY 1"),
+    query("SELECT to_char(date_trunc('day',created_at),'MM-DD') AS d, count(*)::int AS c, COALESCE(SUM(size_bytes),0) AS b FROM files WHERE created_at > now()-interval '13 days' GROUP BY 1"),
+    query("SELECT u.username, u.display_name, u.quota_bytes, COALESCE(SUM(f.size_bytes),0) AS used FROM users u LEFT JOIN files f ON f.owner_id=u.id AND f.deleted_at IS NULL WHERE u.role<>'admin' AND u.quota_bytes>0 GROUP BY u.id, u.username, u.display_name, u.quota_bytes HAVING COALESCE(SUM(f.size_bytes),0) >= u.quota_bytes*0.9 ORDER BY used DESC"),
+    query("SELECT u.username, u.display_name, count(f.id)::int AS c, COALESCE(SUM(f.size_bytes),0) AS b FROM users u LEFT JOIN files f ON f.owner_id=u.id AND f.deleted_at IS NULL GROUP BY u.id, u.username, u.display_name ORDER BY b DESC LIMIT 5"),
+    query("SELECT a.action, a.detail, a.created_at, u.username FROM audit_log a LEFT JOIN users u ON u.id=a.user_id ORDER BY a.created_at DESC LIMIT 12"),
+  ]);
+  // 14일 시계열 채우기
+  const days = []; const now = new Date();
+  const lm = new Map(loginsR.rows.map((r) => [r.d, r.c]));
+  const um = new Map(uploadsR.rows.map((r) => [r.d, r]));
+  for (let i = 13; i >= 0; i--) {
+    const dt = new Date(now.getTime() - i * 86400000); const key = String(dt.getMonth() + 1).padStart(2, '0') + '-' + String(dt.getDate()).padStart(2, '0');
+    const up = um.get(key);
+    days.push({ date: key, logins: lm.get(key) || 0, uploads: up ? up.c : 0, uploadBytes: up ? Number(up.b) : 0 });
+  }
+  const used = Number(fStat.rows[0].b);
+  res.json({
+    users: uStat.rows[0],
+    fileCount: fStat.rows[0].c,
+    storage: { diskTotal: total, diskUsed: used, allocated, available: Math.max(0, total - allocated), usedPct: total ? Math.round(used / total * 100) : 0, allocPct: total ? Math.round(allocated / total * 100) : 0 },
+    quotaWarnings: quotaR.rows.map((r) => ({ username: r.username, displayName: r.display_name, usedBytes: Number(r.used), quotaBytes: Number(r.quota_bytes), pct: Math.round(Number(r.used) / Number(r.quota_bytes) * 100) })),
+    daily: days,
+    topAccounts: topR.rows.map((r) => ({ username: r.username, displayName: r.display_name, fileCount: r.c, usedBytes: Number(r.b) })),
+    recent: recentR.rows.map((r) => ({ action: r.action, detail: r.detail, username: r.username, createdAt: r.created_at })),
+    antivirus: antivirus.enabled(),
+  });
+}));
+
 // ══════════ 허용 확장자 ══════════
 router.get('/settings/extensions', wrap(async (req, res) => {
   res.json({ extensions: getAllowedExtensions() });

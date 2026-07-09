@@ -11,6 +11,7 @@ const { query } = require('../db');
 const { authenticate } = require('../middleware/auth');
 const { audit, wrap, canAccessOwner } = require('../util');
 const { generateToken, hashPassword } = require('../crypto');
+const antivirus = require('../antivirus');
 const { isAllowed, allowedLabel, getAllowedExtensions } = require('../settings');
 
 const router = express.Router();
@@ -249,11 +250,14 @@ router.post('/upload', authenticate, wrap(resolveOwner), upload.array('file', 30
     }
   }
   await ensureFolder(req.targetOwnerId, folder);
-  const saved = [];
+  const saved = []; const rejected = [];
   for (const f of req.files) {
     // 경로 구분자·제어문자 제거 (zip-slip/헤더 주입 방어)
     const originalName = Buffer.from(f.originalname, 'latin1').toString('utf8')
       .replace(/[/\\]/g, '_').replace(/[\x00-\x1f]/g, '').trim() || 'file';
+    // 바이러스 검사(설정 시). 탐지되면 저장하지 않고 삭제.
+    const scan = await antivirus.scanFile(f.path);
+    if (!scan.ok) { await fsp.unlink(f.path).catch(() => {}); rejected.push({ name: originalName, virus: scan.virus }); await audit(req, 'virus_blocked', `${originalName} (${scan.virus})`); continue; }
     const name = await uniqueFileName(req.targetOwnerId, folder, originalName);
     const row = await query(
       `INSERT INTO files (owner_id, folder, original_name, stored_name, size_bytes, mime_type)
@@ -263,7 +267,8 @@ router.post('/upload', authenticate, wrap(resolveOwner), upload.array('file', 30
     saved.push({ id: row.rows[0].id, name, size: f.size, folder });
   }
   await audit(req, 'upload', `owner=${req.targetOwnerId} count=${saved.length}`);
-  res.status(201).json({ uploaded: saved });
+  if (saved.length === 0 && rejected.length) return res.status(422).json({ error: `바이러스가 감지되어 업로드가 차단되었습니다: ${rejected.map((r) => r.virus).join(', ')}`, rejected });
+  res.status(201).json({ uploaded: saved, rejected });
 }));
 
 // 허용 확장자 조회 (로그인 사용자)

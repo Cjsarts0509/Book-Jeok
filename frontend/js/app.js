@@ -35,7 +35,7 @@ const App = (() => {
     root().innerHTML = `
       <div class="login-screen">
         <form class="login-card" id="login-form">
-          <img src="assets/logo.svg?v=28" class="login-logo" alt="북적북적">
+          <img src="assets/logo.svg?v=29" class="login-logo" alt="북적북적">
           <div class="login-title">북적북적</div>
           <div class="login-sub">Book-Jeok · 우리끼리 나누는 파일 창고</div>
           <div class="field"><label>아이디</label><input class="input" name="username" autocomplete="username" placeholder="아이디" required></div>
@@ -59,7 +59,7 @@ const App = (() => {
       <div class="layout">
         <header class="appbar">
           <button class="icon-btn appbar-menu" id="menu-toggle" title="폴더">☰</button>
-          <div class="brand" id="brand-home" title="홈으로"><img src="assets/logo.svg?v=28"><span class="brand-name">북적북적</span></div>
+          <div class="brand" id="brand-home" title="홈으로"><img src="assets/logo.svg?v=29"><span class="brand-name">북적북적</span></div>
           ${isPriv() ? `<select class="input account-switcher" id="account-switcher"><option value="">내 파일</option></select>` : ''}
           <div class="topbar-spacer"></div>
           <nav class="appbar-nav">
@@ -699,8 +699,12 @@ const App = (() => {
     const fd = new FormData(); fd.append('folder', state.folder);
     [...fileList].forEach((f) => fd.append('file', f));
     UI.toast(`${fileList.length}개 업로드 중…`);
-    try { await API.upload(fd, state.ownerId); UI.toast('업로드 완료 ✅', 'success'); loadAll(); }
-    catch (err) { UI.toast(err.message, 'error'); }
+    try {
+      const r = await API.upload(fd, state.ownerId);
+      if (r && r.rejected && r.rejected.length) UI.toast(`⚠️ 바이러스 감지로 ${r.rejected.length}개 차단됨`, 'error');
+      if (!r || !r.rejected || r.rejected.length < fileList.length) UI.toast('업로드 완료 ✅', 'success');
+      loadAll();
+    } catch (err) { UI.toast(err.message, 'error'); }
   }
 
   // Content-Disposition에서 파일명 추출 (filename*=UTF-8'' 우선, 없으면 filename=)

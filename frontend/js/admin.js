@@ -1,6 +1,6 @@
 /* 북적북적 관리자 페이지 */
 const Admin = (() => {
-  const state = { user: null, tab: 'users', users: [] };
+  const state = { user: null, tab: 'dashboard', users: [] };
   const root = () => document.getElementById('app');
 
   async function boot() {
@@ -10,7 +10,7 @@ const Admin = (() => {
       if (user.role !== 'admin') { UI.toast('관리자만 접근할 수 있습니다', 'error'); return (location.href = 'index.html'); }
       state.user = user;
       renderShell();
-      loadUsers();
+      loadDashboard();
     } catch {
       location.href = 'index.html';
     }
@@ -21,8 +21,9 @@ const Admin = (() => {
     root().innerHTML = `
       <div class="layout">
         <header class="appbar">
-          <a class="brand" href="index.html" title="홈으로"><img src="assets/logo.svg?v=28"><span class="brand-name">북적북적</span></a>
+          <a class="brand" href="index.html" title="홈으로"><img src="assets/logo.svg?v=29"><span class="brand-name">북적북적</span></a>
           <nav class="appbar-nav">
+            ${item('dashboard', '🏠', '대시보드')}
             ${item('users', '👥', '계정')}
             ${item('branches', '🏢', '영업점')}
             ${item('notices', '📢', '공지')}
@@ -38,7 +39,7 @@ const Admin = (() => {
           <div class="user-chip-sm">${UI.escapeHtml(state.user.displayName)} · 관리자</div>
         </header>
         <main class="content admin-content">
-          <h1 class="admin-title" id="page-title">계정 관리</h1>
+          <h1 class="admin-title" id="page-title">대시보드</h1>
           <div id="view"></div>
         </main>
       </div>`;
@@ -48,7 +49,8 @@ const Admin = (() => {
   function switchTab(tab) {
     state.tab = tab;
     renderShell();
-    if (tab === 'users') loadUsers();
+    if (tab === 'dashboard') loadDashboard();
+    else if (tab === 'users') loadUsers();
     else if (tab === 'branches') loadBranches();
     else if (tab === 'notices') loadNotices();
     else if (tab === 'ext') loadExt();
@@ -57,8 +59,51 @@ const Admin = (() => {
     else if (tab === 'audit') loadAudit();
     else if (tab === 'capacity') loadCapacity();
     else if (tab === 'manual') loadManual();
-    const titles = { users: '계정 관리', branches: '영업점 관리', notices: '공지사항', ext: '허용 확장자', trash: '휴지통', capacity: '용량 리포트', db: 'DB 상태', audit: '감사 로그', manual: '사용자 매뉴얼' };
+    const titles = { dashboard: '대시보드', users: '계정 관리', branches: '영업점 관리', notices: '공지사항', ext: '허용 확장자', trash: '휴지통', capacity: '용량 리포트', db: 'DB 상태', audit: '감사 로그', manual: '사용자 매뉴얼' };
     document.getElementById('page-title').textContent = titles[tab];
+  }
+
+  // ── 대시보드 ──────────────────────────
+  async function loadDashboard() {
+    const view = document.getElementById('view');
+    view.innerHTML = '<div class="empty"><div class="big">⏳</div>불러오는 중…</div>';
+    try {
+      const d = await API.dashboard();
+      const s = d.storage;
+      const diskWarn = s.usedPct >= 90 || s.allocPct >= 95;
+      const warnItems = [];
+      if (s.usedPct >= 90) warnItems.push(`디스크 사용량이 <b>${s.usedPct}%</b>에 도달했습니다 (${UI.bytes(s.diskUsed)} / ${UI.bytes(s.diskTotal)}).`);
+      if (s.allocPct >= 95) warnItems.push(`할당 합계가 디스크의 <b>${s.allocPct}%</b>입니다. 추가 발급이 제한될 수 있습니다.`);
+      d.quotaWarnings.forEach((q) => warnItems.push(`<b>${UI.escapeHtml(q.displayName)}</b>(@${UI.escapeHtml(q.username)}) 계정이 할당량의 <b>${q.pct}%</b>를 사용 중입니다.`));
+      const warnBox = warnItems.length ? `<div class="dash-warn"><b>⚠️ 용량 임박 경고</b><ul>${warnItems.map((w) => `<li>${w}</li>`).join('')}</ul></div>` : '';
+
+      const maxDay = Math.max(1, ...d.daily.map((x) => Math.max(x.logins, x.uploads)));
+      const bars = d.daily.map((x) => `<div class="dash-bar" title="${x.date} · 로그인 ${x.logins} · 업로드 ${x.uploads}건(${UI.bytes(x.uploadBytes)})">
+        <div class="dash-bcol"><span class="up" style="height:${x.uploads / maxDay * 100}%"></span><span class="lg" style="height:${x.logins / maxDay * 100}%"></span></div>
+        <div class="dash-blabel">${x.date}</div></div>`).join('');
+
+      const tops = d.topAccounts.map((t) => `<div class="rep-row"><div class="rep-name">${UI.escapeHtml(t.displayName)} <span class="muted" style="font-size:11px">@${UI.escapeHtml(t.username)}</span></div><div class="rep-bar"><span style="width:${d.topAccounts[0].usedBytes ? (t.usedBytes / d.topAccounts[0].usedBytes * 100) : 0}%"></span></div><div class="rep-val num">${UI.bytes(t.usedBytes)} · ${t.fileCount}개</div></div>`).join('') || '<p class="muted">데이터 없음</p>';
+
+      const recent = d.recent.map((r) => `<tr><td class="num" style="color:var(--text-muted);white-space:nowrap">${new Date(r.createdAt).toLocaleString('ko-KR')}</td><td>${UI.escapeHtml(r.username || '—')}</td><td><span class="badge user">${UI.escapeHtml(r.action)}</span></td><td class="muted" style="font-size:12px">${UI.escapeHtml(r.detail || '')}</td></tr>`).join('');
+
+      view.innerHTML = `
+        ${warnBox}
+        <div class="stat-grid">
+          <div class="stat"><div class="k">계정</div><div class="v num">${d.users.active}<span style="font-size:14px;color:var(--text-muted)"> / ${d.users.total}</span></div></div>
+          <div class="stat"><div class="k">전체 파일</div><div class="v num">${d.fileCount.toLocaleString()}</div></div>
+          <div class="stat"><div class="k">사용 중</div><div class="v num">${UI.bytes(s.diskUsed)}</div><div class="k">디스크 ${UI.bytes(s.diskTotal)} · ${s.usedPct}%</div></div>
+          <div class="stat"><div class="k">할당 / 남음</div><div class="v num">${UI.bytes(s.allocated)}</div><div class="k">남음 ${UI.bytes(s.available)}</div></div>
+          <div class="stat"><div class="k">바이러스 검사</div><div class="v num" style="font-size:20px">${d.antivirus ? '🛡️ 켜짐' : '⚪ 꺼짐'}</div></div>
+        </div>
+        <div class="dash-card">
+          <div class="dash-h">최근 14일 추이 <span class="muted" style="font-size:12px;font-weight:400">· <span class="dash-leg up"></span> 업로드 <span class="dash-leg lg"></span> 로그인</span></div>
+          <div class="dash-chart">${bars}</div>
+        </div>
+        <div class="dash-2col">
+          <div class="dash-card"><div class="dash-h">사용량 상위 계정</div>${tops}</div>
+          <div class="dash-card"><div class="dash-h">최근 활동</div><div class="table-wrap" style="border:none"><table><tbody>${recent || '<tr><td class="muted">기록 없음</td></tr>'}</tbody></table></div></div>
+        </div>`;
+    } catch (err) { view.innerHTML = `<div class="empty">⚠️ ${UI.escapeHtml(err.message)}</div>`; }
   }
 
   // ── 계정 관리 ──────────────────────────
