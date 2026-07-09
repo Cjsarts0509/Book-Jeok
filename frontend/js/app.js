@@ -29,7 +29,7 @@ const App = (() => {
     root().innerHTML = `
       <div class="login-screen">
         <form class="login-card" id="login-form">
-          <img src="assets/logo.svg?v=19" class="login-logo" alt="북적북적">
+          <img src="assets/logo.svg?v=20" class="login-logo" alt="북적북적">
           <div class="login-title">북적북적</div>
           <div class="login-sub">Book-Jeok · 우리끼리 나누는 파일 창고</div>
           <div class="field"><label>아이디</label><input class="input" name="username" autocomplete="username" placeholder="아이디" required></div>
@@ -53,12 +53,13 @@ const App = (() => {
       <div class="layout">
         <header class="appbar">
           <button class="icon-btn appbar-menu" id="menu-toggle" title="폴더">☰</button>
-          <div class="brand" id="brand-home" title="홈으로"><img src="assets/logo.svg?v=19"><span class="brand-name">북적북적</span></div>
+          <div class="brand" id="brand-home" title="홈으로"><img src="assets/logo.svg?v=20"><span class="brand-name">북적북적</span></div>
           ${isPriv() ? `<select class="input account-switcher" id="account-switcher"><option value="">내 파일</option></select>` : ''}
           <div class="topbar-spacer"></div>
           <nav class="appbar-nav">
             <div class="nav-item" data-nav="files"><span class="ico">📁</span><span class="t">내 파일</span></div>
             ${admin ? '<a class="nav-item" href="admin.html"><span class="ico">⚙️</span><span class="t">관리자</span></a>' : ''}
+            <div class="nav-item" data-nav="help"><span class="ico">❓</span><span class="t">도움말</span></div>
             <div class="nav-item" data-nav="password"><span class="ico">🔑</span><span class="t">비밀번호</span></div>
             <div class="nav-item" data-nav="logout"><span class="ico">🚪</span><span class="t">로그아웃</span></div>
           </nav>
@@ -75,7 +76,7 @@ const App = (() => {
       </div>`;
     root().querySelectorAll('.appbar-nav [data-nav]').forEach((el) => el.addEventListener('click', () => {
       const n = el.dataset.nav;
-      if (n === 'logout') doLogout(); else if (n === 'password') changePasswordModal(); else if (n === 'files') resetToOwn();
+      if (n === 'logout') doLogout(); else if (n === 'password') changePasswordModal(); else if (n === 'files') resetToOwn(); else if (n === 'help') helpModal();
     }));
     document.getElementById('menu-toggle').addEventListener('click', toggleTree);
     document.getElementById('tree-backdrop').addEventListener('click', toggleTree);
@@ -686,6 +687,12 @@ const App = (() => {
         m.q('#copy').addEventListener('click', () => { m.q('#lnk').select(); navigator.clipboard?.writeText(dl); UI.toast('링크 복사됨', 'success'); });
       } catch (err) { UI.toast(err.message, 'error'); }
     });
+  }
+
+  function helpModal() {
+    const m = UI.modal(`${Manual.userHTML()}<div class="modal-actions"><button class="btn btn-primary" id="mclose">닫기</button></div>`);
+    m.el.querySelector('.modal').classList.add('modal-wide');
+    m.q('#mclose').addEventListener('click', m.close);
   }
 
   function changePasswordModal() {
