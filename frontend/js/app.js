@@ -29,7 +29,7 @@ const App = (() => {
     root().innerHTML = `
       <div class="login-screen">
         <form class="login-card" id="login-form">
-          <img src="assets/logo.svg?v=20" class="login-logo" alt="북적북적">
+          <img src="assets/logo.svg?v=21" class="login-logo" alt="북적북적">
           <div class="login-title">북적북적</div>
           <div class="login-sub">Book-Jeok · 우리끼리 나누는 파일 창고</div>
           <div class="field"><label>아이디</label><input class="input" name="username" autocomplete="username" placeholder="아이디" required></div>
@@ -53,7 +53,7 @@ const App = (() => {
       <div class="layout">
         <header class="appbar">
           <button class="icon-btn appbar-menu" id="menu-toggle" title="폴더">☰</button>
-          <div class="brand" id="brand-home" title="홈으로"><img src="assets/logo.svg?v=20"><span class="brand-name">북적북적</span></div>
+          <div class="brand" id="brand-home" title="홈으로"><img src="assets/logo.svg?v=21"><span class="brand-name">북적북적</span></div>
           ${isPriv() ? `<select class="input account-switcher" id="account-switcher"><option value="">내 파일</option></select>` : ''}
           <div class="topbar-spacer"></div>
           <nav class="appbar-nav">
@@ -317,10 +317,10 @@ const App = (() => {
       const key = `folder:${f.path}`;
       return `<tr data-folder-row="${UI.escapeHtml(f.path)}" class="${isSel(key) ? 'sel' : ''}">
         <td><input type="checkbox" class="rowcheck" data-sel-folder="${UI.escapeHtml(f.path)}" data-name="${UI.escapeHtml(f.name)}" ${isSel(key) ? 'checked' : ''}></td>
-        <td class="open-cell" data-open="${UI.escapeHtml(f.path)}" title="더블클릭하여 열기"><span class="ic${f.color ? ' tint' : ''}" style="${folderIcoStyle(f.color)}">${f.icon || '📁'}</span> ${UI.escapeHtml(f.name)}${updateBadge(f, true)}</td>
-        <td class="num muted">${UI.bytes(f.size)}</td>
-        <td class="num muted">${f.createdAt ? UI.date(f.createdAt) : '—'}</td>
-        <td class="num muted">${f.noteUpdatedAt ? UI.date(f.noteUpdatedAt) : '—'}</td>
+        <td class="open-cell name-cell" data-open="${UI.escapeHtml(f.path)}" title="더블클릭하여 열기"><span class="ic${f.color ? ' tint' : ''}" style="${folderIcoStyle(f.color)}">${f.icon || '📁'}</span> ${UI.escapeHtml(f.name)}${updateBadge(f, true)}</td>
+        <td class="num muted" data-label="크기">${UI.bytes(f.size)}</td>
+        <td class="num muted" data-label="등록">${f.createdAt ? UI.date(f.createdAt) : '—'}</td>
+        <td class="num muted" data-label="수정">${f.noteUpdatedAt ? UI.date(f.noteUpdatedAt) : '—'}</td>
         <td class="note-cell" data-fnote="${UI.escapeHtml(f.path)}" title="클릭하여 비고 편집">${f.note ? UI.escapeHtml(f.note) : '<span class="muted">+ 비고</span>'}</td>
         <td class="row-actions"><button class="icon-btn" data-fedit="${UI.escapeHtml(f.path)}" title="폴더 설정">⚙️</button></td>
       </tr>`;
@@ -329,10 +329,10 @@ const App = (() => {
       const key = `file:${f.id}`;
       return `<tr data-file="${f.id}" class="${isSel(key) ? 'sel' : ''}">
         <td><input type="checkbox" class="rowcheck" data-sel-file="${f.id}" data-name="${UI.escapeHtml(f.name)}" ${isSel(key) ? 'checked' : ''}></td>
-        <td><span class="ic">${UI.fileIcon(f.name)}</span> ${UI.escapeHtml(f.name)}${updateBadge(f, false)}</td>
-        <td class="num muted">${UI.bytes(f.size)}</td>
-        <td class="num muted">${UI.date(f.createdAt)}</td>
-        <td class="num muted">${UI.date(f.updatedAt || f.createdAt)}</td>
+        <td class="name-cell"><span class="ic">${UI.fileIcon(f.name)}</span> ${UI.escapeHtml(f.name)}${updateBadge(f, false)}</td>
+        <td class="num muted" data-label="크기">${UI.bytes(f.size)}</td>
+        <td class="num muted" data-label="등록">${UI.date(f.createdAt)}</td>
+        <td class="num muted" data-label="수정">${UI.date(f.updatedAt || f.createdAt)}</td>
         <td class="note-cell" data-note="${f.id}" title="클릭하여 비고 편집">${f.note ? UI.escapeHtml(f.note) : '<span class="muted">+ 비고</span>'}</td>
         <td class="row-actions"><button class="icon-btn" data-share="${f.id}" title="공유">🔗</button><button class="icon-btn" data-dl="${f.id}" title="다운로드">⬇️</button></td>
       </tr>`;

@@ -173,7 +173,7 @@ textarea.input { resize: vertical; }
 .empty .big { font-size: 46px; margin-bottom: 8px; }
 
 /* ── 선택 일괄작업 바 ── */
-.selbar { display: flex; align-items: center; gap: 8px; padding: 10px 14px; margin-bottom: 12px; background: #FFF3CF; border: 1px solid var(--primary); border-radius: var(--radius-sm); position: sticky; top: 0; z-index: 5; animation: slideDown .2s ease; }
+.selbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 14px; margin-bottom: 12px; background: #FFF3CF; border: 1px solid var(--primary); border-radius: var(--radius-sm); position: sticky; top: 0; z-index: 5; animation: slideDown .2s ease; }
 
 /* ── 그리드 뷰 ── */
 .file-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 14px; }
@@ -330,4 +330,46 @@ th { background: var(--bg); font-weight: 700; color: var(--text-muted); font-siz
   .modal-backdrop { align-items: flex-end; padding: 0; }
   .modal-backdrop.open .modal { transform: none; }
   .stat-grid { grid-template-columns: 1fr 1fr; }
+}
+
+/* ── 휴대폰: 리스트 2줄 카드형 · 선택바 줄바꿈 ── */
+@media (max-width: 640px) {
+  /* 리스트 뷰: 표 → 2줄 카드 (1줄 이름 / 2줄 정보·기능) */
+  .table-wrap { overflow-x: visible; }
+  .filetable, .filetable tbody { display: block; }
+  .filetable thead { display: none; }
+  .filetable tr {
+    display: flex; flex-wrap: wrap; align-items: center;
+    gap: 3px 10px; padding: 11px 12px 11px 42px; position: relative;
+    border-bottom: 1px solid var(--border);
+  }
+  .filetable tr:last-child { border-bottom: none; }
+  .filetable td { display: block; border: none; padding: 0; }
+  /* 체크박스: 좌측 세로 중앙 고정 (넉넉한 탭 영역) */
+  .filetable td:first-child { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); margin: 0; }
+  .filetable td:first-child .rowcheck { width: 20px; height: 20px; }
+  /* 1줄: 이름 (전체 폭, 줄바꿈 허용) */
+  .filetable td.name-cell { flex: 1 0 100%; font-weight: 600; font-size: 14.5px; white-space: normal; word-break: break-all; line-height: 1.4; }
+  /* 2줄: 메타 정보 — 라벨 + 값 */
+  .filetable td.num { font-size: 12px; color: var(--text-muted); white-space: nowrap; }
+  .filetable td.num::before { content: attr(data-label) " "; opacity: .6; }
+  .filetable td.num[data-label="수정"] { display: none; } /* 좁은 화면에선 수정일 숨김 */
+  .filetable td.note-cell { flex: 1 1 auto; max-width: 100%; font-size: 12px; color: var(--secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  /* 기능 버튼: 우측 정렬, 항상 노출, 넉넉한 탭 크기 */
+  .filetable td.row-actions { margin-left: auto; display: flex; gap: 6px; }
+  .filetable td.row-actions .icon-btn { width: 36px; height: 36px; font-size: 17px; }
+
+  /* 선택 일괄작업 바: 한 줄 넘침 방지 → 줄바꿈 */
+  .selbar { flex-wrap: wrap; gap: 6px; padding: 9px 11px; }
+  .selbar > div:empty { display: none; }          /* 가운데 스페이서 제거 */
+  .selbar b { flex: 1 0 100%; font-size: 13px; }  /* 개수는 첫 줄 */
+  .selbar .btn { flex: 1 1 auto; justify-content: center; }
+
+  /* 브레드크럼: 길면 가로 스크롤(줄바꿈 대신 한 줄 유지) */
+  .breadcrumb { flex-wrap: nowrap; overflow-x: auto; max-width: 100%; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+  .breadcrumb::-webkit-scrollbar { display: none; }
+  .breadcrumb span[data-folder] { white-space: nowrap; }
+
+  /* 압축 완료 모달 버튼도 세로 정렬 유지 */
+  .zip-actions .btn { padding: 12px; }
 }
