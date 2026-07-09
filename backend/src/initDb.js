@@ -130,6 +130,9 @@ CREATE TABLE IF NOT EXISTS zip_bundles (
 -- share_links: 파일 또는 압축번들을 가리킬 수 있도록
 ALTER TABLE share_links ALTER COLUMN file_id DROP NOT NULL;
 ALTER TABLE share_links ADD COLUMN IF NOT EXISTS bundle_id BIGINT REFERENCES zip_bundles(id) ON DELETE CASCADE;
+-- share_links: 비밀번호(선택)·다운로드 횟수 제한(선택)
+ALTER TABLE share_links ADD COLUMN IF NOT EXISTS password_hash TEXT;
+ALTER TABLE share_links ADD COLUMN IF NOT EXISTS max_downloads INTEGER;
 `;
 
 const DEFAULT_EXT = 'csv,xls,xlsx,xlsm,xlsb,jpg,jpeg,png,gif,ppt,pptx,doc,docx,txt';

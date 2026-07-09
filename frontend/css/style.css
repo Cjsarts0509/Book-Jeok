@@ -190,6 +190,41 @@ textarea.input { resize: vertical; }
 .picked-bar { margin-top: 12px; font-size: 13px; color: var(--text-muted); }
 .picked-bar b { color: var(--secondary); }
 
+/* 툴바 좌/우 배치 + 검색 */
+.tools-left { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.head-right { margin-left: auto; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; min-width: 0; }
+.head-right .breadcrumb { justify-content: flex-end; }
+.head-right .usage-line { justify-content: flex-end; flex-wrap: wrap; margin-bottom: 0; }
+.head-right .usage-bar { width: 140px; }
+.searchbox { display: inline-flex; align-items: center; gap: 6px; }
+.searchbox .input { height: 34px; width: 170px; padding: 6px 12px; }
+#usage-report { padding: 6px 8px; }
+
+/* 검색 결과 배너 */
+.search-banner { display: flex; align-items: center; gap: 8px; padding: 9px 12px; margin-bottom: 10px; background: #E7F5FB; border: 1px solid #B6E3F4; border-radius: var(--radius-sm); font-size: 14px; color: var(--secondary); }
+
+/* 드래그 이동 대상 강조 */
+.drop-target { outline: 2px dashed var(--primary-dark); outline-offset: -2px; background: var(--hover) !important; }
+.tree-item.drop-target { background: var(--hover); box-shadow: inset 0 0 0 2px var(--primary-dark); }
+.file-card.sel { border-color: var(--primary); background: #FFF3CF; box-shadow: inset 0 0 0 2px var(--primary); }
+
+/* 용량 리포트 막대 */
+.rep-summary { font-size: 15px; margin-bottom: 4px; }
+.rep-summary .num { font-size: 20px; font-weight: 800; }
+.rep-row { display: grid; grid-template-columns: 130px 1fr auto; align-items: center; gap: 10px; padding: 5px 0; font-size: 13px; }
+.rep-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.rep-bar { height: 10px; background: var(--border); border-radius: 99px; overflow: hidden; }
+.rep-bar > span { display: block; height: 100%; background: linear-gradient(90deg, var(--primary), var(--accent)); border-radius: 99px; }
+.rep-val { color: var(--text-muted); white-space: nowrap; }
+@media (max-width: 640px) {
+  .head-right { align-items: flex-start; margin-left: 0; width: 100%; }
+  .head-right .breadcrumb, .head-right .usage-line { justify-content: flex-start; }
+  .searchbox { flex: 1 1 100%; }
+  .searchbox .input { flex: 1; width: auto; }
+  .rep-row { grid-template-columns: 1fr auto; }
+  .rep-row .rep-bar { grid-column: 1 / -1; order: 3; }
+}
+
 .empty { text-align: center; padding: 56px 20px; color: var(--text-muted); }
 .empty .big { font-size: 46px; margin-bottom: 8px; }
 

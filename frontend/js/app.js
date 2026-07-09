@@ -11,6 +11,8 @@ const App = (() => {
     expanded: new Set(['/']), // 펼쳐진 폴더 경로 (기본: 루트만 = 최상위만 보임)
     sort: { key: 'name', dir: 'asc' }, // 리스트 정렬 기준
     nav: { stack: ['/'], idx: 0 }, // 폴더 이동 히스토리(뒤로/앞으로)
+    search: { on: false, q: '' }, // 이름 검색 모드
+    anchor: null, drag: null, // 선택 앵커 / 드래그 중 항목
   };
   const root = () => document.getElementById('app');
   const isPriv = () => state.user && (state.user.role === 'admin' || state.user.role === 'manager');
@@ -31,7 +33,7 @@ const App = (() => {
     root().innerHTML = `
       <div class="login-screen">
         <form class="login-card" id="login-form">
-          <img src="assets/logo.svg?v=22" class="login-logo" alt="북적북적">
+          <img src="assets/logo.svg?v=23" class="login-logo" alt="북적북적">
           <div class="login-title">북적북적</div>
           <div class="login-sub">Book-Jeok · 우리끼리 나누는 파일 창고</div>
           <div class="field"><label>아이디</label><input class="input" name="username" autocomplete="username" placeholder="아이디" required></div>
@@ -55,11 +57,12 @@ const App = (() => {
       <div class="layout">
         <header class="appbar">
           <button class="icon-btn appbar-menu" id="menu-toggle" title="폴더">☰</button>
-          <div class="brand" id="brand-home" title="홈으로"><img src="assets/logo.svg?v=22"><span class="brand-name">북적북적</span></div>
+          <div class="brand" id="brand-home" title="홈으로"><img src="assets/logo.svg?v=23"><span class="brand-name">북적북적</span></div>
           ${isPriv() ? `<select class="input account-switcher" id="account-switcher"><option value="">내 파일</option></select>` : ''}
           <div class="topbar-spacer"></div>
           <nav class="appbar-nav">
             <div class="nav-item" data-nav="files"><span class="ico">📁</span><span class="t">내 파일</span></div>
+            <div class="nav-item" data-nav="trash"><span class="ico">🗑️</span><span class="t">휴지통</span></div>
             ${admin ? '<a class="nav-item" href="admin.html"><span class="ico">⚙️</span><span class="t">관리자</span></a>' : ''}
             <div class="nav-item" data-nav="help"><span class="ico">❓</span><span class="t">도움말</span></div>
             <div class="nav-item" data-nav="password"><span class="ico">🔑</span><span class="t">비밀번호</span></div>
@@ -79,7 +82,7 @@ const App = (() => {
       <div class="drop-overlay hidden" id="drop-overlay"><div class="drop-inner"><div class="drop-ic">📥</div>여기에 놓아 업로드<div class="drop-sub">현재 폴더로 올라갑니다</div></div></div>`;
     root().querySelectorAll('.appbar-nav [data-nav]').forEach((el) => el.addEventListener('click', () => {
       const n = el.dataset.nav;
-      if (n === 'logout') doLogout(); else if (n === 'password') changePasswordModal(); else if (n === 'files') resetToOwn(); else if (n === 'help') helpModal();
+      if (n === 'logout') doLogout(); else if (n === 'password') changePasswordModal(); else if (n === 'files') resetToOwn(); else if (n === 'help') helpModal(); else if (n === 'trash') trashModal();
     }));
     document.getElementById('menu-toggle').addEventListener('click', toggleTree);
     document.getElementById('tree-backdrop').addEventListener('click', toggleTree);
@@ -150,6 +153,7 @@ const App = (() => {
   async function loadAll() { await Promise.all([loadTree(), loadFiles()]); }
   async function loadTree() { try { const t = await API.tree(state.ownerId); state.treeFolders = t.folders; state.treeStyles = t.styles || {}; renderTree(); } catch {} }
   async function loadFiles() {
+    state.search.on = false; // 폴더 이동 시 검색 모드 해제
     const view = document.getElementById('view');
     view.innerHTML = '<div class="empty"><div class="big">⏳</div>불러오는 중…</div>';
     try {
@@ -189,8 +193,12 @@ const App = (() => {
     // 캐럿 버튼: 한 번 클릭으로 하위트리 열고 닫기
     el.querySelectorAll('[data-toggle]').forEach((c) => c.addEventListener('click', (e) => { e.stopPropagation(); toggleExpand(c.dataset.toggle); }));
     // 트리 폴더 클릭: 해당 폴더로 이동(경로에 맞춰 트리 자동 펼침). 열고닫기는 ▸ 캐럿으로.
+    // 드래그해서 트리 폴더에 놓으면 그 폴더로 이동.
     el.querySelectorAll('.tree-item[data-folder]').forEach((n) => {
       n.addEventListener('click', () => goTo(n.dataset.folder));
+      n.addEventListener('dragover', (e) => { if (state.drag) { e.preventDefault(); n.classList.add('drop-target'); } });
+      n.addEventListener('dragleave', () => n.classList.remove('drop-target'));
+      n.addEventListener('drop', (e) => { if (!state.drag) return; e.preventDefault(); n.classList.remove('drop-target'); moveDraggedTo(n.dataset.folder); });
     });
   }
   function expandAll() { state.expanded = allTreePaths(); renderTree(); }
@@ -201,22 +209,30 @@ const App = (() => {
     document.getElementById('view').innerHTML = `
       ${state.ownerId ? `<div class="impersonate-banner">👁️ <b>${UI.escapeHtml(state.ownerName || '')}</b> 계정의 파일을 보는 중<div style="flex:1"></div><button class="btn btn-sm btn-secondary" id="exit-imp">내 파일로</button></div>` : ''}
       <div class="content-head">
-        <div class="navcon">
-          <button class="icon-btn nav-btn" id="nav-back" title="뒤로 (Backspace)" ${state.nav.idx > 0 ? '' : 'disabled'}>◀</button>
-          <button class="icon-btn nav-btn" id="nav-fwd" title="앞으로" ${state.nav.idx < state.nav.stack.length - 1 ? '' : 'disabled'}>▶</button>
-          <button class="icon-btn nav-btn" id="nav-up" title="상위 폴더로" ${state.folder !== '/' ? '' : 'disabled'}>▲</button>
+        <div class="tools-left">
+          <div class="navcon">
+            <button class="icon-btn nav-btn" id="nav-back" title="뒤로 (Backspace)" ${state.nav.idx > 0 ? '' : 'disabled'}>◀</button>
+            <button class="icon-btn nav-btn" id="nav-fwd" title="앞으로" ${state.nav.idx < state.nav.stack.length - 1 ? '' : 'disabled'}>▶</button>
+            <button class="icon-btn nav-btn" id="nav-up" title="상위 폴더로" ${state.folder !== '/' ? '' : 'disabled'}>▲</button>
+          </div>
           <div class="viewtoggle">
             <button class="vt ${state.view === 'grid' ? 'on' : ''}" data-view="grid" title="미리보기">▦</button>
             <button class="vt ${state.view === 'list' ? 'on' : ''}" data-view="list" title="리스트">☰</button>
           </div>
+          <button class="btn btn-primary btn-sm" id="upload-btn" title="허용: ${state.allowedExt.join(' · ')}">⬆️ <span class="label">업로드</span></button>
           <button class="btn btn-secondary btn-sm" id="new-folder">📂 <span class="label">새 폴더</span></button>
+          <input type="file" id="file-input" multiple hidden accept="${state.allowedExt.map((e) => '.' + e).join(',')}">
+          <form class="searchbox" id="searchform">
+            <input class="input" id="search-input" type="search" placeholder="이름 검색…" autocomplete="off">
+            <button class="btn btn-secondary btn-sm" type="submit" title="검색">🔎 <span class="label">조회</span></button>
+          </form>
         </div>
-        <div class="breadcrumb" id="crumbs"></div>
-        <div style="flex:1"></div>
-        <button class="btn btn-primary btn-sm" id="upload-btn" title="허용: ${state.allowedExt.join(' · ')}">⬆️ <span class="label">업로드</span></button>
-        <input type="file" id="file-input" multiple hidden accept="${state.allowedExt.map((e) => '.' + e).join(',')}">
+        <div class="head-right">
+          <div class="breadcrumb" id="crumbs"></div>
+          <div class="usage-line"><span class="num">${UI.bytes(u.usedBytes)}</span><span class="muted">${u.unlimited ? '· 무제한' : (u.quotaBytes > 0 ? '/ ' + UI.bytes(u.quotaBytes) : '· 미할당')} · ${u.fileCount}개 파일</span>${!u.unlimited && u.quotaBytes > 0 ? `<span class="usage-bar"><span style="width:${pct}%"></span></span>` : ''}<button class="btn btn-ghost btn-sm" id="usage-report" title="용량 리포트">📊</button></div>
+        </div>
       </div>
-      <div class="usage-line"><span class="num">${UI.bytes(u.usedBytes)}</span><span class="muted">${u.unlimited ? '· 무제한' : (u.quotaBytes > 0 ? '/ ' + UI.bytes(u.quotaBytes) : '· 미할당')} · ${u.fileCount}개 파일</span>${!u.unlimited && u.quotaBytes > 0 ? `<span class="usage-bar" style="flex:1"><span style="width:${pct}%"></span></span>` : ''}</div>
+      ${state.search.on ? `<div class="search-banner">🔎 <b>${UI.escapeHtml(state.search.q)}</b> 검색 결과 · ${state.folders.length + state.files.length}건<div style="flex:1"></div><button class="btn btn-sm btn-ghost" id="search-exit">✕ 검색 나가기</button></div>` : ''}
       <div id="selbar" class="selbar hidden"></div>
       <div id="listing"></div>`;
     renderCrumbs(); renderListing(); wireContent();
@@ -279,7 +295,7 @@ const App = (() => {
 
   function gridHTML() {
     const folders = sortItems(state.folders, true).map((f) => `
-      <div class="file-card fade-in" data-folder-card="${UI.escapeHtml(f.path)}" title="더블클릭하여 열기">
+      <div class="file-card fade-in${state.selected.has(`folder:${f.path}`) ? ' sel' : ''}" data-folder-card="${UI.escapeHtml(f.path)}" data-row-key="folder:${UI.escapeHtml(f.path)}" data-drop-folder="${UI.escapeHtml(f.path)}" draggable="true" title="더블클릭하여 열기">
         <div class="file-actions">
           <button class="icon-btn" data-fedit="${UI.escapeHtml(f.path)}" title="폴더 설정">⚙️</button>
           <button class="icon-btn" data-fnote="${UI.escapeHtml(f.path)}" title="비고">📝</button>
@@ -291,7 +307,7 @@ const App = (() => {
         ${f.note ? `<div class="file-note" title="${UI.escapeHtml(f.note)}">📝 ${UI.escapeHtml(f.note)}</div>` : ''}
       </div>`).join('');
     const files = sortItems(state.files, false).map((f) => `
-      <div class="file-card fade-in" data-file="${f.id}">
+      <div class="file-card fade-in${state.selected.has(`file:${f.id}`) ? ' sel' : ''}" data-file="${f.id}" data-row-key="file:${f.id}" draggable="true">
         <div class="file-actions">
           <button class="icon-btn" data-share="${f.id}" title="공유링크">🔗</button>
           <button class="icon-btn" data-note="${f.id}" title="비고">📝</button>
@@ -311,7 +327,7 @@ const App = (() => {
     const isSel = (key) => state.selected.has(key);
     const folders = sortItems(state.folders, true).map((f) => {
       const key = `folder:${f.path}`;
-      return `<tr data-folder-row="${UI.escapeHtml(f.path)}" class="${isSel(key) ? 'sel' : ''}">
+      return `<tr data-folder-row="${UI.escapeHtml(f.path)}" data-row-key="${UI.escapeHtml(key)}" data-drop-folder="${UI.escapeHtml(f.path)}" draggable="true" class="${isSel(key) ? 'sel' : ''}">
         <td><input type="checkbox" class="rowcheck" data-sel-folder="${UI.escapeHtml(f.path)}" data-name="${UI.escapeHtml(f.name)}" ${isSel(key) ? 'checked' : ''}></td>
         <td class="open-cell name-cell" data-open="${UI.escapeHtml(f.path)}" title="더블클릭하여 열기"><span class="ic${f.color ? ' tint' : ''}" style="${folderIcoStyle(f.color)}">${f.icon || '📁'}</span> ${UI.escapeHtml(f.name)}${updateBadge(f, true)}</td>
         <td class="num muted" data-label="크기">${UI.bytes(f.size)}</td>
@@ -323,7 +339,7 @@ const App = (() => {
     }).join('');
     const files = sortItems(state.files, false).map((f) => {
       const key = `file:${f.id}`;
-      return `<tr data-file="${f.id}" class="${isSel(key) ? 'sel' : ''}">
+      return `<tr data-file="${f.id}" data-row-key="${UI.escapeHtml(key)}" draggable="true" class="${isSel(key) ? 'sel' : ''}">
         <td><input type="checkbox" class="rowcheck" data-sel-file="${f.id}" data-name="${UI.escapeHtml(f.name)}" ${isSel(key) ? 'checked' : ''}></td>
         <td class="name-cell"><span class="ic">${UI.fileIcon(f.name)}</span> ${UI.escapeHtml(f.name)}${updateBadge(f, false)}</td>
         <td class="num muted" data-label="크기">${UI.bytes(f.size)}</td>
@@ -351,7 +367,24 @@ const App = (() => {
     document.getElementById('nav-back').addEventListener('click', navBack);
     document.getElementById('nav-fwd').addEventListener('click', navForward);
     document.getElementById('nav-up').addEventListener('click', navUp);
+    document.getElementById('usage-report').addEventListener('click', usageReportModal);
+    const sf = document.getElementById('searchform'), si = document.getElementById('search-input');
+    si.value = state.search.q;
+    sf.addEventListener('submit', (e) => { e.preventDefault(); doSearch(si.value); });
+    document.getElementById('search-exit')?.addEventListener('click', clearSearch);
   }
+
+  // ── 이름 검색 ──────────────────────────
+  function doSearch(q) {
+    q = (q || '').trim();
+    if (!q) { if (state.search.on) clearSearch(); return; }
+    API.search(q, state.ownerId).then((r) => {
+      state.search = { on: true, q };
+      state.folders = r.folders || []; state.files = r.files || [];
+      state.selected.clear(); state.anchor = null; renderContent();
+    }).catch((e) => UI.toast(e.message, 'error'));
+  }
+  function clearSearch() { state.search = { on: false, q: '' }; loadFiles(); }
 
   // ── 폴더 이동(히스토리 · 트리 동기화) ──────────────
   function normFolder(p) { if (!p || p === '/') return '/'; return '/' + String(p).split('/').filter(Boolean).join('/'); }
@@ -382,19 +415,84 @@ const App = (() => {
     window.addEventListener('dragleave', (e) => { if (!state.user || !hasFiles(e)) return; dragDepth = Math.max(0, dragDepth - 1); if (dragDepth === 0) overlay()?.classList.add('hidden'); });
     window.addEventListener('drop', (e) => { if (!state.user || !hasFiles(e)) return; e.preventDefault(); dragDepth = 0; overlay()?.classList.add('hidden'); if (e.dataTransfer.files.length) uploadFiles(e.dataTransfer.files); });
     document.addEventListener('keydown', (e) => {
-      if (e.key !== 'Backspace' || !state.user) return;
+      if (!state.user) return;
       const t = e.target;
-      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return; // 입력 중엔 통과
-      if (document.querySelector('.modal-backdrop')) return; // 모달 열림 시 무시
-      e.preventDefault(); navBack(); // 브라우저 뒤로가기 대신 폴더 뒤로가기
+      const inField = t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable);
+      const modalOpen = !!document.querySelector('.modal-backdrop');
+      if (e.key === 'Backspace') { if (inField || modalOpen) return; e.preventDefault(); navBack(); return; } // 브라우저 뒤로가기 차단→폴더 뒤로
+      if (inField || modalOpen || !document.getElementById('listing')) return;
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'a' || e.key === 'A')) { e.preventDefault(); selectAllItems(); return; }
+      if (e.key === 'Escape') { if (state.selected.size) { state.selected.clear(); applySelectionClasses(); } return; }
+      if (e.key === 'Delete') { if (state.selected.size) { e.preventDefault(); bulkDelete(); } return; }
+      if (e.key === 'F2') { if (state.selected.size === 1) { e.preventDefault(); const it = [...state.selected.values()][0]; if (it.type === 'file') renameFileModal(it.id); else folderSettingsModal(it.path); } return; }
+      if (e.key === 'Enter') { if (state.selected.size === 1) { const it = [...state.selected.values()][0]; if (it.type === 'folder') openFolder(it.path); else downloadFile(it.id); } return; }
     });
+  }
+
+  // ── 선택 모델(클릭/Ctrl/Shift) · 드래그 이동 ──────────
+  function orderedItems() {
+    const fol = sortItems(state.folders, true).map((f) => ({ key: `folder:${f.path}`, item: { type: 'folder', path: f.path, name: f.name } }));
+    const fil = sortItems(state.files, false).map((f) => ({ key: `file:${f.id}`, item: { type: 'file', id: String(f.id), name: f.name } }));
+    return [...fol, ...fil];
+  }
+  function applySelectionClasses() {
+    document.querySelectorAll('#listing [data-row-key]').forEach((el) => {
+      const on = state.selected.has(el.dataset.rowKey);
+      el.classList.toggle('sel', on);
+      const cb = el.querySelector('.rowcheck'); if (cb) cb.checked = on;
+    });
+    const all = document.getElementById('check-all');
+    if (all) { const o = orderedItems(); all.checked = o.length > 0 && o.every((x) => state.selected.has(x.key)); }
+    updateSelbar();
+  }
+  function selectAllItems() { state.selected.clear(); orderedItems().forEach((o) => state.selected.set(o.key, o.item)); applySelectionClasses(); }
+  function selectClick(e, key, item) {
+    const order = orderedItems();
+    if (e.shiftKey && state.anchor) {
+      const ia = order.findIndex((o) => o.key === state.anchor), ib = order.findIndex((o) => o.key === key);
+      if (ia >= 0 && ib >= 0) { state.selected.clear(); const [lo, hi] = ia < ib ? [ia, ib] : [ib, ia]; for (let i = lo; i <= hi; i++) state.selected.set(order[i].key, order[i].item); }
+    } else if (e.ctrlKey || e.metaKey) {
+      if (state.selected.has(key)) state.selected.delete(key); else state.selected.set(key, item);
+      state.anchor = key;
+    } else { state.selected.clear(); state.selected.set(key, item); state.anchor = key; }
+    applySelectionClasses();
+  }
+  function moveDraggedTo(targetPath) {
+    const items = state.drag || []; state.drag = null;
+    if (!items.length) return;
+    const files = items.filter((i) => i.type === 'file'), folders = items.filter((i) => i.type === 'folder');
+    if (folders.some((fo) => targetPath === fo.path || targetPath.startsWith(fo.path + '/'))) return UI.toast('폴더를 자기 자신/하위로 옮길 수 없습니다', 'error');
+    (async () => {
+      try {
+        if (files.length) await API.bulkMove(files.map((f) => f.id), targetPath);
+        for (const fo of folders) { const target = (targetPath === '/' ? '' : targetPath) + '/' + fo.name; if (target !== fo.path) await API.renameFolder(fo.path, target, state.ownerId); }
+        UI.toast('이동 완료', 'success'); loadAll();
+      } catch (err) { UI.toast(err.message, 'error'); }
+    })();
   }
 
   function wireListing() {
     const box = document.getElementById('listing');
-    // 폴더 열기 — 더블클릭으로만 진입
-    box.querySelectorAll('[data-folder-card]').forEach((el) => el.addEventListener('dblclick', (e) => { if (e.target.closest('.file-actions')) return; openFolder(el.dataset.folderCard); }));
-    box.querySelectorAll('[data-open]').forEach((el) => el.addEventListener('dblclick', () => openFolder(el.dataset.open)));
+    const actionSel = '.file-actions, .row-actions, .rowcheck, button, a, input';
+    // 항목: 클릭=선택, 더블클릭=열기/다운로드, 드래그=이동
+    box.querySelectorAll('[data-row-key]').forEach((el) => {
+      const key = el.dataset.rowKey; const isFolder = key.startsWith('folder:');
+      const found = isFolder ? state.folders.find((f) => `folder:${f.path}` === key) : state.files.find((f) => `file:${f.id}` === key);
+      const item = isFolder ? { type: 'folder', path: key.slice(7), name: found ? found.name : '' } : { type: 'file', id: key.slice(5), name: found ? found.name : '' };
+      el.addEventListener('click', (e) => { if (e.target.closest(actionSel)) return; selectClick(e, key, item); });
+      el.addEventListener('dblclick', (e) => { if (e.target.closest(actionSel)) return; if (isFolder) openFolder(item.path); else downloadFile(item.id); });
+      el.addEventListener('dragstart', (e) => {
+        if (!state.selected.has(key)) { state.selected.clear(); state.selected.set(key, item); state.anchor = key; applySelectionClasses(); }
+        state.drag = [...state.selected.values()]; e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('application/bookjeok', '1');
+      });
+      el.addEventListener('dragend', () => { state.drag = null; document.querySelectorAll('.drop-target').forEach((x) => x.classList.remove('drop-target')); });
+    });
+    // 폴더 드롭 대상 (리스트 행/그리드 카드)
+    box.querySelectorAll('[data-drop-folder]').forEach((el) => {
+      el.addEventListener('dragover', (e) => { if (state.drag) { e.preventDefault(); el.classList.add('drop-target'); } });
+      el.addEventListener('dragleave', () => el.classList.remove('drop-target'));
+      el.addEventListener('drop', (e) => { if (!state.drag) return; e.preventDefault(); el.classList.remove('drop-target'); moveDraggedTo(el.dataset.dropFolder); });
+    });
     // 파일 액션
     box.querySelectorAll('[data-dl]').forEach((el) => el.addEventListener('click', (e) => { e.stopPropagation(); downloadFile(el.dataset.dl); }));
     box.querySelectorAll('[data-del]').forEach((el) => el.addEventListener('click', (e) => { e.stopPropagation(); deleteFile(el.dataset.del); }));
@@ -405,29 +503,25 @@ const App = (() => {
     box.querySelectorAll('[data-fnote]').forEach((el) => el.addEventListener('click', (e) => { e.stopPropagation(); folderNoteModal(el.dataset.fnote); }));
     box.querySelectorAll('[data-fedit]').forEach((el) => el.addEventListener('click', (e) => { e.stopPropagation(); folderSettingsModal(el.dataset.fedit); }));
     box.querySelectorAll('[data-fdel]').forEach((el) => el.addEventListener('click', (e) => { e.stopPropagation(); deleteFolder(el.dataset.fdel); }));
-    // 체크박스 선택 (리스트 뷰)
-    box.querySelectorAll('.rowcheck').forEach((c) => c.addEventListener('change', () => {
-      const item = c.dataset.selFile ? { type: 'file', id: c.dataset.selFile, name: c.dataset.name } : { type: 'folder', path: c.dataset.selFolder, name: c.dataset.name };
-      const key = selKey(item);
-      if (c.checked) state.selected.set(key, item); else state.selected.delete(key);
-      c.closest('tr').classList.toggle('sel', c.checked); updateSelbar();
-    }));
+    // 체크박스
+    box.querySelectorAll('.rowcheck').forEach((c) => {
+      c.addEventListener('click', (e) => e.stopPropagation());
+      c.addEventListener('change', () => {
+        const item = c.dataset.selFile ? { type: 'file', id: c.dataset.selFile, name: c.dataset.name } : { type: 'folder', path: c.dataset.selFolder, name: c.dataset.name };
+        const key = selKey(item);
+        if (c.checked) state.selected.set(key, item); else state.selected.delete(key);
+        state.anchor = key; applySelectionClasses();
+      });
+    });
     // 칼럼 정렬 (헤더 클릭)
     box.querySelectorAll('th.sortable').forEach((th) => th.addEventListener('click', () => toggleSort(th.dataset.sort)));
     const all = document.getElementById('check-all');
-    if (all) all.addEventListener('change', () => {
-      state.selected.clear();
-      if (all.checked) {
-        state.folders.forEach((f) => state.selected.set(`folder:${f.path}`, { type: 'folder', path: f.path, name: f.name }));
-        state.files.forEach((f) => state.selected.set(`file:${f.id}`, { type: 'file', id: String(f.id), name: f.name }));
-      }
-      renderListing();
-    });
+    if (all) all.addEventListener('change', () => { if (all.checked) selectAllItems(); else { state.selected.clear(); applySelectionClasses(); } });
   }
 
   function updateSelbar() {
     const bar = document.getElementById('selbar'); if (!bar) return;
-    if (state.view !== 'list' || state.selected.size === 0) {
+    if (state.selected.size === 0) {
       // 부드럽게 닫힘
       if (!bar.classList.contains('hidden') && !bar.classList.contains('closing')) {
         bar.classList.add('closing');
@@ -516,20 +610,11 @@ const App = (() => {
     });
     m.q('#zshare').addEventListener('click', () => {
       m.animate(() => {
-        m.q('#zresult').innerHTML = `<div class="field" style="margin-top:14px"><label>만료 기간</label>
-          <select class="input" id="zexp"><option value="0">무기한</option><option value="1">1일</option><option value="7">7일</option><option value="30">30일</option></select></div>
-          <button class="btn btn-primary btn-sm" id="zgen">링크 생성</button><div id="zlink"></div>`;
+        m.q('#zresult').innerHTML = `${shareOptionFields()}<button class="btn btn-primary btn-sm" id="zgen">링크 생성</button><div id="result"></div>`;
       });
       m.q('#zgen').addEventListener('click', async () => {
-        try {
-          const r = await API.bundleShare(bundle.bundleId, parseInt(m.q('#zexp').value, 10));
-          const dl = r.url + '/download';
-          m.animate(() => {
-            m.q('#zlink').innerHTML = `<div class="field" style="margin-top:14px"><label>다운로드 링크 (누구나 접근 가능)</label><input class="input" id="zlnk" readonly value="${dl}"></div><button class="btn btn-secondary btn-sm" id="zcopy">📋 링크 복사</button>`;
-          });
-          m.q('#zlnk').select();
-          m.q('#zcopy').addEventListener('click', () => { m.q('#zlnk').select(); navigator.clipboard?.writeText(dl); UI.toast('링크 복사됨', 'success'); });
-        } catch (err) { UI.toast(err.message, 'error'); }
+        try { const r = await API.bundleShare(bundle.bundleId, shareOptionValues(m)); shareResult(m, r.url); }
+        catch (err) { UI.toast(err.message, 'error'); }
       });
     });
   }
@@ -733,17 +818,60 @@ const App = (() => {
     setTimeout(() => m.q('#nm').focus(), 50);
   }
 
+  // 공유 옵션(만료·비밀번호·횟수) 공통 필드/값/결과
+  function shareOptionFields() {
+    return `<div class="field"><label>만료 기간</label><select class="input" id="exp"><option value="0">무기한</option><option value="1">1일</option><option value="7">7일</option><option value="30">30일</option></select></div>
+      <div class="field"><label>비밀번호 (선택)</label><input class="input" id="spw" type="text" placeholder="비우면 없음"></div>
+      <div class="field"><label>다운로드 횟수 제한 (선택)</label><input class="input num" id="smax" type="number" min="1" placeholder="비우면 무제한"></div>`;
+  }
+  const shareOptionValues = (m) => ({ expiresInDays: parseInt(m.q('#exp').value, 10) || 0, password: m.q('#spw').value.trim(), maxDownloads: parseInt(m.q('#smax').value, 10) || 0 });
+  function shareResult(m, url) {
+    m.animate(() => { m.q('#result').innerHTML = `<div class="field" style="margin-top:14px"><label>공유 링크 (누구나 접근 가능)</label><input class="input" id="lnk" readonly value="${UI.escapeHtml(url)}"></div><button class="btn btn-secondary btn-sm" id="copy">📋 링크 복사</button>`; });
+    m.q('#lnk').select();
+    m.q('#copy').addEventListener('click', () => { m.q('#lnk').select(); navigator.clipboard?.writeText(url); UI.toast('링크 복사됨', 'success'); });
+  }
   async function shareModal(id) {
     const f = state.files.find((x) => String(x.id) === String(id));
-    const m = UI.modal(`<h3>🔗 공유 링크</h3><p class="muted" style="font-size:13px;margin-bottom:8px">${UI.escapeHtml(f.name)}</p><div class="field"><label>만료 기간</label><select class="input" id="exp"><option value="0">무기한</option><option value="1">1일</option><option value="7">7일</option><option value="30">30일</option></select></div><div class="modal-actions"><button class="btn btn-ghost" id="c">닫기</button><button class="btn btn-primary" id="gen">링크 생성</button></div><div id="result"></div>`);
+    const m = UI.modal(`<h3>🔗 공유 링크</h3><p class="muted" style="font-size:13px;margin-bottom:8px">${UI.escapeHtml(f ? f.name : '')}</p>${shareOptionFields()}<div class="modal-actions"><button class="btn btn-ghost" id="c">닫기</button><button class="btn btn-primary" id="gen">링크 생성</button></div><div id="result"></div>`);
     m.q('#c').addEventListener('click', m.close);
     m.q('#gen').addEventListener('click', async () => {
-      try { const r = await API.share(id, parseInt(m.q('#exp').value, 10)); const dl = r.url + '/download';
-        m.q('#result').innerHTML = `<div class="field" style="margin-top:14px"><label>다운로드 링크 (누구나 접근 가능)</label><input class="input" id="lnk" readonly value="${dl}"></div><button class="btn btn-secondary btn-sm" id="copy">📋 링크 복사</button>`;
-        m.q('#lnk').select();
-        m.q('#copy').addEventListener('click', () => { m.q('#lnk').select(); navigator.clipboard?.writeText(dl); UI.toast('링크 복사됨', 'success'); });
-      } catch (err) { UI.toast(err.message, 'error'); }
+      try { const r = await API.share(id, shareOptionValues(m)); shareResult(m, r.url); }
+      catch (err) { UI.toast(err.message, 'error'); }
     });
+  }
+
+  function trashModal() {
+    const m = UI.modal(`<h3>🗑️ 내 휴지통 <span class="muted" style="font-size:13px;font-weight:400">· 최근 30일 이내 복원 가능</span></h3><div id="trash-body"><p class="muted">불러오는 중…</p></div><div class="modal-actions"><button class="btn btn-ghost" id="tc">닫기</button></div>`);
+    m.el.querySelector('.modal').classList.add('modal-wide');
+    m.q('#tc').addEventListener('click', m.close);
+    const daysLeft = (iso) => Math.max(0, 30 - Math.floor((Date.now() - new Date(iso).getTime()) / 86400000));
+    async function load() {
+      try {
+        const { folders, files } = await API.selfTrash();
+        if (!folders.length && !files.length) { m.q('#trash-body').innerHTML = '<p class="muted" style="text-align:center;padding:24px">휴지통이 비어 있습니다.</p>'; return; }
+        const frows = folders.map((f) => `<tr><td>📁 <b>${UI.escapeHtml(f.name)}</b> <span class="muted" style="font-size:12px">(${f.fileCount}개)</span><br><span class="muted" style="font-size:11px">${UI.escapeHtml(f.path)}</span></td><td class="num muted">${daysLeft(f.deletedAt)}일 남음</td><td style="text-align:right"><button class="btn btn-sm btn-secondary" data-rf="${f.id}">복원</button></td></tr>`).join('');
+        const rows = files.map((f) => `<tr><td>📄 ${UI.escapeHtml(f.name)}<br><span class="muted" style="font-size:11px">${UI.escapeHtml(f.folder)} · ${UI.bytes(f.size)}</span></td><td class="num muted">${daysLeft(f.deletedAt)}일 남음</td><td style="text-align:right"><button class="btn btn-sm btn-secondary" data-rfile="${f.id}">복원</button></td></tr>`).join('');
+        m.q('#trash-body').innerHTML = `<div class="table-wrap"><table><tbody>${frows}${rows}</tbody></table></div>`;
+        m.el.querySelectorAll('[data-rf]').forEach((b) => b.addEventListener('click', async () => { try { await API.restoreSelfFolder(b.dataset.rf); UI.toast('폴더 복원됨', 'success'); load(); loadAll(); } catch (e) { UI.toast(e.message, 'error'); } }));
+        m.el.querySelectorAll('[data-rfile]').forEach((b) => b.addEventListener('click', async () => { try { await API.restoreSelfFile(b.dataset.rfile); UI.toast('파일 복원됨', 'success'); load(); loadAll(); } catch (e) { UI.toast(e.message, 'error'); } }));
+      } catch (e) { m.q('#trash-body').innerHTML = `<p class="muted" style="color:var(--danger)">${UI.escapeHtml(e.message)}</p>`; }
+    }
+    load();
+  }
+
+  function usageReportModal() {
+    const m = UI.modal(`<h3>📊 용량 리포트</h3><div id="rep-body"><p class="muted">불러오는 중…</p></div><div class="modal-actions"><button class="btn btn-primary" id="rc">닫기</button></div>`);
+    m.el.querySelector('.modal').classList.add('modal-wide');
+    m.q('#rc').addEventListener('click', m.close);
+    API.usageReport(state.ownerId).then((r) => {
+      const pct = r.quotaBytes > 0 ? Math.min(100, r.usedBytes / r.quotaBytes * 100) : 0;
+      const max = Math.max(1, ...r.folders.map((f) => f.bytes));
+      const bars = r.folders.length ? r.folders.map((f) => `<div class="rep-row"><div class="rep-name">${UI.escapeHtml(f.name)}</div><div class="rep-bar"><span style="width:${(f.bytes / max * 100).toFixed(1)}%"></span></div><div class="rep-val num">${UI.bytes(f.bytes)} · ${f.fileCount}개</div></div>`).join('') : '<p class="muted">파일이 없습니다.</p>';
+      m.q('#rep-body').innerHTML = `
+        <div class="rep-summary"><b class="num">${UI.bytes(r.usedBytes)}</b> <span class="muted">${r.unlimited ? '· 무제한' : (r.quotaBytes > 0 ? '/ ' + UI.bytes(r.quotaBytes) + ` (${pct.toFixed(0)}%)` : '· 미할당')} · 총 ${r.fileCount}개 파일</span></div>
+        ${!r.unlimited && r.quotaBytes > 0 ? `<div class="usage-bar" style="max-width:none;margin:6px 0 16px"><span style="width:${pct}%"></span></div>` : '<div style="height:8px"></div>'}
+        <div class="muted" style="font-size:12px;margin-bottom:6px">최상위 폴더별 사용량</div>${bars}`;
+    }).catch((e) => { m.q('#rep-body').innerHTML = `<p class="muted" style="color:var(--danger)">${UI.escapeHtml(e.message)}</p>`; });
   }
 
   function helpModal() {

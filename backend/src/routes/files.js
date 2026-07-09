@@ -10,7 +10,7 @@ const config = require('../config');
 const { query } = require('../db');
 const { authenticate } = require('../middleware/auth');
 const { audit, wrap, canAccessOwner } = require('../util');
-const { generateToken } = require('../crypto');
+const { generateToken, hashPassword } = require('../crypto');
 const { isAllowed, allowedLabel, getAllowedExtensions } = require('../settings');
 
 const router = express.Router();
@@ -473,29 +473,114 @@ router.post('/bundle/:id(\\d+)/share', authenticate, wrap(async (req, res) => {
   const b = await loadBundleForUser(req.user, req.params.id);
   if (!b) return res.status(404).json({ error: '압축 파일을 찾을 수 없습니다.' });
   if (b === 'forbidden') return res.status(403).json({ error: '권한이 없습니다.' });
-  const days = parseInt(req.body.expiresInDays || '0', 10);
-  const expiresAt = days > 0 ? new Date(Date.now() + days * 86400000) : null;
+  const { passwordHash, maxDownloads, expiresAt } = await shareOptions(req);
   const token = generateToken(24);
-  await query('INSERT INTO share_links (bundle_id, token, created_by, expires_at) VALUES ($1,$2,$3,$4)', [b.id, token, req.user.id, expiresAt]);
-  const proto = (req.headers['x-forwarded-proto'] || 'https').split(',')[0];
-  const base = config.publicApiUrl || `${proto}://${req.headers.host}`;
+  await query('INSERT INTO share_links (bundle_id, token, created_by, expires_at, password_hash, max_downloads) VALUES ($1,$2,$3,$4,$5,$6)', [b.id, token, req.user.id, expiresAt, passwordHash, maxDownloads]);
   await audit(req, 'create_share', `bundle=${b.id}`);
-  res.status(201).json({ token, url: `${base}/api/share/${token}`, fileName: b.display_name, expiresAt });
+  res.status(201).json({ token, url: `${shareWebBase(req)}/share.html?t=${token}`, fileName: b.display_name, expiresAt });
+}));
+
+// ── 이름 검색 (현재 계정 범위, 폴더/파일 제목 기준) ──────────
+router.get('/search', authenticate, wrap(resolveOwner), wrap(async (req, res) => {
+  const q = String(req.query.q || '').trim();
+  if (!q) return res.json({ query: '', folders: [], files: [] });
+  const owner = req.targetOwnerId; const ql = q.toLowerCase();
+  const fr = await query('SELECT id, path, note, note_updated_at, created_at, icon, color FROM folders WHERE owner_id=$1 AND deleted_at IS NULL', [owner]);
+  const folders = fr.rows
+    .filter((r) => (r.path.split('/').filter(Boolean).pop() || '').toLowerCase().includes(ql))
+    .slice(0, 300)
+    .map((r) => ({ id: r.id, path: r.path, name: r.path.split('/').filter(Boolean).pop() || r.path, note: r.note || '', noteUpdatedAt: r.note_updated_at, createdAt: r.created_at, icon: r.icon || '', color: r.color || '', size: 0 }));
+  const like = '%' + q.replace(/[%_\\]/g, (c) => '\\' + c) + '%';
+  const files = await query("SELECT * FROM files WHERE owner_id=$1 AND deleted_at IS NULL AND original_name ILIKE $2 ESCAPE '\\' ORDER BY original_name LIMIT 500", [owner, like]);
+  res.json({ query: q, folders, files: files.rows.map(fileRow) });
+}));
+
+// ── 용량 리포트 (최상위 폴더별 집계) ──────────
+router.get('/usage/report', authenticate, wrap(resolveOwner), wrap(async (req, res) => {
+  const owner = req.targetOwnerId;
+  const tot = await query('SELECT COUNT(*)::int AS c, COALESCE(SUM(size_bytes),0) AS b FROM files WHERE owner_id=$1 AND deleted_at IS NULL', [owner]);
+  const u = await query('SELECT quota_bytes, role FROM users WHERE id=$1', [owner]);
+  const byTop = await query(
+    `SELECT COALESCE(NULLIF(split_part(folder,'/',2),''),'(루트)') AS top, COUNT(*)::int AS c, COALESCE(SUM(size_bytes),0) AS b
+     FROM files WHERE owner_id=$1 AND deleted_at IS NULL GROUP BY top ORDER BY b DESC LIMIT 100`, [owner]);
+  res.json({
+    ownerId: owner, fileCount: tot.rows[0].c, usedBytes: Number(tot.rows[0].b),
+    quotaBytes: Number(u.rows[0].quota_bytes), unlimited: u.rows[0].role === 'admin',
+    folders: byTop.rows.map((r) => ({ name: r.top, fileCount: r.c, bytes: Number(r.b) })),
+  });
+}));
+
+// ── 사용자 셀프 휴지통 (본인 것, 최근 30일) ──────────
+const SELF_TRASH_MS = 30 * 86400000;
+router.get('/trash', authenticate, wrap(async (req, res) => {
+  const owner = req.user.id;
+  const files = await query(
+    `SELECT id, original_name AS name, folder, size_bytes, deleted_at FROM files
+     WHERE owner_id=$1 AND deleted_at IS NOT NULL AND deleted_with_folder IS NULL AND deleted_at > now() - interval '30 days'
+     ORDER BY deleted_at DESC`, [owner]);
+  const folders = await query(
+    `SELECT fo.id, fo.path, fo.deleted_at, (SELECT COUNT(*) FROM files x WHERE x.deleted_with_folder=fo.path AND x.owner_id=fo.owner_id) AS file_count
+     FROM folders fo WHERE fo.owner_id=$1 AND fo.deleted_at IS NOT NULL AND fo.deleted_at > now() - interval '30 days'
+     ORDER BY fo.deleted_at DESC`, [owner]);
+  res.json({
+    days: 30,
+    files: files.rows.map((r) => ({ id: r.id, name: r.name, folder: r.folder, size: Number(r.size_bytes), deletedAt: r.deleted_at })),
+    folders: folders.rows.map((r) => ({ id: r.id, path: r.path, name: r.path.split('/').filter(Boolean).pop() || r.path, fileCount: Number(r.file_count), deletedAt: r.deleted_at })),
+  });
+}));
+router.post('/trash/file/:id(\\d+)/restore', authenticate, wrap(async (req, res) => {
+  const r = await query("SELECT * FROM files WHERE id=$1 AND owner_id=$2 AND deleted_at IS NOT NULL AND deleted_at > now() - interval '30 days'", [req.params.id, req.user.id]);
+  if (r.rowCount === 0) return res.status(404).json({ error: '복원할 수 없습니다. (없거나 30일 초과)' });
+  const f = r.rows[0];
+  await ensureFolder(f.owner_id, f.folder);
+  const name = await uniqueFileName(f.owner_id, f.folder, f.original_name);
+  await query('UPDATE files SET deleted_at=NULL, deleted_with_folder=NULL, original_name=$1, updated_at=now() WHERE id=$2', [name, f.id]);
+  await audit(req, 'self_restore_file', `file=${f.id}`);
+  res.json({ ok: true, name, folder: f.folder });
+}));
+router.post('/trash/folder/:id(\\d+)/restore', authenticate, wrap(async (req, res) => {
+  const r = await query("SELECT * FROM folders WHERE id=$1 AND owner_id=$2 AND deleted_at IS NOT NULL AND deleted_at > now() - interval '30 days'", [req.params.id, req.user.id]);
+  if (r.rowCount === 0) return res.status(404).json({ error: '복원할 수 없습니다. (없거나 30일 초과)' });
+  const fo = r.rows[0];
+  let newPath = fo.path;
+  const dup = await query('SELECT 1 FROM folders WHERE owner_id=$1 AND path=$2 AND deleted_at IS NULL', [fo.owner_id, fo.path]);
+  if (dup.rowCount > 0) {
+    let n = 2; const parent = fo.path.slice(0, fo.path.lastIndexOf('/')) || ''; const base = fo.path.split('/').pop();
+    // eslint-disable-next-line no-constant-condition
+    while (true) { const c = `${parent}/${base} (${n})`; const e = await query('SELECT 1 FROM folders WHERE owner_id=$1 AND path=$2 AND deleted_at IS NULL', [fo.owner_id, c]); if (e.rowCount === 0) { newPath = c; break; } n++; }
+  }
+  await ensureFolder(fo.owner_id, newPath.slice(0, newPath.lastIndexOf('/')) || '/');
+  const cut = String(fo.path.length + 1); const oldLike = fo.path + '/%';
+  await query(`UPDATE folders SET deleted_at=NULL, path=$4 || substring(path from $5::int) WHERE owner_id=$1 AND deleted_at IS NOT NULL AND (path=$2 OR path LIKE $3)`, [fo.owner_id, fo.path, oldLike, newPath, cut]);
+  await query(`UPDATE files SET deleted_at=NULL, deleted_with_folder=NULL, folder=$3 || substring(folder from $4::int), updated_at=now() WHERE owner_id=$1 AND deleted_with_folder=$2`, [fo.owner_id, fo.path, newPath, cut]);
+  await audit(req, 'self_restore_folder', `${fo.path} -> ${newPath}`);
+  res.json({ ok: true, path: newPath });
 }));
 
 // ── 공유 링크 ──────────
+function shareWebBase(req) {
+  const o = req.headers.origin; if (o) return o.replace(/\/$/, '');
+  const proto = (req.headers['x-forwarded-proto'] || 'https').split(',')[0];
+  return config.publicApiUrl || `${proto}://${req.headers.host}`;
+}
+async function shareOptions(req) {
+  const password = String(req.body.password || '').trim();
+  const passwordHash = password ? await hashPassword(password) : null;
+  const mx = parseInt(req.body.maxDownloads, 10);
+  const maxDownloads = (Number.isFinite(mx) && mx > 0) ? mx : null;
+  const days = parseInt(req.body.expiresInDays || '0', 10);
+  const expiresAt = days > 0 ? new Date(Date.now() + days * 86400000) : null;
+  return { passwordHash, maxDownloads, expiresAt };
+}
 router.post('/:id(\\d+)/share', authenticate, wrap(async (req, res) => {
   const r = await query('SELECT owner_id, original_name FROM files WHERE id=$1 AND deleted_at IS NULL', [req.params.id]);
   if (r.rowCount === 0) return res.status(404).json({ error: '파일을 찾을 수 없습니다.' });
   if (!(await canAccessOwner(req.user, r.rows[0].owner_id))) return res.status(403).json({ error: '권한이 없습니다.' });
-  const days = parseInt(req.body.expiresInDays || '0', 10);
-  const expiresAt = days > 0 ? new Date(Date.now() + days * 86400000) : null;
+  const { passwordHash, maxDownloads, expiresAt } = await shareOptions(req);
   const token = generateToken(24);
-  await query('INSERT INTO share_links (file_id, token, created_by, expires_at) VALUES ($1,$2,$3,$4)', [req.params.id, token, req.user.id, expiresAt]);
-  const proto = (req.headers['x-forwarded-proto'] || 'https').split(',')[0];
-  const base = config.publicApiUrl || `${proto}://${req.headers.host}`;
+  await query('INSERT INTO share_links (file_id, token, created_by, expires_at, password_hash, max_downloads) VALUES ($1,$2,$3,$4,$5,$6)', [req.params.id, token, req.user.id, expiresAt, passwordHash, maxDownloads]);
   await audit(req, 'create_share', `file=${req.params.id}`);
-  res.status(201).json({ token, url: `${base}/api/share/${token}`, fileName: r.rows[0].original_name, expiresAt });
+  res.status(201).json({ token, url: `${shareWebBase(req)}/share.html?t=${token}`, fileName: r.rows[0].original_name, expiresAt });
 }));
 
 // ── 사용량 ──────────

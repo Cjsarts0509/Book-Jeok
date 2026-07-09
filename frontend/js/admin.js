@@ -21,13 +21,14 @@ const Admin = (() => {
     root().innerHTML = `
       <div class="layout">
         <header class="appbar">
-          <a class="brand" href="index.html" title="홈으로"><img src="assets/logo.svg?v=22"><span class="brand-name">북적북적</span></a>
+          <a class="brand" href="index.html" title="홈으로"><img src="assets/logo.svg?v=23"><span class="brand-name">북적북적</span></a>
           <nav class="appbar-nav">
             ${item('users', '👥', '계정')}
             ${item('branches', '🏢', '영업점')}
             ${item('notices', '📢', '공지')}
             ${item('ext', '🧩', '확장자')}
             ${item('trash', '🗑️', '휴지통')}
+            ${item('capacity', '📊', '용량')}
             ${item('db', '🗄️', 'DB')}
             ${item('audit', '📜', '로그')}
             ${item('manual', '📖', '매뉴얼')}
@@ -54,8 +55,9 @@ const Admin = (() => {
     else if (tab === 'trash') loadTrash();
     else if (tab === 'db') loadDb();
     else if (tab === 'audit') loadAudit();
+    else if (tab === 'capacity') loadCapacity();
     else if (tab === 'manual') loadManual();
-    const titles = { users: '계정 관리', branches: '영업점 관리', notices: '공지사항', ext: '허용 확장자', trash: '휴지통', db: 'DB 상태', audit: '감사 로그', manual: '사용자 매뉴얼' };
+    const titles = { users: '계정 관리', branches: '영업점 관리', notices: '공지사항', ext: '허용 확장자', trash: '휴지통', capacity: '용량 리포트', db: 'DB 상태', audit: '감사 로그', manual: '사용자 매뉴얼' };
     document.getElementById('page-title').textContent = titles[tab];
   }
 
@@ -474,6 +476,33 @@ const Admin = (() => {
           <td class="num" style="color:var(--text-muted)">${UI.escapeHtml(l.ip)}</td>
         </tr>`).join('');
       view.innerHTML = `<div class="table-wrap"><table><thead><tr><th>시각</th><th>사용자</th><th>동작</th><th>상세</th><th>IP</th></tr></thead><tbody>${rows || '<tr><td colspan=5>기록 없음</td></tr>'}</tbody></table></div>`;
+    } catch (err) { view.innerHTML = `<div class="empty">⚠️ ${UI.escapeHtml(err.message)}</div>`; }
+  }
+
+  // ── 용량 리포트 (전 계정) ──────────────
+  async function loadCapacity() {
+    const view = document.getElementById('view');
+    view.innerHTML = '<div class="empty"><div class="big">⏳</div>불러오는 중…</div>';
+    try {
+      const [{ users }, disk] = await Promise.all([API.adminUsers(), API.diskInfo()]);
+      const totalUsed = users.reduce((s, u) => s + Number(u.usedBytes || 0), 0);
+      const max = Math.max(1, ...users.map((u) => Number(u.usedBytes || 0)));
+      const rows = users.slice().sort((a, b) => Number(b.usedBytes) - Number(a.usedBytes)).map((u) => {
+        const used = Number(u.usedBytes || 0), quota = Number(u.quotaBytes || 0);
+        const pctQ = quota > 0 ? Math.min(100, used / quota * 100) : 0;
+        const label = quota > 0 ? `${UI.bytes(used)} / ${UI.bytes(quota)} (${pctQ.toFixed(0)}%)` : `${UI.bytes(used)}${u.role === 'admin' ? ' · 무제한' : ' · 미할당'}`;
+        return `<div class="rep-row"><div class="rep-name">${UI.escapeHtml(u.displayName)} <span class="muted" style="font-size:11px">@${UI.escapeHtml(u.username)}</span></div>
+          <div class="rep-bar"><span style="width:${(used / max * 100).toFixed(1)}%"></span></div>
+          <div class="rep-val num">${label} · ${u.fileCount}개</div></div>`;
+      }).join('');
+      view.innerHTML = `
+        <div class="stat-grid">
+          <div class="stat"><div class="k">디스크 전체</div><div class="v num">${UI.bytes(disk.totalBytes)}</div></div>
+          <div class="stat"><div class="k">사용 중 (전 계정)</div><div class="v num">${UI.bytes(totalUsed)}</div></div>
+          <div class="stat"><div class="k">할당 합계</div><div class="v num">${UI.bytes(disk.allocatedBytes || 0)}</div></div>
+          <div class="stat"><div class="k">할당 가능 (남음)</div><div class="v num">${UI.bytes(disk.availableBytes || 0)}</div></div>
+        </div>
+        <div class="muted" style="font-size:12px;margin-bottom:8px">계정별 사용량 (많은 순)</div>${rows || '<p class="muted">계정이 없습니다.</p>'}`;
     } catch (err) { view.innerHTML = `<div class="empty">⚠️ ${UI.escapeHtml(err.message)}</div>`; }
   }
 
