@@ -19,6 +19,7 @@ const App = (() => {
     tagFilter: null,      // 태그로 필터(태그 id)
     tags: [],             // 현재 계정(owner)의 태그 목록
     qrEnabled: true,      // 공유 QR 사용 여부(관리자 설정)
+    ocrEnabled: false,    // OCR 엔진(tesseract) 설치 여부
     seenAt: 0,            // 현재 폴더를 '직전에' 열람한 시각(이 이후 생긴 항목만 NEW/수정)
     seenFolder: null,     // seenAt이 캡처된 폴더 키(리프레시 시 재캡처 방지)
   };
@@ -37,6 +38,7 @@ const App = (() => {
       try {
         state.user = (await API.me()).user;
         state.qrEnabled = state.user.qrEnabled !== false;
+        state.ocrEnabled = !!state.user.ocrEnabled;
         if (state.user.role === 'admin' && !state.user.totpEnabled) return force2faSetup();
         return renderApp();
       } catch { API.setToken(null); }
@@ -46,7 +48,7 @@ const App = (() => {
   // 관리자 2FA 필수: 설정 완료 전까지 앱 진입 차단
   function force2faSetup() {
     root().innerHTML = `<div class="login-screen"><div class="login-card" style="max-width:460px">
-      <img src="assets/logo.svg?v=61" class="login-logo" alt="북적북적">
+      <img src="assets/logo.svg?v=62" class="login-logo" alt="북적북적">
       <div class="login-title">2단계 인증 설정</div>
       <p class="muted" style="text-align:center;font-size:13px;margin:6px 0 12px">관리자 계정은 보안을 위해 <b>2단계 인증이 필수</b>입니다.<br>설정을 완료해야 계속할 수 있습니다.</p>
       <div id="tf-host"></div>
@@ -60,7 +62,7 @@ const App = (() => {
     root().innerHTML = `
       <div class="login-screen">
         <form class="login-card" id="login-form">
-          <img src="assets/logo.svg?v=61" class="login-logo" alt="북적북적">
+          <img src="assets/logo.svg?v=62" class="login-logo" alt="북적북적">
           <div class="login-title">북적북적</div>
           <div class="login-sub">Book-Jeok · 우리끼리 나누는 파일 창고</div>
           <div class="field"><label>아이디</label><input class="input" name="username" autocomplete="username" placeholder="아이디" required></div>
@@ -74,7 +76,7 @@ const App = (() => {
       try {
         await UI.busy(btn, async () => {
           const r = await API.login(f.username.value.trim(), f.password.value, f.token.value.trim());
-          API.setToken(r.token); state.user = r.user; state.qrEnabled = r.user.qrEnabled !== false;
+          API.setToken(r.token); state.user = r.user; state.qrEnabled = r.user.qrEnabled !== false; state.ocrEnabled = !!r.user.ocrEnabled;
           if (r.mustSetup2fa) return force2faSetup();
           UI.toast(`${r.user.displayName}님 환영합니다 🎉`, 'success'); renderApp();
         });
@@ -93,7 +95,7 @@ const App = (() => {
       <div class="layout">
         <header class="appbar">
           <button class="icon-btn appbar-menu" id="menu-toggle" title="폴더">☰</button>
-          <div class="brand" id="brand-home" title="홈으로"><img src="assets/logo.svg?v=61"><span class="brand-name">북적북적</span></div>
+          <div class="brand" id="brand-home" title="홈으로"><img src="assets/logo.svg?v=62"><span class="brand-name">북적북적</span></div>
           ${isPriv() ? `<select class="input account-switcher" id="account-switcher"><option value="">내 파일</option></select>` : ''}
           <div class="topbar-spacer"></div>
           <button class="icon-btn appbar-navmenu" id="nav-menu-toggle" title="메뉴" aria-label="메뉴">☰<span class="notif-badge hidden" id="notif-badge-menu">0</span></button>
@@ -382,6 +384,9 @@ const App = (() => {
     ? `<span class="tag-chips">${tags.map((t) => `<span class="tag-chip" style="--tc:${UI.escapeHtml(t.color || '#118AB2')}">${UI.escapeHtml(t.name)}</span>`).join('')}</span>` : '';
   // 검색 시 이름이 아닌 '문서 내용(OCR)'으로 매칭된 경우 스니펫 표시
   const ocrSnip = (f) => f.ocrSnippet ? `<div class="ocr-snip" title="문서 내용에서 검색어 발견">📄 ${UI.escapeHtml(f.ocrSnippet)}</div>` : '';
+  // 이미지 파일 + OCR 엔진 사용 가능하면 OCR 실행 버튼 노출 (이미 인식했으면 표시)
+  const canOcr = (f) => state.ocrEnabled && isImage(f.name);
+  const ocrTitle = (f) => f.ocrStatus === 'done' ? '문자 인식됨 · 다시 인식' : '문자 인식(OCR)';
 
   function renderListing() {
     const box = document.getElementById('listing');
@@ -442,6 +447,7 @@ const App = (() => {
           <div class="mcard-acts">
             <button class="mbtn mbtn-primary" data-dl="${f.id}">⬇️ 다운로드</button>
             ${canPreview(f.name) ? `<button class="mbtn" data-preview="${f.id}">👁️ 미리보기</button>` : ''}
+            ${canOcr(f) ? `<button class="mbtn${f.ocrStatus === 'done' ? ' ocr-on' : ''}" data-ocr="${f.id}">🔤 ${f.ocrStatus === 'done' ? 'OCR 완료' : 'OCR'}</button>` : ''}
             <button class="mbtn" data-share="${f.id}">🔗 공유</button>
             <button class="mbtn" data-tags="${f.id}">🏷️ 태그</button>
             <button class="mbtn" data-note="${f.id}">📝 비고</button>
@@ -474,6 +480,7 @@ const App = (() => {
       <div class="file-card fade-in${state.selected.has(`file:${f.id}`) ? ' sel' : ''}" data-file="${f.id}" data-row-key="file:${f.id}" draggable="true">
         <div class="file-actions">
           ${canPreview(f.name) ? `<button class="icon-btn" data-preview="${f.id}" title="미리보기">👁️</button>` : ''}
+          ${canOcr(f) ? `<button class="icon-btn${f.ocrStatus === 'done' ? ' ocr-on' : ''}" data-ocr="${f.id}" title="${ocrTitle(f)}">🔤</button>` : ''}
           <button class="icon-btn" data-share="${f.id}" title="공유링크">🔗</button>
           <button class="icon-btn" data-tags="${f.id}" title="태그">🏷️</button>
           <button class="icon-btn" data-note="${f.id}" title="비고">📝</button>
@@ -515,7 +522,7 @@ const App = (() => {
         <td class="num muted" data-label="등록">${UI.date(f.createdAt)}</td>
         <td class="num muted" data-label="수정">${UI.date(f.updatedAt || f.createdAt)}</td>
         <td class="note-cell" data-note="${f.id}" title="클릭하여 비고 편집">${f.note ? UI.escapeHtml(f.note) : '<span class="muted">+ 비고</span>'}</td>
-        <td class="row-actions">${canPreview(f.name) ? `<button class="icon-btn" data-preview="${f.id}" title="미리보기">👁️</button>` : ''}<button class="icon-btn" data-share="${f.id}" title="공유">🔗</button><button class="icon-btn" data-tags="${f.id}" title="태그">🏷️</button><button class="icon-btn" data-dl="${f.id}" title="다운로드">⬇️</button></td>
+        <td class="row-actions">${canPreview(f.name) ? `<button class="icon-btn" data-preview="${f.id}" title="미리보기">👁️</button>` : ''}${canOcr(f) ? `<button class="icon-btn${f.ocrStatus === 'done' ? ' ocr-on' : ''}" data-ocr="${f.id}" title="${ocrTitle(f)}">🔤</button>` : ''}<button class="icon-btn" data-share="${f.id}" title="공유">🔗</button><button class="icon-btn" data-tags="${f.id}" title="태그">🏷️</button><button class="icon-btn" data-dl="${f.id}" title="다운로드">⬇️</button></td>
       </tr>`;
     }).join('');
     const th = (key, label, style = '') => `<th class="sortable${state.sort.key === key ? ' sorted' : ''}" data-sort="${key}"${style ? ` style="${style}"` : ''}>${label}${sortArrow(key)}</th>`;
@@ -760,6 +767,7 @@ const App = (() => {
     });
     // 파일 액션
     box.querySelectorAll('[data-preview]').forEach((el) => el.addEventListener('click', (e) => { e.stopPropagation(); previewModal(el.dataset.preview); }));
+    box.querySelectorAll('[data-ocr]').forEach((el) => el.addEventListener('click', (e) => { e.stopPropagation(); runOcr(el.dataset.ocr, e.currentTarget); }));
     box.querySelectorAll('[data-dl]').forEach((el) => el.addEventListener('click', (e) => { e.stopPropagation(); downloadFile(el.dataset.dl); }));
     box.querySelectorAll('[data-del]').forEach((el) => el.addEventListener('click', (e) => { e.stopPropagation(); deleteFile(el.dataset.del); }));
     box.querySelectorAll('[data-share]').forEach((el) => el.addEventListener('click', (e) => { e.stopPropagation(); shareModal(el.dataset.share); }));
@@ -954,13 +962,13 @@ const App = (() => {
   // ── 카메라(사진) 업로드: 촬영 → 각 사진 제목·비고 입력 → 업로드 ──────────
   function cameraReviewModal(files) {
     const urls = files.map((f) => URL.createObjectURL(f));
-    const stamp = () => { const d = new Date(); const p = (n) => String(n).padStart(2, '0'); return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`; };
     const rows = files.map((f, i) => `
       <div class="cam-item" data-i="${i}">
         <img class="cam-thumb" src="${urls[i]}" alt="">
         <div class="cam-fields">
-          <input class="input cam-title" placeholder="제목(선택)" value="사진_${stamp()}_${i + 1}">
+          <input class="input cam-title" placeholder="제목(선택)">
           <input class="input cam-note" placeholder="비고(선택)">
+          ${state.ocrEnabled ? `<label class="cam-ocr"><input type="checkbox" class="cam-ocr-cb"> 🔤 문자 인식(OCR) — 사진 속 글자로 검색</label>` : ''}
         </div>
         <button class="icon-btn cam-rm" data-rm="${i}" title="제거">✕</button>
       </div>`).join('');
@@ -980,17 +988,21 @@ const App = (() => {
     }));
     m.q('#cam-go').addEventListener('click', async () => {
       const fd = new FormData(); fd.append('folder', state.folder);
+      let anyOcr = false;
       [...kept].forEach((i) => {
         const item = m.el.querySelector(`.cam-item[data-i="${i}"]`);
+        const wantOcr = item.querySelector('.cam-ocr-cb')?.checked || false;
+        if (wantOcr) anyOcr = true;
         fd.append('file', files[i]);
         fd.append('titles', item.querySelector('.cam-title').value.trim());
         fd.append('notes', item.querySelector('.cam-note').value.trim());
+        fd.append('ocr', wantOcr ? '1' : '0');
       });
       m.q('#cam-go').disabled = true; m.q('#cam-go').textContent = '업로드 중…';
       try {
         const r = await API.upload(fd, state.ownerId);
         if (r && r.rejected && r.rejected.length) UI.toast(`⚠️ ${r.rejected.length}장 차단됨`, 'error');
-        UI.toast('촬영 업로드 완료 ✅ (OCR 인식은 잠시 후 검색 가능)', 'success');
+        UI.toast(anyOcr ? '촬영 업로드 완료 ✅ (문자 인식은 잠시 후 검색 가능)' : '촬영 업로드 완료 ✅', 'success');
         cleanup(); m.close(); loadAll();
       } catch (err) { UI.toast(err.message, 'error'); m.q('#cam-go').disabled = false; m.q('#cam-go').textContent = `⬆️ ${kept.size}장 업로드`; }
     });
@@ -1204,6 +1216,7 @@ const App = (() => {
     ] : [
       { icon: '⬇️', label: '다운로드', onClick: () => downloadFile(item.id) },
       ...(canPreview(item.name) ? [{ icon: '👁️', label: '미리보기', onClick: () => previewModal(item.id) }] : []),
+      ...((state.ocrEnabled && isImage(item.name)) ? [{ icon: '🔤', label: '문자 인식(OCR)', onClick: () => runOcr(item.id) }] : []),
       { icon: '🔗', label: '공유 링크', onClick: () => shareModal(item.id) },
       { icon: '🏷️', label: '태그', onClick: () => tagPickerModal(item.id) },
       { icon: '📝', label: '비고', onClick: () => noteModal(item.id) },
@@ -1434,6 +1447,19 @@ const App = (() => {
   async function toggleFavFolder(path) {
     try { const r = await API.toggleFav({ kind: 'folder', path, ownerId: state.ownerId || undefined }); const f = state.folders.find((x) => x.path === path); if (f) f.fav = r.fav; renderListing(); }
     catch (e) { UI.toast(e.message, 'error'); }
+  }
+
+  // ── OCR 문자 인식 실행 (수동) ──────────
+  async function runOcr(id, btn) {
+    await UI.busy(btn, async () => {
+      try {
+        UI.toast('문자 인식(OCR) 중…');
+        const r = await API.ocrFile(id);
+        UI.toast(r.chars > 0 ? `OCR 완료 · ${r.chars}자 인식됨 (이제 내용으로 검색 가능)` : 'OCR 완료 · 인식된 글자가 없습니다', 'success');
+        const f = state.files.find((x) => String(x.id) === String(id)); if (f) f.ocrStatus = 'done';
+        renderListing();
+      } catch (e) { UI.toast(e.message, 'error'); }
+    });
   }
 
   // ── 파일 태그 지정 ──────────

@@ -100,7 +100,7 @@ async function resolveOwner(req, res, next) {
 const fileRow = (r) => ({
   id: r.id, name: r.original_name, folder: r.folder, size: Number(r.size_bytes),
   mime: r.mime_type, note: r.note || '', createdAt: r.created_at, updatedAt: r.updated_at, noteUpdatedAt: r.note_updated_at,
-  fav: false, tags: [],
+  ocrStatus: r.ocr_status || '', fav: false, tags: [],
 });
 
 // 파일/폴더 목록에 즐겨찾기(fav)와 태그(tags) 정보를 채워 넣는다(뷰어 기준).
@@ -226,7 +226,7 @@ router.delete('/folders', authenticate, wrap(resolveOwner), wrap(async (req, res
 router.get('/', authenticate, wrap(resolveOwner), wrap(async (req, res) => {
   const folder = normalizeFolder(req.query.folder);
   const files = await query(
-    `SELECT id, folder, original_name, size_bytes, mime_type, note, created_at, updated_at, note_updated_at
+    `SELECT id, folder, original_name, size_bytes, mime_type, note, created_at, updated_at, note_updated_at, ocr_status
      FROM files WHERE owner_id=$1 AND folder=$2 AND deleted_at IS NULL ORDER BY original_name`,
     [req.targetOwnerId, folder]
   );
@@ -279,9 +279,10 @@ router.post('/upload', authenticate, wrap(resolveOwner), upload.array('file', 30
     }
   }
   await ensureFolder(req.targetOwnerId, folder);
-  // 업로드 시 파일별 제목/비고(선택) — 카메라 업로드 등에서 index로 정렬해 전달
+  // 업로드 시 파일별 제목/비고/OCR여부(선택) — 카메라 업로드 등에서 index로 정렬해 전달
   const titles = req.body.titles !== undefined ? [].concat(req.body.titles) : [];
   const notes = req.body.notes !== undefined ? [].concat(req.body.notes) : [];
+  const ocrFlags = req.body.ocr !== undefined ? [].concat(req.body.ocr) : [];
   const saved = []; const rejected = [];
   for (let i = 0; i < req.files.length; i++) {
     const f = req.files[i];
@@ -309,14 +310,15 @@ router.post('/upload', authenticate, wrap(resolveOwner), upload.array('file', 30
     } else {
       name = await uniqueFileName(req.targetOwnerId, folder, originalName);
     }
-    // 이미지면 OCR 대기 상태로 표시(백그라운드 처리)
-    const ocrStatus = (ocr.enabled() && ocr.canOcr(name)) ? 'pending' : '';
+    // OCR은 자동으로 하지 않음 — 업로드 시 사용자가 요청한 이미지(ocr 플래그)만 백그라운드 처리
+    const wantOcr = (String(ocrFlags[i]) === '1' || ocrFlags[i] === true) && ocr.enabled() && ocr.canOcr(name);
+    const ocrStatus = wantOcr ? 'pending' : '';
     const row = await query(
       `INSERT INTO files (owner_id, folder, original_name, stored_name, size_bytes, mime_type, note, note_updated_at, ocr_status)
        VALUES ($1,$2,$3,$4,$5,$6,$7,${note ? 'now()' : 'NULL'},$8) RETURNING id`,
       [req.targetOwnerId, folder, name, path.basename(f.path), f.size, f.mimetype, note, ocrStatus]
     );
-    if (ocrStatus === 'pending') ocr.enqueue(row.rows[0].id, f.path);
+    if (wantOcr) ocr.enqueue(row.rows[0].id, f.path);
     saved.push({ id: row.rows[0].id, name, size: f.size, folder });
   }
   await audit(req, 'upload', `owner=${req.targetOwnerId} count=${saved.length}`);
@@ -343,6 +345,23 @@ router.get('/:id(\\d+)/download', authenticate, wrap(async (req, res) => {
   if (!fs.existsSync(disk)) return res.status(410).json({ error: '파일 실체가 존재하지 않습니다.' });
   await audit(req, 'download', `file=${file.id}`);
   res.download(disk, file.original_name);
+}));
+
+// ── OCR 문자 인식 (수동 실행) ──────────
+router.post('/:id(\\d+)/ocr', authenticate, wrap(async (req, res) => {
+  const r = await query('SELECT owner_id, original_name, stored_name FROM files WHERE id=$1 AND deleted_at IS NULL', [req.params.id]);
+  if (r.rowCount === 0) return res.status(404).json({ error: '파일을 찾을 수 없습니다.' });
+  const f = r.rows[0];
+  if (!(await canAccessOwner(req.user, f.owner_id))) return res.status(403).json({ error: '권한이 없습니다.' });
+  if (!ocr.canOcr(f.original_name)) return res.status(400).json({ error: '이미지 파일만 문자 인식(OCR)할 수 있습니다.' });
+  if (!ocr.enabled()) return res.status(503).json({ error: 'OCR 엔진(tesseract)이 설치되어 있지 않습니다. 서버를 재빌드하세요.' });
+  const disk = path.join(userDir(f.owner_id), f.stored_name);
+  if (!fs.existsSync(disk)) return res.status(410).json({ error: '파일 실체가 존재하지 않습니다.' });
+  const out = await ocr.extractText(disk);
+  if (!out.ok) { await query("UPDATE files SET ocr_status='error' WHERE id=$1", [req.params.id]); return res.status(500).json({ error: 'OCR 처리에 실패했습니다.' }); }
+  await query('UPDATE files SET ocr_text=$1, ocr_status=$2 WHERE id=$3', [out.text || '', 'done', req.params.id]);
+  await audit(req, 'ocr_run', `file=${req.params.id} chars=${(out.text || '').length}`);
+  res.json({ ok: true, chars: (out.text || '').length });
 }));
 
 // ── 비고 ──────────
