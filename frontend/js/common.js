@@ -236,7 +236,13 @@ const UI = (() => {
         return `<div class="tm-tile${drill ? '' : ' nodrill'}" data-drill="${drill ? 1 : 0}"${pathAttr} style="left:${r.x}px;top:${r.y}px;width:${Math.max(0, r.w - 2)}px;height:${Math.max(0, r.h - 2)}px;background:${color}" data-name="${escapeHtml(name)}" data-sub="${escapeHtml(sub)}">${small ? '' : `<div class="tm-name">${escapeHtml(name)}</div><div class="tm-sub">${escapeHtml(sub)}</div>`}</div>`;
       }).join('');
       box.querySelectorAll('.tm-tile').forEach((el) => {
-        el.addEventListener('mousemove', (e) => { tip.style.display = 'block'; tip.innerHTML = `<b>${el.dataset.name}</b><br>${el.dataset.sub}`; const cr = container.getBoundingClientRect(); tip.style.left = (e.clientX - cr.left + 12) + 'px'; tip.style.top = (e.clientY - cr.top + 12) + 'px'; });
+        el.addEventListener('mousemove', (e) => {
+          tip.style.display = 'block'; tip.innerHTML = `<b>${el.dataset.name}</b><br>${el.dataset.sub}`;
+          const cr = container.getBoundingClientRect(); const tw = tip.offsetWidth, th = tip.offsetHeight;
+          let x = e.clientX - cr.left + 14; if (x + tw > cr.width) x = e.clientX - cr.left - tw - 14; if (x < 2) x = 2;
+          let y = e.clientY - cr.top + 14; if (y + th > cr.height) y = e.clientY - cr.top - th - 14; if (y < 2) y = 2;
+          tip.style.left = x + 'px'; tip.style.top = y + 'px';
+        });
         el.addEventListener('mouseleave', () => { tip.style.display = 'none'; });
         if (el.dataset.drill === '1') el.addEventListener('click', () => { path = el.dataset.tpath; draw(); });
       });

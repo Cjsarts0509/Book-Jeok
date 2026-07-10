@@ -21,7 +21,7 @@ const Admin = (() => {
     root().innerHTML = `
       <div class="layout">
         <header class="appbar">
-          <a class="brand" href="index.html" title="홈으로"><img src="assets/logo.svg?v=35"><span class="brand-name">북적북적</span></a>
+          <a class="brand" href="index.html" title="홈으로"><img src="assets/logo.svg?v=36"><span class="brand-name">북적북적</span></a>
           <nav class="appbar-nav">
             ${item('dashboard', '🏠', '대시보드')}
             ${item('users', '👥', '계정')}
@@ -709,7 +709,13 @@ const Admin = (() => {
     wireCrumb();
     const tip = document.getElementById('tm-tip');
     box.querySelectorAll('.tm-tile').forEach((el) => {
-      el.addEventListener('mousemove', (e) => { tip.style.display = 'block'; tip.innerHTML = `<b>${el.dataset.name}</b><br>${el.dataset.sub}`; const vr = document.getElementById('view').getBoundingClientRect(); tip.style.left = (e.clientX - vr.left + 12) + 'px'; tip.style.top = (e.clientY - vr.top + 12) + 'px'; });
+      el.addEventListener('mousemove', (e) => {
+        tip.style.display = 'block'; tip.innerHTML = `<b>${el.dataset.name}</b><br>${el.dataset.sub}`;
+        const vr = document.getElementById('view').getBoundingClientRect(); const tw = tip.offsetWidth, th = tip.offsetHeight;
+        let x = e.clientX - vr.left + 14; if (x + tw > vr.width) x = e.clientX - vr.left - tw - 14; if (x < 2) x = 2;
+        let y = e.clientY - vr.top + 14; if (y + th > vr.height) y = e.clientY - vr.top - th - 14; if (y < 2) y = 2;
+        tip.style.left = x + 'px'; tip.style.top = y + 'px';
+      });
       el.addEventListener('mouseleave', () => { tip.style.display = 'none'; });
       if (el.dataset.drill !== '1') return;
       el.addEventListener('click', () => {
