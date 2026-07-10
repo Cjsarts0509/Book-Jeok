@@ -1,6 +1,7 @@
 /* 공통 유틸: 토스트, 포맷, 파일 아이콘 */
 const UI = (() => {
-  function toast(msg, type = '') {
+  // opts: { action: { label, onClick }, duration }
+  function toast(msg, type = '', opts = {}) {
     let wrap = document.getElementById('toast-wrap');
     if (!wrap) {
       wrap = document.createElement('div');
@@ -9,13 +10,31 @@ const UI = (() => {
     }
     const el = document.createElement('div');
     el.className = 'toast ' + type;
-    el.textContent = msg;
+    const span = document.createElement('span');
+    span.className = 'toast-msg'; span.textContent = msg;
+    el.appendChild(span);
+    let removed = false;
+    const remove = () => { if (removed) return; removed = true; el.style.transition = 'opacity .3s'; el.style.opacity = '0'; setTimeout(() => el.remove(), 300); };
+    const dur = opts.duration || (opts.action ? 6000 : 2800);
+    if (opts.action) {
+      const btn = document.createElement('button');
+      btn.className = 'toast-action'; btn.textContent = opts.action.label;
+      btn.addEventListener('click', () => { remove(); try { opts.action.onClick(); } catch (_) {} });
+      el.appendChild(btn);
+    }
     wrap.appendChild(el);
-    setTimeout(() => {
-      el.style.transition = 'opacity .3s';
-      el.style.opacity = '0';
-      setTimeout(() => el.remove(), 300);
-    }, 2800);
+    setTimeout(remove, dur);
+    return { remove };
+  }
+
+  // 비동기 처리 중 버튼을 로딩 상태(비활성+스피너)로. fn() 반환 Promise 대기 후 원복.
+  async function busy(btn, fn) {
+    if (!btn) return fn();
+    const html = btn.innerHTML; const wasDisabled = btn.disabled;
+    btn.disabled = true; btn.classList.add('is-busy');
+    btn.innerHTML = `<span class="btn-spin"></span>${html}`;
+    try { return await fn(); }
+    finally { btn.classList.remove('is-busy'); btn.disabled = wasDisabled; btn.innerHTML = html; }
   }
 
   function bytes(n) {
@@ -251,5 +270,5 @@ const UI = (() => {
     return { redraw: draw };
   }
 
-  return { toast, bytes, date, fileIcon, extIcon, EXT_CATALOG, escapeHtml, sanitizeHtml, isRecent, modal, confirm, folderTreemap };
+  return { toast, busy, bytes, date, fileIcon, extIcon, EXT_CATALOG, escapeHtml, sanitizeHtml, isRecent, modal, confirm, folderTreemap };
 })();

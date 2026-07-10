@@ -663,3 +663,46 @@ th { background: var(--bg); font-weight: 700; color: var(--text-muted); font-siz
   /* 압축 완료 모달 버튼도 세로 정렬 유지 */
   .zip-actions .btn { padding: 12px; }
 }
+
+/* ══════════════════════════════════════════
+   UI 개선: 토스트 액션·버튼 스피너·인라인 이름변경·컨텍스트 메뉴·모바일 탭바
+   ══════════════════════════════════════════ */
+/* 토스트 액션(실행취소 등) */
+#toast-wrap .toast { display: inline-flex; align-items: center; gap: 12px; }
+.toast-action { background: rgba(255,255,255,.18); border: 1px solid rgba(255,255,255,.4); color: #fff; font-weight: 700; font-size: 13px; padding: 5px 13px; border-radius: 999px; cursor: pointer; white-space: nowrap; flex: 0 0 auto; }
+.toast-action:hover { background: rgba(255,255,255,.32); }
+
+/* 버튼 로딩 스피너 */
+.btn-spin { width: 14px; height: 14px; border: 2px solid currentColor; border-top-color: transparent; border-radius: 50%; display: inline-block; margin-right: 6px; vertical-align: -2px; animation: bjspin .7s linear infinite; }
+.btn.is-busy { cursor: progress; }
+@keyframes bjspin { to { transform: rotate(360deg); } }
+
+/* 인라인 이름변경 */
+.inline-rename { height: 30px; padding: 3px 8px; font-size: 14px; font-weight: 600; width: 100%; max-width: 340px; }
+
+/* 우클릭 컨텍스트 메뉴 */
+.ctx-menu { position: fixed; z-index: 200; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow-lg); padding: 5px; min-width: 178px; animation: ctxIn .12s ease; }
+@keyframes ctxIn { from { opacity: 0; transform: scale(.97); } to { opacity: 1; transform: none; } }
+.ctx-item { display: flex; align-items: center; gap: 10px; width: 100%; padding: 9px 12px; border: none; background: transparent; border-radius: 7px; font-size: 13.5px; color: var(--text); cursor: pointer; text-align: left; }
+.ctx-item:hover { background: var(--hover); }
+.ctx-item.danger { color: var(--danger); }
+.ctx-item .ci-ic { width: 18px; text-align: center; }
+.ctx-sep { height: 1px; background: var(--border); margin: 4px 6px; }
+
+/* 모바일 하단 탭바 + 업로드 FAB */
+.mobile-tabbar { display: none; }
+@media (max-width: 768px) {
+  .mobile-tabbar {
+    display: flex; position: fixed; left: 0; right: 0; bottom: 0; z-index: 46;
+    background: var(--surface); border-top: 1px solid var(--border);
+    padding: 4px 6px calc(4px + env(safe-area-inset-bottom, 0px));
+    justify-content: space-around; align-items: flex-end; box-shadow: 0 -2px 12px rgba(0,0,0,.06);
+  }
+  .mtab { flex: 1 1 0; display: flex; flex-direction: column; align-items: center; gap: 2px; border: none; background: transparent; color: var(--text-muted); font-size: 11px; font-weight: 600; padding: 6px 2px; cursor: pointer; position: relative; }
+  .mtab .mt-ic { font-size: 20px; line-height: 1; }
+  .mtab-fab { flex: 0 0 auto; margin-top: -20px; }
+  .mtab-fab .mt-ic { width: 54px; height: 54px; border-radius: 50%; background: var(--primary); color: var(--text); display: grid; place-items: center; font-size: 24px; box-shadow: var(--shadow); }
+  .mtab .notif-badge { position: absolute; top: 2px; left: 50%; margin-left: 6px; right: auto; }
+  .content { padding-bottom: 80px; }
+  #toast-wrap { bottom: 86px; }
+}

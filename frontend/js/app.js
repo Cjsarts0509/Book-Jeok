@@ -46,7 +46,7 @@ const App = (() => {
   // 관리자 2FA 필수: 설정 완료 전까지 앱 진입 차단
   function force2faSetup() {
     root().innerHTML = `<div class="login-screen"><div class="login-card" style="max-width:460px">
-      <img src="assets/logo.svg?v=60" class="login-logo" alt="북적북적">
+      <img src="assets/logo.svg?v=61" class="login-logo" alt="북적북적">
       <div class="login-title">2단계 인증 설정</div>
       <p class="muted" style="text-align:center;font-size:13px;margin:6px 0 12px">관리자 계정은 보안을 위해 <b>2단계 인증이 필수</b>입니다.<br>설정을 완료해야 계속할 수 있습니다.</p>
       <div id="tf-host"></div>
@@ -60,7 +60,7 @@ const App = (() => {
     root().innerHTML = `
       <div class="login-screen">
         <form class="login-card" id="login-form">
-          <img src="assets/logo.svg?v=60" class="login-logo" alt="북적북적">
+          <img src="assets/logo.svg?v=61" class="login-logo" alt="북적북적">
           <div class="login-title">북적북적</div>
           <div class="login-sub">Book-Jeok · 우리끼리 나누는 파일 창고</div>
           <div class="field"><label>아이디</label><input class="input" name="username" autocomplete="username" placeholder="아이디" required></div>
@@ -71,18 +71,18 @@ const App = (() => {
       </div>`;
     document.getElementById('login-form').addEventListener('submit', async (e) => {
       e.preventDefault(); const f = e.target, btn = f.querySelector('button');
-      btn.disabled = true; btn.textContent = '로그인 중…';
       try {
-        const r = await API.login(f.username.value.trim(), f.password.value, f.token.value.trim());
-        API.setToken(r.token); state.user = r.user;
-        if (r.mustSetup2fa) return force2faSetup();
-        UI.toast(`${r.user.displayName}님 환영합니다 🎉`, 'success'); renderApp();
+        await UI.busy(btn, async () => {
+          const r = await API.login(f.username.value.trim(), f.password.value, f.token.value.trim());
+          API.setToken(r.token); state.user = r.user; state.qrEnabled = r.user.qrEnabled !== false;
+          if (r.mustSetup2fa) return force2faSetup();
+          UI.toast(`${r.user.displayName}님 환영합니다 🎉`, 'success'); renderApp();
+        });
       } catch (err) {
         if (err.data && err.data.need2fa) {
           f.querySelector('#tfa-field').classList.remove('hidden'); f.token.focus();
           UI.toast(err.message, err.data.need2fa && f.token.value ? 'error' : 'info');
         } else UI.toast(err.message, 'error');
-        btn.disabled = false; btn.textContent = '로그인';
       }
     });
   }
@@ -93,7 +93,7 @@ const App = (() => {
       <div class="layout">
         <header class="appbar">
           <button class="icon-btn appbar-menu" id="menu-toggle" title="폴더">☰</button>
-          <div class="brand" id="brand-home" title="홈으로"><img src="assets/logo.svg?v=60"><span class="brand-name">북적북적</span></div>
+          <div class="brand" id="brand-home" title="홈으로"><img src="assets/logo.svg?v=61"><span class="brand-name">북적북적</span></div>
           ${isPriv() ? `<select class="input account-switcher" id="account-switcher"><option value="">내 파일</option></select>` : ''}
           <div class="topbar-spacer"></div>
           <button class="icon-btn appbar-navmenu" id="nav-menu-toggle" title="메뉴" aria-label="메뉴">☰<span class="notif-badge hidden" id="notif-badge-menu">0</span></button>
@@ -119,7 +119,22 @@ const App = (() => {
           <main class="content" id="view"></main>
         </div>
       </div>
+      <nav class="mobile-tabbar" id="mobile-tabbar">
+        <button class="mtab" data-mtab="files"><span class="mt-ic">📁</span><span class="mt-l">파일</span></button>
+        <button class="mtab" data-mtab="search"><span class="mt-ic">🔎</span><span class="mt-l">검색</span></button>
+        <button class="mtab mtab-fab" data-mtab="upload" aria-label="업로드"><span class="mt-ic">⬆️</span></button>
+        <button class="mtab" data-mtab="notif"><span class="mt-ic">🔔</span><span class="notif-badge hidden" id="notif-badge-tab">0</span><span class="mt-l">알림</span></button>
+        <button class="mtab" data-mtab="menu"><span class="mt-ic">☰</span><span class="mt-l">메뉴</span></button>
+      </nav>
       <div class="drop-overlay hidden" id="drop-overlay"><div class="drop-inner"><div class="drop-ic">📥</div>여기에 놓아 업로드<div class="drop-sub">현재 폴더로 올라갑니다</div></div></div>`;
+    root().querySelectorAll('#mobile-tabbar [data-mtab]').forEach((el) => el.addEventListener('click', () => {
+      const t = el.dataset.mtab;
+      if (t === 'files') goTo('/');
+      else if (t === 'search') { const si = document.getElementById('search-input'); if (si) { window.scrollTo({ top: 0, behavior: 'smooth' }); si.focus(); } }
+      else if (t === 'upload') document.getElementById('file-input')?.click();
+      else if (t === 'notif') notifModal();
+      else if (t === 'menu') document.getElementById('appbar-nav')?.classList.toggle('open');
+    }));
     root().querySelectorAll('.appbar-nav [data-nav]').forEach((el) => el.addEventListener('click', () => {
       const n = el.dataset.nav;
       closeNavMenu();
@@ -664,7 +679,7 @@ const App = (() => {
       if ((e.ctrlKey || e.metaKey) && (e.key === 'a' || e.key === 'A')) { e.preventDefault(); selectAllItems(); return; }
       if (e.key === 'Escape') { if (state.selected.size) { state.selected.clear(); applySelectionClasses(); } return; }
       if (e.key === 'Delete') { if (state.selected.size) { e.preventDefault(); bulkDelete(); } return; }
-      if (e.key === 'F2') { if (state.selected.size === 1) { e.preventDefault(); const it = [...state.selected.values()][0]; if (it.type === 'file') renameFileModal(it.id); else folderSettingsModal(it.path); } return; }
+      if (e.key === 'F2') { if (state.selected.size === 1) { e.preventDefault(); const it = [...state.selected.values()][0]; inlineRename(it.type, it.type === 'file' ? it.id : it.path); } return; }
       if (e.key === 'Enter') { if (state.selected.size === 1) { const it = [...state.selected.values()][0]; if (it.type === 'folder') openFolder(it.path); else downloadFile(it.id); } return; }
     });
   }
@@ -730,6 +745,7 @@ const App = (() => {
       const item = isFolder ? { type: 'folder', path: key.slice(7), name: found ? found.name : '' } : { type: 'file', id: key.slice(5), name: found ? found.name : '' };
       el.addEventListener('click', (e) => { if (e.target.closest(actionSel)) return; selectClick(e, key, item); });
       el.addEventListener('dblclick', (e) => { if (e.target.closest(actionSel)) return; if (isFolder) openFolder(item.path); else downloadFile(item.id); });
+      el.addEventListener('contextmenu', (e) => { if (e.target.closest('input, a')) return; e.preventDefault(); openContextFor(e, isFolder, item); });
       el.addEventListener('dragstart', (e) => {
         if (!state.selected.has(key)) { state.selected.clear(); state.selected.set(key, item); state.anchor = key; applySelectionClasses(); }
         state.drag = [...state.selected.values()]; e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('application/bookjeok', '1');
@@ -748,7 +764,7 @@ const App = (() => {
     box.querySelectorAll('[data-del]').forEach((el) => el.addEventListener('click', (e) => { e.stopPropagation(); deleteFile(el.dataset.del); }));
     box.querySelectorAll('[data-share]').forEach((el) => el.addEventListener('click', (e) => { e.stopPropagation(); shareModal(el.dataset.share); }));
     box.querySelectorAll('[data-note]').forEach((el) => el.addEventListener('click', (e) => { e.stopPropagation(); noteModal(el.dataset.note); }));
-    box.querySelectorAll('[data-rename]').forEach((el) => el.addEventListener('click', (e) => { e.stopPropagation(); renameFileModal(el.dataset.rename); }));
+    box.querySelectorAll('[data-rename]').forEach((el) => el.addEventListener('click', (e) => { e.stopPropagation(); inlineRename('file', el.dataset.rename); }));
     box.querySelectorAll('[data-tags]').forEach((el) => el.addEventListener('click', (e) => { e.stopPropagation(); tagPickerModal(el.dataset.tags); }));
     // 즐겨찾기 별
     box.querySelectorAll('[data-fav-file]').forEach((el) => el.addEventListener('click', (e) => { e.stopPropagation(); toggleFavFile(el.dataset.favFile); }));
@@ -804,11 +820,25 @@ const App = (() => {
     const ok = await UI.confirm({ title: '선택 항목 삭제', danger: true, confirmText: '휴지통으로',
       message: `선택한 ${items.length}개 항목을 삭제할까요?${folders.length ? `\n(폴더 ${folders.length}개는 하위 파일도 함께 삭제됩니다)` : ''}\n삭제된 항목은 관리자 휴지통에서 복원할 수 있습니다.` });
     if (!ok) return;
+    const fileIds = files.map((f) => f.id);
+    const folderIds = folders.map((fo) => (state.folders.find((x) => x.path === fo.path) || {}).id).filter(Boolean);
     try {
-      if (files.length) await API.bulkDelete(files.map((f) => f.id));
+      if (files.length) await API.bulkDelete(fileIds);
       for (const fo of folders) await API.deleteFolder(fo.path, state.ownerId);
-      UI.toast(`${items.length}개 삭제됨 (휴지통 이동)`, 'success'); loadAll();
+      UI.toast(`${items.length}개 삭제됨 (휴지통 이동)`, 'success', undoOpts(fileIds, folderIds)); loadAll();
     } catch (err) { UI.toast(err.message, 'error'); }
+  }
+
+  // 삭제 직후 "실행취소" 토스트 옵션 (본인 계정 볼 때만 · 셀프 복원 API 사용)
+  function undoOpts(fileIds, folderIds) {
+    if (state.ownerId) return {}; // 다른 계정 열람 중엔 셀프 복원 불가 → Undo 미제공
+    return { action: { label: '↩ 실행취소', onClick: async () => {
+      try {
+        for (const id of (fileIds || [])) await API.restoreSelfFile(id).catch(() => {});
+        for (const id of (folderIds || [])) await API.restoreSelfFolder(id).catch(() => {});
+        UI.toast('복원되었습니다', 'success'); loadAll();
+      } catch (e) { UI.toast(e.message, 'error'); }
+    } } };
   }
 
   const lastSeg = (p) => (p && p !== '/') ? p.split('/').filter(Boolean).pop() : '';
@@ -1028,14 +1058,15 @@ const App = (() => {
     const f = state.files.find((x) => String(x.id) === String(id));
     const ok = await UI.confirm({ title: '파일 삭제', danger: true, confirmText: '휴지통으로', message: `'${f?.name || '이 파일'}'을(를) 삭제할까요?\n관리자 휴지통에서 복원할 수 있습니다.` });
     if (!ok) return;
-    try { await API.deleteFile(id); UI.toast('삭제됨 (휴지통 이동)', 'success'); loadFiles(); } catch (err) { UI.toast(err.message, 'error'); }
+    try { await API.deleteFile(id); UI.toast('삭제됨 (휴지통 이동)', 'success', undoOpts([id], [])); loadFiles(); } catch (err) { UI.toast(err.message, 'error'); }
   }
 
   async function deleteFolder(path) {
     const name = path.split('/').pop();
+    const fid = (state.folders.find((x) => x.path === path) || {}).id;
     const ok = await UI.confirm({ title: '폴더 삭제', danger: true, confirmText: '휴지통으로', message: `'${name}' 폴더와 그 안의 모든 파일을 삭제할까요?\n관리자 휴지통에서 복원할 수 있습니다.` });
     if (!ok) return;
-    try { await API.deleteFolder(path, state.ownerId); UI.toast('폴더 삭제됨 (휴지통 이동)', 'success'); loadAll(); } catch (err) { UI.toast(err.message, 'error'); }
+    try { await API.deleteFolder(path, state.ownerId); UI.toast('폴더 삭제됨 (휴지통 이동)', 'success', undoOpts([], fid ? [fid] : [])); loadAll(); } catch (err) { UI.toast(err.message, 'error'); }
   }
 
   function newFolderModal() {
@@ -1105,6 +1136,83 @@ const App = (() => {
     m.q('#c').addEventListener('click', m.close);
     m.q('#ok').addEventListener('click', async () => { try { await API.setFolderNote(path, m.q('#note').value, state.ownerId); m.close(); UI.toast('폴더 비고 저장됨', 'success'); loadFiles(); } catch (err) { UI.toast(err.message, 'error'); } });
     setTimeout(() => m.q('#note').focus(), 50);
+  }
+
+  // ── 인라인 이름변경 (모달 없이 항목에서 바로 편집) ──────────
+  function inlineRename(type, ref) {
+    const key = type === 'folder' ? `folder:${ref}` : `file:${ref}`;
+    let row; try { row = document.querySelector(`#listing [data-row-key="${CSS.escape(key)}"]`); } catch { row = null; }
+    const nameEl = row && row.querySelector('.name-cell, .file-name, .mcard-name');
+    if (!nameEl) return type === 'file' ? renameFileModal(ref) : folderSettingsModal(ref); // 폴백: 모달
+    if (nameEl.querySelector('.inline-rename')) return;
+    const cur = type === 'folder' ? String(ref).split('/').pop() : ((state.files.find((f) => String(f.id) === String(ref)) || {}).name || '');
+    const orig = nameEl.innerHTML;
+    const input = document.createElement('input');
+    input.className = 'input inline-rename'; input.value = cur;
+    nameEl.innerHTML = ''; nameEl.appendChild(input);
+    input.focus();
+    const dot = cur.lastIndexOf('.');
+    input.setSelectionRange(0, (type === 'file' && dot > 0) ? dot : cur.length);
+    let done = false;
+    const cancel = () => { if (done) return; done = true; nameEl.innerHTML = orig; };
+    const commit = async () => {
+      if (done) return; const v = input.value.trim();
+      if (!v || v === cur) return cancel();
+      done = true;
+      try {
+        if (type === 'file') {
+          // 확장자 유지: 새 이름에 원래 확장자가 없으면 자동으로 붙임
+          const od = cur.lastIndexOf('.'); const ext = od > 0 ? cur.slice(od) : '';
+          const finalName = (ext && !v.toLowerCase().endsWith(ext.toLowerCase())) ? v + ext : v;
+          await API.renameFile(ref, finalName);
+        } else { const parent = String(ref).slice(0, String(ref).lastIndexOf('/')) || ''; await API.renameFolder(ref, parent + '/' + v, state.ownerId); }
+        UI.toast('이름 변경됨', 'success'); loadAll();
+      } catch (e) { UI.toast(e.message, 'error'); nameEl.innerHTML = orig; }
+    };
+    input.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Enter') { e.preventDefault(); commit(); } else if (e.key === 'Escape') { e.preventDefault(); cancel(); } });
+    input.addEventListener('blur', commit);
+    input.addEventListener('click', (e) => e.stopPropagation());
+    input.addEventListener('dblclick', (e) => e.stopPropagation());
+  }
+
+  // ── 우클릭 컨텍스트 메뉴 ──────────
+  let ctxEl = null;
+  const ctxKey = (e) => { if (e.key === 'Escape') closeCtx(); };
+  function closeCtx() { if (!ctxEl) return; ctxEl.remove(); ctxEl = null; document.removeEventListener('click', closeCtx); document.removeEventListener('keydown', ctxKey); window.removeEventListener('scroll', closeCtx, true); }
+  function showContextMenu(x, y, items) {
+    closeCtx();
+    const el = document.createElement('div'); el.className = 'ctx-menu';
+    el.innerHTML = items.map((it, i) => it.sep ? '<div class="ctx-sep"></div>' : `<button class="ctx-item${it.danger ? ' danger' : ''}" data-ci="${i}"><span class="ci-ic">${it.icon || ''}</span>${UI.escapeHtml(it.label)}</button>`).join('');
+    document.body.appendChild(el);
+    el.style.left = Math.max(6, Math.min(x, window.innerWidth - el.offsetWidth - 8)) + 'px';
+    el.style.top = Math.max(6, Math.min(y, window.innerHeight - el.offsetHeight - 8)) + 'px';
+    el.querySelectorAll('[data-ci]').forEach((b) => b.addEventListener('click', (e) => { e.stopPropagation(); const it = items[Number(b.dataset.ci)]; closeCtx(); it.onClick(); }));
+    ctxEl = el;
+    setTimeout(() => { document.addEventListener('click', closeCtx); document.addEventListener('keydown', ctxKey); window.addEventListener('scroll', closeCtx, true); }, 0);
+  }
+  function openContextFor(e, isFolder, item) {
+    const items = isFolder ? [
+      { icon: '📂', label: '열기', onClick: () => openFolder(item.path) },
+      { icon: '🔗', label: '폴더 공유', onClick: () => folderShareModal(item.path) },
+      { icon: '📥', label: '업로드 요청', onClick: () => uploadRequestModal(item.path) },
+      { icon: '⚙️', label: '폴더 설정', onClick: () => folderSettingsModal(item.path) },
+      { icon: '📝', label: '비고', onClick: () => folderNoteModal(item.path) },
+      { icon: '✏️', label: '이름 변경', onClick: () => inlineRename('folder', item.path) },
+      { sep: true },
+      { icon: (state.folders.find((x) => x.path === item.path) || {}).fav ? '⭐' : '☆', label: '즐겨찾기', onClick: () => toggleFavFolder(item.path) },
+      { icon: '🗑️', label: '삭제', danger: true, onClick: () => deleteFolder(item.path) },
+    ] : [
+      { icon: '⬇️', label: '다운로드', onClick: () => downloadFile(item.id) },
+      ...(canPreview(item.name) ? [{ icon: '👁️', label: '미리보기', onClick: () => previewModal(item.id) }] : []),
+      { icon: '🔗', label: '공유 링크', onClick: () => shareModal(item.id) },
+      { icon: '🏷️', label: '태그', onClick: () => tagPickerModal(item.id) },
+      { icon: '📝', label: '비고', onClick: () => noteModal(item.id) },
+      { icon: '✏️', label: '이름 변경', onClick: () => inlineRename('file', item.id) },
+      { sep: true },
+      { icon: (state.files.find((x) => String(x.id) === String(item.id)) || {}).fav ? '⭐' : '☆', label: '즐겨찾기', onClick: () => toggleFavFile(item.id) },
+      { icon: '🗑️', label: '삭제', danger: true, onClick: () => deleteFile(item.id) },
+    ];
+    showContextMenu(e.clientX, e.clientY, items);
   }
 
   function renameFileModal(id) {
@@ -1413,10 +1521,10 @@ const App = (() => {
     const f = state.files.find((x) => String(x.id) === String(id));
     const m = UI.modal(`<h3>🔗 공유 링크</h3><p class="muted" style="font-size:13px;margin-bottom:8px">${UI.escapeHtml(f ? f.name : '')}</p>${shareOptionFields()}<div class="modal-actions"><button class="btn btn-ghost" id="c">닫기</button><button class="btn btn-primary" id="gen">링크 생성</button></div><div id="result"></div>`);
     m.q('#c').addEventListener('click', m.close);
-    m.q('#gen').addEventListener('click', async () => {
+    m.q('#gen').addEventListener('click', (e) => UI.busy(e.currentTarget, async () => {
       try { const r = await API.share(id, shareOptionValues(m)); shareResult(m, r.url); }
       catch (err) { UI.toast(err.message, 'error'); }
-    });
+    }));
   }
 
   function trashModal() {
@@ -1478,7 +1586,7 @@ const App = (() => {
   async function refreshNotifBadge() {
     try {
       const d = await API.notifications(1);
-      const badges = [document.getElementById('notif-badge'), document.getElementById('notif-badge-menu')].filter(Boolean);
+      const badges = [document.getElementById('notif-badge'), document.getElementById('notif-badge-menu'), document.getElementById('notif-badge-tab')].filter(Boolean);
       if (!badges.length) return;
       badges.forEach((badge) => {
         if (d.unread > 0) { badge.textContent = d.unread > 99 ? '99+' : d.unread; badge.classList.remove('hidden'); }
