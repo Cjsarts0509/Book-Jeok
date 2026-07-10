@@ -37,7 +37,7 @@ const App = (() => {
     root().innerHTML = `
       <div class="login-screen">
         <form class="login-card" id="login-form">
-          <img src="assets/logo.svg?v=39" class="login-logo" alt="북적북적">
+          <img src="assets/logo.svg?v=40" class="login-logo" alt="북적북적">
           <div class="login-title">북적북적</div>
           <div class="login-sub">Book-Jeok · 우리끼리 나누는 파일 창고</div>
           <div class="field"><label>아이디</label><input class="input" name="username" autocomplete="username" placeholder="아이디" required></div>
@@ -61,7 +61,7 @@ const App = (() => {
       <div class="layout">
         <header class="appbar">
           <button class="icon-btn appbar-menu" id="menu-toggle" title="폴더">☰</button>
-          <div class="brand" id="brand-home" title="홈으로"><img src="assets/logo.svg?v=39"><span class="brand-name">북적북적</span></div>
+          <div class="brand" id="brand-home" title="홈으로"><img src="assets/logo.svg?v=40"><span class="brand-name">북적북적</span></div>
           ${isPriv() ? `<select class="input account-switcher" id="account-switcher"><option value="">내 파일</option></select>` : ''}
           <div class="topbar-spacer"></div>
           <nav class="appbar-nav">
@@ -1049,13 +1049,11 @@ const App = (() => {
   }
 
   // 공유 옵션(만료·비밀번호·횟수) 공통 필드/값/결과
-  // 공유별 알림 옵트인 (인앱 / 이메일) — 활동 발생 시 만든 사람에게 알림
+  // 공유별 알림 옵트인 (인앱) — 활동 발생 시 만든 사람에게 알림(상단 🔔)
   function notifyFields(kindLabel) {
-    return `<div class="field"><label>${kindLabel || '활동'} 알림 (선택)</label>
-      <label class="set-check"><input type="checkbox" id="nt-inapp"> 🔔 인앱 알림 받기</label>
-      <label class="set-check"><input type="checkbox" id="nt-email"> ✉️ 이메일 알림 받기 <span class="muted" style="font-size:12px">— ⚙️설정의 이메일로</span></label></div>`;
+    return `<div class="field"><label class="set-check"><input type="checkbox" id="nt-inapp"> 🔔 ${kindLabel || '활동'} 시 인앱 알림 받기</label></div>`;
   }
-  const notifyValues = (m) => ({ notifyInapp: !!(m.q('#nt-inapp') && m.q('#nt-inapp').checked), notifyEmail: !!(m.q('#nt-email') && m.q('#nt-email').checked) });
+  const notifyValues = (m) => ({ notifyInapp: !!(m.q('#nt-inapp') && m.q('#nt-inapp').checked) });
   function shareOptionFields() {
     return `<div class="field"><label>만료 기간</label><select class="input" id="exp"><option value="0">무기한</option><option value="1">1일</option><option value="7">7일</option><option value="30">30일</option></select></div>
       <div class="field"><label>비밀번호 (선택)</label><input class="input" id="spw" type="text" placeholder="비우면 없음"></div>
@@ -1157,11 +1155,6 @@ const App = (() => {
     try { u = (await API.me()).user; } catch (e) { m.q('#set-body').innerHTML = `<p class="muted" style="color:var(--danger)">${UI.escapeHtml(e.message)}</p>`; return; }
     m.q('#set-body').innerHTML = `
       <div class="set-sec">
-        <div class="dash-h">🔔 알림</div>
-        <div class="field"><label>알림 받을 이메일</label><input class="input" id="s-email" type="email" placeholder="예: name@example.com" value="${UI.escapeHtml(u.email || '')}"></div>
-        <p class="muted" style="font-size:12px;margin-top:-2px">알림을 받을지는 <b>공유를 만들 때 각 공유마다</b> 켭니다. 이메일 알림을 켜면 위 주소로 발송됩니다.</p>
-      </div>
-      <div class="set-sec">
         <div class="dash-h">⬆️ 업로드</div>
         <label class="muted" style="font-size:13px">같은 이름 파일을 올릴 때</label>
         <label class="set-radio"><input type="radio" name="s-conf" value="rename" ${u.uploadConflict !== 'overwrite' ? 'checked' : ''}> 번호 붙여 보관 <span class="muted">— 기존 파일 그대로 두고 (2), (3)…</span></label>
@@ -1178,7 +1171,7 @@ const App = (() => {
       </div>`;
     m.q('#s-save').addEventListener('click', async () => {
       try {
-        await API.updateSettings({ email: m.q('#s-email').value.trim(), uploadConflict: m.el.querySelector('input[name=s-conf]:checked').value });
+        await API.updateSettings({ uploadConflict: m.el.querySelector('input[name=s-conf]:checked').value });
         UI.toast('설정이 저장되었습니다 ✅', 'success');
       } catch (err) { UI.toast(err.message, 'error'); }
     });

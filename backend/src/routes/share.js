@@ -83,8 +83,8 @@ router.get('/:token/download', attemptLimiter, wrap(async (req, res) => {
     await query('UPDATE share_links SET download_count = download_count + 1 WHERE id=$1', [s.share_id]);
   }
   if (!fs.existsSync(s.diskPath)) return res.status(410).json({ error: '파일 실체가 존재하지 않습니다.' });
-  if ((s.notifyInapp || s.notifyEmail) && s.createdBy) {
-    notify.push({ userId: s.createdBy, type: 'share_download', title: '공유 파일이 다운로드됨', body: `'${s.name}' 공유 링크에서 다운로드가 발생했습니다.`, inApp: s.notifyInapp, email: s.notifyEmail }).catch(() => {});
+  if (s.notifyInapp && s.createdBy) {
+    notify.push({ userId: s.createdBy, type: 'share_download', title: '공유 파일이 다운로드됨', body: `'${s.name}' 공유 링크에서 다운로드가 발생했습니다.` }).catch(() => {});
   }
   res.download(s.diskPath, s.name);
 }));
