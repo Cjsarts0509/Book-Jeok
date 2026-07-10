@@ -48,7 +48,7 @@ const App = (() => {
   // 관리자 2FA 필수: 설정 완료 전까지 앱 진입 차단
   function force2faSetup() {
     root().innerHTML = `<div class="login-screen"><div class="login-card" style="max-width:460px">
-      <img src="assets/logo.svg?v=62" class="login-logo" alt="북적북적">
+      <img src="assets/logo.svg?v=63" class="login-logo" alt="북적북적">
       <div class="login-title">2단계 인증 설정</div>
       <p class="muted" style="text-align:center;font-size:13px;margin:6px 0 12px">관리자 계정은 보안을 위해 <b>2단계 인증이 필수</b>입니다.<br>설정을 완료해야 계속할 수 있습니다.</p>
       <div id="tf-host"></div>
@@ -62,7 +62,7 @@ const App = (() => {
     root().innerHTML = `
       <div class="login-screen">
         <form class="login-card" id="login-form">
-          <img src="assets/logo.svg?v=62" class="login-logo" alt="북적북적">
+          <img src="assets/logo.svg?v=63" class="login-logo" alt="북적북적">
           <div class="login-title">북적북적</div>
           <div class="login-sub">Book-Jeok · 우리끼리 나누는 파일 창고</div>
           <div class="field"><label>아이디</label><input class="input" name="username" autocomplete="username" placeholder="아이디" required></div>
@@ -95,7 +95,7 @@ const App = (() => {
       <div class="layout">
         <header class="appbar">
           <button class="icon-btn appbar-menu" id="menu-toggle" title="폴더">☰</button>
-          <div class="brand" id="brand-home" title="홈으로"><img src="assets/logo.svg?v=62"><span class="brand-name">북적북적</span></div>
+          <div class="brand" id="brand-home" title="홈으로"><img src="assets/logo.svg?v=63"><span class="brand-name">북적북적</span></div>
           ${isPriv() ? `<select class="input account-switcher" id="account-switcher"><option value="">내 파일</option></select>` : ''}
           <div class="topbar-spacer"></div>
           <button class="icon-btn appbar-navmenu" id="nav-menu-toggle" title="메뉴" aria-label="메뉴">☰<span class="notif-badge hidden" id="notif-badge-menu">0</span></button>
@@ -767,7 +767,7 @@ const App = (() => {
     });
     // 파일 액션
     box.querySelectorAll('[data-preview]').forEach((el) => el.addEventListener('click', (e) => { e.stopPropagation(); previewModal(el.dataset.preview); }));
-    box.querySelectorAll('[data-ocr]').forEach((el) => el.addEventListener('click', (e) => { e.stopPropagation(); runOcr(el.dataset.ocr, e.currentTarget); }));
+    box.querySelectorAll('[data-ocr]').forEach((el) => el.addEventListener('click', (e) => { e.stopPropagation(); ocrModal(el.dataset.ocr); }));
     box.querySelectorAll('[data-dl]').forEach((el) => el.addEventListener('click', (e) => { e.stopPropagation(); downloadFile(el.dataset.dl); }));
     box.querySelectorAll('[data-del]').forEach((el) => el.addEventListener('click', (e) => { e.stopPropagation(); deleteFile(el.dataset.del); }));
     box.querySelectorAll('[data-share]').forEach((el) => el.addEventListener('click', (e) => { e.stopPropagation(); shareModal(el.dataset.share); }));
@@ -1216,7 +1216,7 @@ const App = (() => {
     ] : [
       { icon: '⬇️', label: '다운로드', onClick: () => downloadFile(item.id) },
       ...(canPreview(item.name) ? [{ icon: '👁️', label: '미리보기', onClick: () => previewModal(item.id) }] : []),
-      ...((state.ocrEnabled && isImage(item.name)) ? [{ icon: '🔤', label: '문자 인식(OCR)', onClick: () => runOcr(item.id) }] : []),
+      ...((state.ocrEnabled && isImage(item.name)) ? [{ icon: '🔤', label: '문자 인식(OCR)', onClick: () => ocrModal(item.id) }] : []),
       { icon: '🔗', label: '공유 링크', onClick: () => shareModal(item.id) },
       { icon: '🏷️', label: '태그', onClick: () => tagPickerModal(item.id) },
       { icon: '📝', label: '비고', onClick: () => noteModal(item.id) },
@@ -1449,17 +1449,56 @@ const App = (() => {
     catch (e) { UI.toast(e.message, 'error'); }
   }
 
-  // ── OCR 문자 인식 실행 (수동) ──────────
-  async function runOcr(id, btn) {
-    await UI.busy(btn, async () => {
-      try {
-        UI.toast('문자 인식(OCR) 중…');
-        const r = await API.ocrFile(id);
-        UI.toast(r.chars > 0 ? `OCR 완료 · ${r.chars}자 인식됨 (이제 내용으로 검색 가능)` : 'OCR 완료 · 인식된 글자가 없습니다', 'success');
+  // ── OCR 문자 인식 실행 + 결과 뷰어 ──────────
+  function ocrModal(id) {
+    const file = state.files.find((x) => String(x.id) === String(id));
+    const m = UI.modal(`<h3>🔤 문자 인식(OCR) <span class="muted" style="font-size:13px;font-weight:400">· ${UI.escapeHtml(file ? file.name : '')}</span></h3>
+      <div id="ocr-body"><p class="muted">불러오는 중…</p></div>
+      <div class="modal-actions"><button class="btn btn-ghost" id="ocr-close">닫기</button><span style="flex:1"></span><button class="btn btn-secondary" id="ocr-run" style="display:none"></button><button class="btn btn-primary" id="ocr-copy" style="display:none">📋 복사</button></div>`);
+    m.el.querySelector('.modal').classList.add('modal-wide');
+    m.q('#ocr-close').addEventListener('click', m.close);
+    let curText = '';
+    function render(status, text) {
+      curText = text || '';
+      const body = m.q('#ocr-body'); const runBtn = m.q('#ocr-run'); const copyBtn = m.q('#ocr-copy');
+      if (status === 'done') {
+        body.innerHTML = curText.trim()
+          ? `<div class="ocr-result">${UI.escapeHtml(curText)}</div><p class="muted" style="font-size:12px;margin-top:8px">이 텍스트로 파일 검색이 됩니다.</p>`
+          : '<div class="empty" style="padding:24px">인식된 글자가 없습니다. (사진이 흐리거나 글자가 없을 수 있어요)</div>';
+        runBtn.textContent = '🔁 다시 인식'; runBtn.style.display = '';
+        copyBtn.style.display = curText.trim() ? '' : 'none';
+      } else {
+        body.innerHTML = '<div class="empty" style="padding:24px">아직 문자 인식을 하지 않았습니다.<br>아래 버튼으로 이 이미지의 글자를 인식하세요.</div>';
+        runBtn.textContent = '🔤 문자 인식 실행'; runBtn.style.display = '';
+        copyBtn.style.display = 'none';
+      }
+    }
+    async function load() {
+      try { const r = await API.ocrText(id); render(r.status, r.text); }
+      catch (e) { m.q('#ocr-body').innerHTML = `<p class="muted" style="color:var(--danger)">${UI.escapeHtml(e.message)}</p>`; }
+    }
+    m.q('#ocr-run').addEventListener('click', async () => {
+      const runBtn = m.q('#ocr-run'), copyBtn = m.q('#ocr-copy'), body = m.q('#ocr-body');
+      runBtn.disabled = true; runBtn.innerHTML = '<span class="btn-spin"></span>인식 중…'; copyBtn.style.display = 'none';
+      body.innerHTML = '<div class="empty" style="padding:24px">⏳ 문자 인식 중… (몇 초 걸릴 수 있어요)</div>';
+      // 처리 시작(응답 지연/유실에 견고하도록 결과는 폴링으로 확인)
+      const withTimeout = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('t')), ms))]);
+      withTimeout(API.ocrFile(id), 3000).catch(() => {});
+      let done = null;
+      for (let i = 0; i < 20; i++) {
+        await new Promise((r) => setTimeout(r, 600));
+        try { const r = await withTimeout(API.ocrText(id), 2500); if (r.status === 'done') { done = r; break; } if (r.status === 'error') break; } catch (_) { /* 지연/유실 → 새 연결로 재시도 */ }
+      }
+      runBtn.disabled = false;
+      if (done) {
         const f = state.files.find((x) => String(x.id) === String(id)); if (f) f.ocrStatus = 'done';
+        render('done', done.text);
+        UI.toast((done.text || '').trim() ? '문자 인식 완료' : '인식된 글자가 없습니다', 'success');
         renderListing();
-      } catch (e) { UI.toast(e.message, 'error'); }
+      } else { UI.toast('OCR 처리에 실패했습니다. 다시 시도해주세요.', 'error'); load(); }
     });
+    m.q('#ocr-copy').addEventListener('click', () => { navigator.clipboard?.writeText(curText); UI.toast('복사됨', 'success'); });
+    load();
   }
 
   // ── 파일 태그 지정 ──────────

@@ -347,8 +347,23 @@ router.get('/:id(\\d+)/download', authenticate, wrap(async (req, res) => {
   res.download(disk, file.original_name);
 }));
 
+// ── OCR 결과 조회 ──────────
+router.get('/:id(\\d+)/ocr', authenticate, wrap(async (req, res) => {
+  res.set('Connection', 'close'); // OCR(execFile) 경로는 keep-alive 재사용 시 지연 → 새 연결 유도
+  const r = await query('SELECT owner_id, original_name, ocr_text, ocr_status FROM files WHERE id=$1 AND deleted_at IS NULL', [req.params.id]);
+  if (r.rowCount === 0) return res.status(404).json({ error: '파일을 찾을 수 없습니다.' });
+  if (!(await canAccessOwner(req.user, r.rows[0].owner_id))) return res.status(403).json({ error: '권한이 없습니다.' });
+  res.json({
+    status: r.rows[0].ocr_status || '',
+    text: r.rows[0].ocr_text || '',
+    isImage: ocr.canOcr(r.rows[0].original_name),
+    enabled: ocr.enabled(),
+  });
+}));
+
 // ── OCR 문자 인식 (수동 실행) ──────────
 router.post('/:id(\\d+)/ocr', authenticate, wrap(async (req, res) => {
+  res.set('Connection', 'close'); // 자식 프로세스(tesseract) 실행 중 keep-alive 소켓 재사용 방지
   const r = await query('SELECT owner_id, original_name, stored_name FROM files WHERE id=$1 AND deleted_at IS NULL', [req.params.id]);
   if (r.rowCount === 0) return res.status(404).json({ error: '파일을 찾을 수 없습니다.' });
   const f = r.rows[0];
@@ -361,7 +376,7 @@ router.post('/:id(\\d+)/ocr', authenticate, wrap(async (req, res) => {
   if (!out.ok) { await query("UPDATE files SET ocr_status='error' WHERE id=$1", [req.params.id]); return res.status(500).json({ error: 'OCR 처리에 실패했습니다.' }); }
   await query('UPDATE files SET ocr_text=$1, ocr_status=$2 WHERE id=$3', [out.text || '', 'done', req.params.id]);
   await audit(req, 'ocr_run', `file=${req.params.id} chars=${(out.text || '').length}`);
-  res.json({ ok: true, chars: (out.text || '').length });
+  res.json({ ok: true, chars: (out.text || '').length, text: out.text || '' });
 }));
 
 // ── 비고 ──────────

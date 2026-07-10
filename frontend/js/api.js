@@ -92,6 +92,7 @@ const API = (() => {
     setFileTags: (id, tagIds) => req('PUT', `/files/${id}/tags`, { tagIds }),
     qr: (text) => req('GET', `/files/qr?text=${encodeURIComponent(text)}`),
     ocrFile: (id) => req('POST', `/files/${id}/ocr`),
+    ocrText: (id) => req('GET', `/files/${id}/ocr`),
     createUploadRequest: (data) => req('POST', '/files/upload-requests', data),
     uploadRequests: (ownerId) => req('GET', `/files/upload-requests${ownerId ? '?ownerId=' + ownerId : ''}`),
     deleteUploadRequest: (id, ownerId) => req('DELETE', `/files/upload-requests/${id}${ownerId ? '?ownerId=' + ownerId : ''}`),
