@@ -354,16 +354,16 @@ textarea.input { resize: vertical; }
   .head-right .usage-line .usage-bar { display: none; }  /* 좁은 화면: 게이지 숨기고 📊는 한 줄 유지 */
   /* 검색줄을 윗줄(업로드·새폴더)과 분리 */
   .tools-break { display: block; flex: 0 0 100%; height: 0; }
-  /* 툴바: 각 줄을 가로로 꽉 채움(양쪽정렬처럼). flex-basis 0이라 줄바꿈 없이 늘어나 채움 */
-  .content-head .navcon .nav-btn { width: 28px; height: 28px; }  /* 네비/뷰 살짝 축소해 윗줄이 한 줄에 */
+  /* 툴바: 각 줄을 가로로 꽉 채우되, 폭이 부족하면 다음 줄로 넘어가(절대 화면 밖으로 안 나감).
+     핵심: flex-basis를 auto(내용폭)로 둬 줄바꿈 판단이 실제 글자폭 기준이 되게 함(폰트가 넓어도 안 잘림). */
+  .content-head .navcon .nav-btn { width: 28px; height: 28px; }  /* 네비/뷰 살짝 축소 */
   .content-head .navcon { gap: 3px; }
   .content-head .viewtoggle .vt { width: 28px; height: 30px; }
-  .content-head #upload-btn, .content-head #new-folder { flex: 1 1 0; }  /* 윗줄: 업로드·새폴더가 늘어나 우측 끝까지 */
-  .searchbox { flex: 3 1 0; justify-content: flex-start; min-width: 0; }  /* 검색줄: 이름검색이 가장 넓게 */
-  .searchbox .input { flex: 1 1 0; width: auto; min-width: 0; }
+  .content-head #upload-btn, .content-head #new-folder { flex: 1 1 auto; }  /* 늘어나 채우되 좁으면 줄바꿈 */
+  .searchbox { flex: 1 1 auto; justify-content: flex-start; min-width: 0; }  /* 검색은 남는 폭을 채움 */
+  .searchbox .input { flex: 1 1 auto; width: 0; min-width: 0; }  /* 폭0에서 grow → 조회·필터 자리 항상 확보 */
   #searchform button[type="submit"] { flex: 0 0 auto; }  /* 조회는 자연 폭 */
-  .extfilter { flex: 1 1 0; min-width: 0; }
-  .extfilter #extfilter-btn { width: 100%; }
+  .extfilter { flex: 0 0 auto; min-width: 0; }            /* 필터는 자연 폭, 검색줄 우측에 고정 */
   .rep-row { grid-template-columns: 1fr auto; }
   .rep-row .rep-bar { grid-column: 1 / -1; order: 3; }
 }
