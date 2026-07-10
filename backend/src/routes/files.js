@@ -14,7 +14,8 @@ const { generateToken, hashPassword } = require('../crypto');
 const filetype = require('../filetype');
 const yara = require('../yara');
 const notify = require('../notify');
-const { isAllowed, allowedLabel, getAllowedExtensions } = require('../settings');
+const { isAllowed, allowedLabel, getAllowedExtensions, trashRetentionDays, shareQrEnabled } = require('../settings');
+const QRCode = require('qrcode');
 
 const router = express.Router();
 
@@ -98,7 +99,29 @@ async function resolveOwner(req, res, next) {
 const fileRow = (r) => ({
   id: r.id, name: r.original_name, folder: r.folder, size: Number(r.size_bytes),
   mime: r.mime_type, note: r.note || '', createdAt: r.created_at, updatedAt: r.updated_at, noteUpdatedAt: r.note_updated_at,
+  fav: false, tags: [],
 });
+
+// 파일/폴더 목록에 즐겨찾기(fav)와 태그(tags) 정보를 채워 넣는다(뷰어 기준).
+async function attachMeta(userId, ownerId, files, folders) {
+  const fileIds = files.map((f) => f.id);
+  if (fileIds.length) {
+    const [fav, tg] = await Promise.all([
+      query('SELECT file_id FROM favorites WHERE user_id=$1 AND file_id = ANY($2::bigint[])', [userId, fileIds]),
+      query(`SELECT ft.file_id, t.id, t.name, t.color FROM file_tags ft JOIN tags t ON t.id=ft.tag_id WHERE ft.file_id = ANY($1::bigint[]) ORDER BY t.name`, [fileIds]),
+    ]);
+    const favSet = new Set(fav.rows.map((r) => String(r.file_id)));
+    const tagMap = new Map();
+    for (const r of tg.rows) { const k = String(r.file_id); if (!tagMap.has(k)) tagMap.set(k, []); tagMap.get(k).push({ id: r.id, name: r.name, color: r.color }); }
+    for (const f of files) { f.fav = favSet.has(String(f.id)); f.tags = tagMap.get(String(f.id)) || []; }
+  }
+  if (folders && folders.length) {
+    const paths = folders.map((f) => f.path);
+    const favf = await query('SELECT folder_path FROM favorites WHERE user_id=$1 AND folder_owner=$2 AND folder_path = ANY($3::text[])', [userId, ownerId, paths]);
+    const favSet = new Set(favf.rows.map((r) => r.folder_path));
+    for (const f of folders) f.fav = favSet.has(f.path);
+  }
+}
 
 // ── 접근 가능한 계정 목록 ──────────
 router.get('/accounts', authenticate, wrap(async (req, res) => {
@@ -229,10 +252,12 @@ router.get('/', authenticate, wrap(resolveOwner), wrap(async (req, res) => {
       note: fr.rows[0]?.note || '', noteUpdatedAt: fr.rows[0]?.note_updated_at || null,
       createdAt: fr.rows[0]?.created_at || null,
       icon: fr.rows[0]?.icon || '', color: fr.rows[0]?.color || '',
-      size: Number(agg.rows[0].s), fileCount: agg.rows[0].c,
+      size: Number(agg.rows[0].s), fileCount: agg.rows[0].c, fav: false,
     });
   }
-  res.json({ folder, ownerId: req.targetOwnerId, folders, files: files.rows.map(fileRow) });
+  const fileList = files.rows.map(fileRow);
+  await attachMeta(req.user.id, req.targetOwnerId, fileList, folders);
+  res.json({ folder, ownerId: req.targetOwnerId, folders, files: fileList });
 }));
 
 // ── 업로드 ──────────
@@ -502,19 +527,47 @@ router.post('/bundle/:id(\\d+)/share', authenticate, wrap(async (req, res) => {
   res.status(201).json({ token, url: `${shareWebBase(req)}/share.html?t=${token}`, fileName: b.display_name, expiresAt });
 }));
 
-// ── 이름 검색 (현재 계정 범위, 폴더/파일 제목 기준) ──────────
+// ── 검색 고도화 (이름 + 유형·기간·크기·태그·즐겨찾기 필터) ──────────
 router.get('/search', authenticate, wrap(resolveOwner), wrap(async (req, res) => {
+  const owner = req.targetOwnerId;
   const q = String(req.query.q || '').trim();
-  if (!q) return res.json({ query: '', folders: [], files: [] });
-  const owner = req.targetOwnerId; const ql = q.toLowerCase();
-  const fr = await query('SELECT id, path, note, note_updated_at, created_at, icon, color FROM folders WHERE owner_id=$1 AND deleted_at IS NULL', [owner]);
-  const folders = fr.rows
-    .filter((r) => (r.path.split('/').filter(Boolean).pop() || '').toLowerCase().includes(ql))
-    .slice(0, 300)
-    .map((r) => ({ id: r.id, path: r.path, name: r.path.split('/').filter(Boolean).pop() || r.path, note: r.note || '', noteUpdatedAt: r.note_updated_at, createdAt: r.created_at, icon: r.icon || '', color: r.color || '', size: 0 }));
-  const like = '%' + q.replace(/[%_\\]/g, (c) => '\\' + c) + '%';
-  const files = await query("SELECT * FROM files WHERE owner_id=$1 AND deleted_at IS NULL AND original_name ILIKE $2 ESCAPE '\\' ORDER BY original_name LIMIT 500", [owner, like]);
-  res.json({ query: q, folders, files: files.rows.map(fileRow) });
+  const exts = String(req.query.exts || '').split(',').map((s) => s.trim().replace(/^\./, '').toLowerCase()).filter(Boolean);
+  const dateFrom = String(req.query.dateFrom || '').trim();
+  const dateTo = String(req.query.dateTo || '').trim();
+  const minSize = parseFloat(req.query.minSize); // MB
+  const maxSize = parseFloat(req.query.maxSize); // MB
+  const tagId = parseInt(req.query.tagId, 10);
+  const favOnly = String(req.query.favOnly || '') === '1';
+  const sort = ['name', 'size', 'createdAt'].includes(req.query.sort) ? req.query.sort : 'name';
+  const hasFileFilter = q || exts.length || dateFrom || dateTo || Number.isFinite(minSize) || Number.isFinite(maxSize) || Number.isFinite(tagId) || favOnly;
+  if (!hasFileFilter) return res.json({ query: '', folders: [], files: [] });
+
+  // 파일 조건 동적 구성
+  const cond = ['f.owner_id=$1', 'f.deleted_at IS NULL']; const vals = [owner]; let i = 2;
+  if (q) { cond.push(`f.original_name ILIKE $${i} ESCAPE '\\'`); vals.push('%' + q.replace(/[%_\\]/g, (c) => '\\' + c) + '%'); i++; }
+  if (exts.length) { cond.push(`lower(substring(f.original_name from '\\.([^.]+)$')) = ANY($${i}::text[])`); vals.push(exts); i++; }
+  if (dateFrom) { cond.push(`f.created_at >= $${i}`); vals.push(dateFrom); i++; }
+  if (dateTo) { cond.push(`f.created_at < ($${i}::date + 1)`); vals.push(dateTo); i++; }
+  if (Number.isFinite(minSize)) { cond.push(`f.size_bytes >= $${i}`); vals.push(Math.round(minSize * 1048576)); i++; }
+  if (Number.isFinite(maxSize)) { cond.push(`f.size_bytes <= $${i}`); vals.push(Math.round(maxSize * 1048576)); i++; }
+  if (Number.isFinite(tagId)) { cond.push(`EXISTS (SELECT 1 FROM file_tags ft WHERE ft.file_id=f.id AND ft.tag_id=$${i})`); vals.push(tagId); i++; }
+  if (favOnly) { cond.push(`EXISTS (SELECT 1 FROM favorites fv WHERE fv.user_id=$${i} AND fv.file_id=f.id)`); vals.push(req.user.id); i++; }
+  const orderBy = sort === 'size' ? 'f.size_bytes DESC' : sort === 'createdAt' ? 'f.created_at DESC' : 'f.original_name';
+  const files = await query(`SELECT f.* FROM files f WHERE ${cond.join(' AND ')} ORDER BY ${orderBy} LIMIT 500`, vals);
+
+  // 폴더는 이름 검색이 있을 때만(그리고 파일 전용 필터가 없을 때) 함께 매칭
+  let folders = [];
+  if (q && !exts.length && !Number.isFinite(minSize) && !Number.isFinite(maxSize) && !Number.isFinite(tagId)) {
+    const ql = q.toLowerCase();
+    const fr = await query('SELECT id, path, note, note_updated_at, created_at, icon, color FROM folders WHERE owner_id=$1 AND deleted_at IS NULL', [owner]);
+    folders = fr.rows
+      .filter((r) => (r.path.split('/').filter(Boolean).pop() || '').toLowerCase().includes(ql))
+      .slice(0, 300)
+      .map((r) => ({ id: r.id, path: r.path, name: r.path.split('/').filter(Boolean).pop() || r.path, note: r.note || '', noteUpdatedAt: r.note_updated_at, createdAt: r.created_at, icon: r.icon || '', color: r.color || '', size: 0, fav: false }));
+  }
+  const fileList = files.rows.map(fileRow);
+  await attachMeta(req.user.id, owner, fileList, folders);
+  res.json({ query: q, folders, files: fileList });
 }));
 
 // ── 용량 리포트 (최상위 폴더별 집계) ──────────
@@ -536,27 +589,58 @@ router.get('/usage/report', authenticate, wrap(resolveOwner), wrap(async (req, r
   });
 }));
 
-// ── 사용자 셀프 휴지통 (본인 것, 최근 30일) ──────────
-const SELF_TRASH_MS = 30 * 86400000;
+// ── 사용자 셀프 휴지통 (본인 것, 보관기간=관리자 설정) ──────────
+const trashCutoff = () => new Date(Date.now() - trashRetentionDays() * 86400000).toISOString();
 router.get('/trash', authenticate, wrap(async (req, res) => {
-  const owner = req.user.id;
+  const owner = req.user.id; const cutoff = trashCutoff();
   const files = await query(
     `SELECT id, original_name AS name, folder, size_bytes, deleted_at FROM files
-     WHERE owner_id=$1 AND deleted_at IS NOT NULL AND deleted_with_folder IS NULL AND deleted_at > now() - interval '30 days'
-     ORDER BY deleted_at DESC`, [owner]);
+     WHERE owner_id=$1 AND deleted_at IS NOT NULL AND deleted_with_folder IS NULL AND deleted_at > $2
+     ORDER BY deleted_at DESC`, [owner, cutoff]);
   const folders = await query(
     `SELECT fo.id, fo.path, fo.deleted_at, (SELECT COUNT(*) FROM files x WHERE x.deleted_with_folder=fo.path AND x.owner_id=fo.owner_id) AS file_count
-     FROM folders fo WHERE fo.owner_id=$1 AND fo.deleted_at IS NOT NULL AND fo.deleted_at > now() - interval '30 days'
-     ORDER BY fo.deleted_at DESC`, [owner]);
+     FROM folders fo WHERE fo.owner_id=$1 AND fo.deleted_at IS NOT NULL AND fo.deleted_at > $2
+     ORDER BY fo.deleted_at DESC`, [owner, cutoff]);
   res.json({
-    days: 30,
+    days: trashRetentionDays(),
     files: files.rows.map((r) => ({ id: r.id, name: r.name, folder: r.folder, size: Number(r.size_bytes), deletedAt: r.deleted_at })),
     folders: folders.rows.map((r) => ({ id: r.id, path: r.path, name: r.path.split('/').filter(Boolean).pop() || r.path, fileCount: Number(r.file_count), deletedAt: r.deleted_at })),
   });
 }));
+// 영구 삭제(본인) — 단일 파일
+router.delete('/trash/file/:id(\\d+)', authenticate, wrap(async (req, res) => {
+  const r = await query('SELECT stored_name, owner_id FROM files WHERE id=$1 AND owner_id=$2 AND deleted_at IS NOT NULL', [req.params.id, req.user.id]);
+  if (r.rowCount === 0) return res.status(404).json({ error: '항목을 찾을 수 없습니다.' });
+  await fsp.unlink(path.join(userDir(r.rows[0].owner_id), r.rows[0].stored_name)).catch(() => {});
+  await query('DELETE FROM files WHERE id=$1', [req.params.id]);
+  await audit(req, 'self_purge_file', `file=${req.params.id}`);
+  res.json({ ok: true });
+}));
+// 영구 삭제(본인) — 폴더(그 폴더로 삭제된 파일 포함)
+router.delete('/trash/folder/:id(\\d+)', authenticate, wrap(async (req, res) => {
+  const r = await query('SELECT path FROM folders WHERE id=$1 AND owner_id=$2 AND deleted_at IS NOT NULL', [req.params.id, req.user.id]);
+  if (r.rowCount === 0) return res.status(404).json({ error: '항목을 찾을 수 없습니다.' });
+  const p = r.rows[0].path;
+  const files = await query('SELECT id, stored_name FROM files WHERE owner_id=$1 AND deleted_with_folder=$2', [req.user.id, p]);
+  for (const f of files.rows) await fsp.unlink(path.join(userDir(req.user.id), f.stored_name)).catch(() => {});
+  if (files.rowCount) await query('DELETE FROM files WHERE id = ANY($1::bigint[])', [files.rows.map((f) => f.id)]);
+  await query('DELETE FROM folders WHERE id=$1', [req.params.id]);
+  await audit(req, 'self_purge_folder', `${p}`);
+  res.json({ ok: true });
+}));
+// 휴지통 비우기(본인 전체 영구삭제)
+router.post('/trash/empty', authenticate, wrap(async (req, res) => {
+  const owner = req.user.id;
+  const files = await query('SELECT id, stored_name FROM files WHERE owner_id=$1 AND deleted_at IS NOT NULL', [owner]);
+  for (const f of files.rows) await fsp.unlink(path.join(userDir(owner), f.stored_name)).catch(() => {});
+  if (files.rowCount) await query('DELETE FROM files WHERE id = ANY($1::bigint[])', [files.rows.map((f) => f.id)]);
+  const folders = await query('DELETE FROM folders WHERE owner_id=$1 AND deleted_at IS NOT NULL RETURNING id', [owner]);
+  await audit(req, 'self_empty_trash', `files=${files.rowCount} folders=${folders.rowCount}`);
+  res.json({ ok: true, files: files.rowCount, folders: folders.rowCount });
+}));
 router.post('/trash/file/:id(\\d+)/restore', authenticate, wrap(async (req, res) => {
-  const r = await query("SELECT * FROM files WHERE id=$1 AND owner_id=$2 AND deleted_at IS NOT NULL AND deleted_at > now() - interval '30 days'", [req.params.id, req.user.id]);
-  if (r.rowCount === 0) return res.status(404).json({ error: '복원할 수 없습니다. (없거나 30일 초과)' });
+  const r = await query('SELECT * FROM files WHERE id=$1 AND owner_id=$2 AND deleted_at IS NOT NULL AND deleted_at > $3', [req.params.id, req.user.id, trashCutoff()]);
+  if (r.rowCount === 0) return res.status(404).json({ error: '복원할 수 없습니다. (없거나 보관기간 초과)' });
   const f = r.rows[0];
   await ensureFolder(f.owner_id, f.folder);
   const name = await uniqueFileName(f.owner_id, f.folder, f.original_name);
@@ -565,8 +649,8 @@ router.post('/trash/file/:id(\\d+)/restore', authenticate, wrap(async (req, res)
   res.json({ ok: true, name, folder: f.folder });
 }));
 router.post('/trash/folder/:id(\\d+)/restore', authenticate, wrap(async (req, res) => {
-  const r = await query("SELECT * FROM folders WHERE id=$1 AND owner_id=$2 AND deleted_at IS NOT NULL AND deleted_at > now() - interval '30 days'", [req.params.id, req.user.id]);
-  if (r.rowCount === 0) return res.status(404).json({ error: '복원할 수 없습니다. (없거나 30일 초과)' });
+  const r = await query('SELECT * FROM folders WHERE id=$1 AND owner_id=$2 AND deleted_at IS NOT NULL AND deleted_at > $3', [req.params.id, req.user.id, trashCutoff()]);
+  if (r.rowCount === 0) return res.status(404).json({ error: '복원할 수 없습니다. (없거나 보관기간 초과)' });
   const fo = r.rows[0];
   let newPath = fo.path;
   const dup = await query('SELECT 1 FROM folders WHERE owner_id=$1 AND path=$2 AND deleted_at IS NULL', [fo.owner_id, fo.path]);
@@ -703,6 +787,94 @@ router.post('/notifications/read', authenticate, wrap(async (req, res) => {
   if (ids && ids.length) await query('UPDATE notifications SET is_read=true WHERE user_id=$1 AND id = ANY($2)', [req.user.id, ids]);
   else await query('UPDATE notifications SET is_read=true WHERE user_id=$1 AND is_read=false', [req.user.id]);
   res.json({ ok: true });
+}));
+
+// ── 즐겨찾기(별표) ─ 뷰어 개인 북마크 ──────────
+router.post('/favorites/toggle', authenticate, wrap(async (req, res) => {
+  const kind = req.body.kind;
+  if (kind === 'file') {
+    const id = Number(req.body.id);
+    const f = await query('SELECT owner_id FROM files WHERE id=$1 AND deleted_at IS NULL', [id]);
+    if (f.rowCount === 0) return res.status(404).json({ error: '파일을 찾을 수 없습니다.' });
+    if (!(await canAccessOwner(req.user, f.rows[0].owner_id))) return res.status(403).json({ error: '권한이 없습니다.' });
+    const del = await query('DELETE FROM favorites WHERE user_id=$1 AND file_id=$2 RETURNING id', [req.user.id, id]);
+    if (del.rowCount) return res.json({ ok: true, fav: false });
+    await query('INSERT INTO favorites (user_id, file_id) VALUES ($1,$2) ON CONFLICT DO NOTHING', [req.user.id, id]);
+    return res.json({ ok: true, fav: true });
+  }
+  if (kind === 'folder') {
+    const p = normalizeFolder(req.body.path);
+    const ownerId = Number(req.body.ownerId) || req.user.id;
+    if (!(await canAccessOwner(req.user, ownerId))) return res.status(403).json({ error: '권한이 없습니다.' });
+    const del = await query('DELETE FROM favorites WHERE user_id=$1 AND folder_owner=$2 AND folder_path=$3 RETURNING id', [req.user.id, ownerId, p]);
+    if (del.rowCount) return res.json({ ok: true, fav: false });
+    await query('INSERT INTO favorites (user_id, folder_owner, folder_path) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING', [req.user.id, ownerId, p]);
+    return res.json({ ok: true, fav: true });
+  }
+  res.status(400).json({ error: '잘못된 요청입니다.' });
+}));
+
+// ── 태그(라벨) ─ 계정(owner)별 정의 + 파일 연결 ──────────
+router.get('/tags', authenticate, wrap(resolveOwner), wrap(async (req, res) => {
+  const r = await query(
+    `SELECT t.id, t.name, t.color, (SELECT COUNT(*) FROM file_tags ft WHERE ft.tag_id=t.id) AS cnt
+     FROM tags t WHERE t.owner_id=$1 ORDER BY t.name`, [req.targetOwnerId]);
+  res.json({ tags: r.rows.map((t) => ({ id: t.id, name: t.name, color: t.color, count: Number(t.cnt) })) });
+}));
+router.post('/tags', authenticate, wrap(resolveOwner), wrap(async (req, res) => {
+  const name = String(req.body.name || '').trim().slice(0, 40);
+  const color = /^#[0-9a-fA-F]{6}$/.test(req.body.color || '') ? req.body.color : '#118AB2';
+  if (!name) return res.status(400).json({ error: '태그 이름을 입력하세요.' });
+  try {
+    const r = await query('INSERT INTO tags (owner_id, name, color) VALUES ($1,$2,$3) RETURNING id', [req.targetOwnerId, name, color]);
+    await audit(req, 'create_tag', `owner=${req.targetOwnerId} ${name}`);
+    res.status(201).json({ id: r.rows[0].id, name, color });
+  } catch (e) {
+    if (e.code === '23505') return res.status(409).json({ error: '같은 이름의 태그가 이미 있습니다.' });
+    throw e;
+  }
+}));
+router.patch('/tags/:id(\\d+)', authenticate, wrap(resolveOwner), wrap(async (req, res) => {
+  const name = String(req.body.name || '').trim().slice(0, 40);
+  const color = /^#[0-9a-fA-F]{6}$/.test(req.body.color || '') ? req.body.color : null;
+  const sets = []; const vals = []; let i = 1;
+  if (name) { sets.push(`name=$${i++}`); vals.push(name); }
+  if (color) { sets.push(`color=$${i++}`); vals.push(color); }
+  if (!sets.length) return res.json({ ok: true });
+  vals.push(req.params.id, req.targetOwnerId);
+  const r = await query(`UPDATE tags SET ${sets.join(', ')} WHERE id=$${i++} AND owner_id=$${i}`, vals);
+  if (r.rowCount === 0) return res.status(404).json({ error: '태그를 찾을 수 없습니다.' });
+  res.json({ ok: true });
+}));
+router.delete('/tags/:id(\\d+)', authenticate, wrap(resolveOwner), wrap(async (req, res) => {
+  const r = await query('DELETE FROM tags WHERE id=$1 AND owner_id=$2 RETURNING id', [req.params.id, req.targetOwnerId]);
+  if (r.rowCount === 0) return res.status(404).json({ error: '태그를 찾을 수 없습니다.' });
+  await audit(req, 'delete_tag', `id=${req.params.id}`);
+  res.json({ ok: true });
+}));
+// 파일의 태그 목록 교체 (owner 소유 태그만 허용)
+router.put('/:id(\\d+)/tags', authenticate, wrap(async (req, res) => {
+  const fr = await query('SELECT owner_id FROM files WHERE id=$1 AND deleted_at IS NULL', [req.params.id]);
+  if (fr.rowCount === 0) return res.status(404).json({ error: '파일을 찾을 수 없습니다.' });
+  const owner = fr.rows[0].owner_id;
+  if (!(await canAccessOwner(req.user, owner))) return res.status(403).json({ error: '권한이 없습니다.' });
+  const wanted = (Array.isArray(req.body.tagIds) ? req.body.tagIds : []).map(Number).filter(Boolean);
+  const valid = wanted.length
+    ? (await query('SELECT id FROM tags WHERE owner_id=$1 AND id = ANY($2::bigint[])', [owner, wanted])).rows.map((r) => r.id)
+    : [];
+  await query('DELETE FROM file_tags WHERE file_id=$1', [req.params.id]);
+  for (const t of valid) await query('INSERT INTO file_tags (file_id, tag_id) VALUES ($1,$2) ON CONFLICT DO NOTHING', [req.params.id, t]);
+  await audit(req, 'set_file_tags', `file=${req.params.id} tags=${valid.length}`);
+  res.json({ ok: true, tagIds: valid });
+}));
+
+// ── 공유 링크 QR 코드 (관리자가 켠 경우에만) ──────────
+router.get('/qr', authenticate, wrap(async (req, res) => {
+  if (!shareQrEnabled()) return res.status(403).json({ error: 'QR 코드 기능이 비활성화되어 있습니다.' });
+  const text = String(req.query.text || '').slice(0, 1024);
+  if (!text) return res.status(400).json({ error: '대상 URL이 없습니다.' });
+  const qr = await QRCode.toDataURL(text, { margin: 1, width: 220 });
+  res.json({ qr });
 }));
 
 module.exports = router;

@@ -1,16 +1,15 @@
 'use strict';
 
-// 휴지통 자동 영구삭제: deleted_at 이 1년 지난 파일/폴더를 완전 제거.
+// 휴지통 자동 영구삭제: deleted_at 이 보관기간(관리자 설정, 기본 30일) 지난 파일/폴더를 완전 제거.
 const path = require('path');
 const fsp = require('fs/promises');
 const config = require('./config');
 const { query } = require('./db');
-
-const RETENTION_MS = 365 * 24 * 60 * 60 * 1000; // 1년
+const { trashRetentionDays } = require('./settings');
 
 async function purgeOldTrash() {
   try {
-    const cutoff = new Date(Date.now() - RETENTION_MS).toISOString();
+    const cutoff = new Date(Date.now() - trashRetentionDays() * 86400000).toISOString();
     // 만료된 파일: 디스크 제거 후 행 삭제
     const files = await query('SELECT id, owner_id, stored_name FROM files WHERE deleted_at IS NOT NULL AND deleted_at < $1', [cutoff]);
     for (const f of files.rows) {
@@ -33,4 +32,4 @@ function startPurgeScheduler() {
   setInterval(purgeOldTrash, 24 * 60 * 60 * 1000).unref();
 }
 
-module.exports = { purgeOldTrash, startPurgeScheduler, RETENTION_MS };
+module.exports = { purgeOldTrash, startPurgeScheduler };

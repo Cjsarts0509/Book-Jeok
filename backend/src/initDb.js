@@ -203,6 +203,48 @@ ALTER TABLE folder_shares   ADD COLUMN IF NOT EXISTS notify_inapp BOOLEAN NOT NU
 ALTER TABLE folder_shares   ADD COLUMN IF NOT EXISTS notify_email BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE upload_requests ADD COLUMN IF NOT EXISTS notify_inapp BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE upload_requests ADD COLUMN IF NOT EXISTS notify_email BOOLEAN NOT NULL DEFAULT FALSE;
+
+-- 로그인 이벤트(이상 로그인 감지): (사용자, IP) 최초 접속 여부 판별용
+CREATE TABLE IF NOT EXISTS login_events (
+  id         BIGSERIAL PRIMARY KEY,
+  user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  ip         VARCHAR(64) NOT NULL DEFAULT '',
+  user_agent TEXT NOT NULL DEFAULT '',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_login_events_user ON login_events(user_id, ip);
+
+-- 즐겨찾기(별표): 뷰어(user_id) 개인 북마크. 파일 또는 (소유자,폴더경로)
+CREATE TABLE IF NOT EXISTS favorites (
+  id           BIGSERIAL PRIMARY KEY,
+  user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  file_id      BIGINT REFERENCES files(id) ON DELETE CASCADE,
+  folder_owner INTEGER REFERENCES users(id) ON DELETE CASCADE,
+  folder_path  TEXT,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_fav_file ON favorites(user_id, file_id) WHERE file_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_fav_folder ON favorites(user_id, folder_owner, folder_path) WHERE folder_path IS NOT NULL;
+
+-- 태그(라벨): 계정(owner)별 정의 + 파일 연결
+CREATE TABLE IF NOT EXISTS tags (
+  id         BIGSERIAL PRIMARY KEY,
+  owner_id   INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  name       TEXT NOT NULL,
+  color      TEXT NOT NULL DEFAULT '#118AB2',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (owner_id, name)
+);
+CREATE TABLE IF NOT EXISTS file_tags (
+  file_id BIGINT NOT NULL REFERENCES files(id) ON DELETE CASCADE,
+  tag_id  BIGINT NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
+  PRIMARY KEY (file_id, tag_id)
+);
+CREATE INDEX IF NOT EXISTS idx_file_tags_tag ON file_tags(tag_id);
+
+-- 전역 설정 기본값(휴지통 보관일수, 공유 QR 사용여부)
+INSERT INTO settings (key, value) VALUES ('trash_retention_days', '30') ON CONFLICT (key) DO NOTHING;
+INSERT INTO settings (key, value) VALUES ('share_qr_enabled', '1') ON CONFLICT (key) DO NOTHING;
 `;
 
 const DEFAULT_EXT = 'csv,xls,xlsx,xlsm,xlsb,jpg,jpeg,png,gif,ppt,pptx,doc,docx,txt';

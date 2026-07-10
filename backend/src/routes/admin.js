@@ -8,8 +8,7 @@ const { query, healthStats } = require('../db');
 const { hashPassword, encryptSecret, decryptSecret, generatePassword } = require('../crypto');
 const { authenticate, requireAdmin } = require('../middleware/auth');
 const { audit, wrap } = require('../util');
-const { RETENTION_MS } = require('../purge');
-const { getAllowedExtensions, setAllowedExtensions } = require('../settings');
+const { getAllowedExtensions, setAllowedExtensions, trashRetentionDays, shareQrEnabled, setSetting } = require('../settings');
 const { diskTotalBytes, allocatedBytes, validateAllocation } = require('../disk');
 
 function gb(bytes) { return (bytes / 1073741824).toFixed(2) + 'GB'; }
@@ -222,7 +221,7 @@ router.get('/audit', wrap(async (req, res) => {
 // ══════════ 휴지통 ══════════
 // GET /api/admin/trash — 삭제된 파일/폴더 목록 (전 계정)
 router.get('/trash', wrap(async (req, res) => {
-  const days = Math.round(RETENTION_MS / 86400000);
+  const days = trashRetentionDays();
   const files = await query(`
     SELECT f.id, f.original_name AS name, f.folder, f.size_bytes, f.deleted_at, u.username, u.display_name
     FROM files f LEFT JOIN users u ON u.id=f.owner_id
@@ -349,6 +348,23 @@ router.put('/settings/extensions', wrap(async (req, res) => {
   const normalized = await setAllowedExtensions(req.body.extensions || '');
   await audit(req, 'set_extensions', normalized);
   res.json({ ok: true, extensions: normalized.split(',').filter(Boolean) });
+}));
+
+// ══════════ 일반 설정 (휴지통 보관일수, 공유 QR) ══════════
+router.get('/settings/general', wrap(async (req, res) => {
+  res.json({ trashRetentionDays: trashRetentionDays(), shareQrEnabled: shareQrEnabled() });
+}));
+router.put('/settings/general', wrap(async (req, res) => {
+  if (req.body.trashRetentionDays !== undefined) {
+    const n = parseInt(req.body.trashRetentionDays, 10);
+    if (!Number.isFinite(n) || n < 1 || n > 3650) return res.status(400).json({ error: '보관일수는 1~3650 사이여야 합니다.' });
+    await setSetting('trash_retention_days', n);
+  }
+  if (req.body.shareQrEnabled !== undefined) {
+    await setSetting('share_qr_enabled', req.body.shareQrEnabled ? '1' : '0');
+  }
+  await audit(req, 'set_general_settings', `trash=${trashRetentionDays()} qr=${shareQrEnabled()}`);
+  res.json({ ok: true, trashRetentionDays: trashRetentionDays(), shareQrEnabled: shareQrEnabled() });
 }));
 
 // ══════════ 영업점 관리 ══════════

@@ -7,9 +7,39 @@ const config = require('../config');
 const { query } = require('../db');
 const { hashPassword, verifyPassword, encryptSecret, decryptSecret } = require('../crypto');
 const { authenticate } = require('../middleware/auth');
-const { audit, wrap } = require('../util');
+const { audit, wrap, clientIp } = require('../util');
+const { shareQrEnabled } = require('../settings');
+const notify = require('../notify');
 const totp = require('../totp');
 const QRCode = require('qrcode');
+
+// IP 마스킹 (알림 표시용): 마지막 옥텟/그룹만 가림
+function maskIp(ip) {
+  if (!ip) return '알 수 없는 위치';
+  if (ip.includes('.')) return ip.replace(/\.\d+$/, '.•••');
+  if (ip.includes(':')) return ip.split(':').slice(0, 3).join(':') + ':•••';
+  return ip;
+}
+
+// 이상 로그인 감지: 해당 계정에서 처음 보는 IP면 인앱 알림 (최초 로그인은 제외)
+async function checkNewLocation(user, req) {
+  try {
+    const ip = clientIp(req);
+    const ua = String(req.headers['user-agent'] || '').slice(0, 300);
+    const prior = await query(
+      'SELECT (SELECT COUNT(*) FROM login_events WHERE user_id=$1) AS total, (SELECT COUNT(*) FROM login_events WHERE user_id=$1 AND ip=$2) AS sameip',
+      [user.id, ip]
+    );
+    const total = Number(prior.rows[0].total), sameip = Number(prior.rows[0].sameip);
+    await query('INSERT INTO login_events (user_id, ip, user_agent) VALUES ($1,$2,$3)', [user.id, ip, ua]);
+    if (total > 0 && sameip === 0) {
+      await notify.push({
+        userId: user.id, type: 'login_new', title: '새로운 위치에서 로그인',
+        body: `${maskIp(ip)} 에서 로그인되었습니다. 본인이 아니라면 즉시 비밀번호를 변경하세요.`,
+      });
+    }
+  } catch (err) { console.error('[login-anomaly]', err.message); }
+}
 
 const router = express.Router();
 
@@ -74,6 +104,7 @@ router.post('/login', loginLimiter, wrap(async (req, res) => {
 
   const token = issueToken(res, user);
   await audit({ ...req, user }, 'login', '');
+  await checkNewLocation(user, req);
   // 관리자는 2FA 필수 — 미설정 시 강제 설정 안내
   const mustSetup2fa = user.role === 'admin' && !user.totp_enabled;
   res.json({
@@ -109,6 +140,7 @@ router.get('/me', authenticate, wrap(async (req, res) => {
       notifyEmail: row.notify_email !== false,
       uploadConflict: row.upload_conflict || 'rename',
       totpEnabled: !!row.totp_enabled,
+      qrEnabled: shareQrEnabled(),
     },
   });
 }));

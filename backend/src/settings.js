@@ -6,6 +6,10 @@ const { query } = require('./db');
 const DEFAULT_EXT = 'csv,xls,xlsx,xlsm,xlsb,jpg,jpeg,png,gif,ppt,pptx,doc,docx,txt';
 let allowedExt = parseExt(DEFAULT_EXT);
 
+// 일반 key/value 설정 캐시 (휴지통 보관일수, 공유 QR 등)
+const cache = new Map();
+const DEFAULTS = { trash_retention_days: '30', share_qr_enabled: '1' };
+
 function parseExt(str) {
   return new Set(
     String(str || '')
@@ -17,12 +21,35 @@ function parseExt(str) {
 
 async function loadSettings() {
   try {
-    const r = await query("SELECT value FROM settings WHERE key='allowed_extensions'");
-    if (r.rowCount > 0) allowedExt = parseExt(r.rows[0].value);
+    const r = await query('SELECT key, value FROM settings');
+    for (const row of r.rows) {
+      if (row.key === 'allowed_extensions') allowedExt = parseExt(row.value);
+      else cache.set(row.key, row.value);
+    }
   } catch (err) {
     console.error('[settings] 로드 실패:', err.message);
   }
 }
+
+function getSetting(key, def) {
+  return cache.has(key) ? cache.get(key) : (def !== undefined ? def : DEFAULTS[key]);
+}
+async function setSetting(key, value) {
+  const v = String(value);
+  await query(
+    'INSERT INTO settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = $2',
+    [key, v]
+  );
+  cache.set(key, v);
+  return v;
+}
+
+// 휴지통 보관일수 (1~3650일, 잘못된 값이면 기본 30)
+function trashRetentionDays() {
+  const n = parseInt(getSetting('trash_retention_days'), 10);
+  return Number.isFinite(n) && n >= 1 && n <= 3650 ? n : 30;
+}
+const shareQrEnabled = () => getSetting('share_qr_enabled') !== '0';
 
 async function setAllowedExtensions(str) {
   const normalized = [...parseExt(str)].join(',');
@@ -38,4 +65,7 @@ const getAllowedExtensions = () => [...allowedExt].sort();
 const isAllowed = (ext) => allowedExt.has(String(ext || '').toLowerCase());
 const allowedLabel = () => getAllowedExtensions().join(', ');
 
-module.exports = { loadSettings, setAllowedExtensions, getAllowedExtensions, isAllowed, allowedLabel, DEFAULT_EXT };
+module.exports = {
+  loadSettings, setAllowedExtensions, getAllowedExtensions, isAllowed, allowedLabel, DEFAULT_EXT,
+  getSetting, setSetting, trashRetentionDays, shareQrEnabled,
+};
