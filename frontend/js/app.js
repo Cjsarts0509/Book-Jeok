@@ -37,7 +37,7 @@ const App = (() => {
     root().innerHTML = `
       <div class="login-screen">
         <form class="login-card" id="login-form">
-          <img src="assets/logo.svg?v=34" class="login-logo" alt="북적북적">
+          <img src="assets/logo.svg?v=35" class="login-logo" alt="북적북적">
           <div class="login-title">북적북적</div>
           <div class="login-sub">Book-Jeok · 우리끼리 나누는 파일 창고</div>
           <div class="field"><label>아이디</label><input class="input" name="username" autocomplete="username" placeholder="아이디" required></div>
@@ -61,7 +61,7 @@ const App = (() => {
       <div class="layout">
         <header class="appbar">
           <button class="icon-btn appbar-menu" id="menu-toggle" title="폴더">☰</button>
-          <div class="brand" id="brand-home" title="홈으로"><img src="assets/logo.svg?v=34"><span class="brand-name">북적북적</span></div>
+          <div class="brand" id="brand-home" title="홈으로"><img src="assets/logo.svg?v=35"><span class="brand-name">북적북적</span></div>
           ${isPriv() ? `<select class="input account-switcher" id="account-switcher"><option value="">내 파일</option></select>` : ''}
           <div class="topbar-spacer"></div>
           <nav class="appbar-nav">
@@ -1090,12 +1090,12 @@ const App = (() => {
     m.q('#rc').addEventListener('click', m.close);
     API.usageReport(state.ownerId).then((r) => {
       const pct = r.quotaBytes > 0 ? Math.min(100, r.usedBytes / r.quotaBytes * 100) : 0;
-      const max = Math.max(1, ...r.folders.map((f) => f.bytes));
-      const bars = r.folders.length ? r.folders.map((f) => `<div class="rep-row"><div class="rep-name">${UI.escapeHtml(f.name)}</div><div class="rep-bar"><span style="width:${(f.bytes / max * 100).toFixed(1)}%"></span></div><div class="rep-val num">${UI.bytes(f.bytes)} · ${f.fileCount}개</div></div>`).join('') : '<p class="muted">파일이 없습니다.</p>';
       m.q('#rep-body').innerHTML = `
         <div class="rep-summary"><b class="num">${UI.bytes(r.usedBytes)}</b> <span class="muted">${r.unlimited ? '· 무제한' : (r.quotaBytes > 0 ? '/ ' + UI.bytes(r.quotaBytes) + ` (${pct.toFixed(0)}%)` : '· 미할당')} · 총 ${r.fileCount}개 파일</span></div>
-        ${!r.unlimited && r.quotaBytes > 0 ? `<div class="usage-bar" style="max-width:none;margin:6px 0 16px"><span style="width:${pct}%"></span></div>` : '<div style="height:8px"></div>'}
-        <div class="muted" style="font-size:12px;margin-bottom:6px">최상위 폴더별 사용량</div>${bars}`;
+        ${!r.unlimited && r.quotaBytes > 0 ? `<div class="usage-bar" style="max-width:none;margin:6px 0 14px"><span style="width:${pct}%"></span></div>` : '<div style="height:8px"></div>'}
+        <div id="rep-map"></div>`;
+      if (r.tree && r.tree.length) UI.folderTreemap(m.q('#rep-map'), r.tree, { height: 380, rootLabel: '내 폴더' });
+      else m.q('#rep-map').innerHTML = '<p class="muted">파일이 없습니다.</p>';
     }).catch((e) => { m.q('#rep-body').innerHTML = `<p class="muted" style="color:var(--danger)">${UI.escapeHtml(e.message)}</p>`; });
   }
 

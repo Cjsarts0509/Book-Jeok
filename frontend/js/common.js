@@ -166,5 +166,84 @@ const UI = (() => {
     });
   }
 
-  return { toast, bytes, date, fileIcon, extIcon, EXT_CATALOG, escapeHtml, sanitizeHtml, isRecent, modal, confirm };
+  // ── 폴더 계층 트리맵(SpaceSniffer식) ──────────────────────────
+  // container: 렌더 대상 요소, folders: [{folder, used, files}], opts: {height, rootLabel}
+  // 폴더를 한 단계씩 드릴다운(📁 하위 있음 / 📂 없음 / 📄 이 폴더 파일) + 브레드크럼.
+  function folderTreemap(container, folders, opts = {}) {
+    const H = opts.height || 460;
+    const rootLabel = opts.rootLabel || '홈(최상위)';
+    let path = '/';
+    container.classList.add('tm-wrap');
+    container.innerHTML = `<div class="tm-bar"><div class="tm-crumb"></div><div class="muted" style="font-size:12px">타일 크기 = 사용량 · 폴더를 클릭하면 하위로</div></div><div class="treemap"></div><div class="tm-tip" style="display:none"></div>`;
+    const box = container.querySelector('.treemap');
+    const crumbEl = container.querySelector('.tm-crumb');
+    const tip = container.querySelector('.tm-tip');
+
+    function buildTree() {
+      const nodes = new Map();
+      const parentOf = (p) => { const i = p.lastIndexOf('/'); return i <= 0 ? '/' : p.slice(0, i); };
+      const ensure = (p) => {
+        if (nodes.has(p)) return nodes.get(p);
+        const name = p === '/' ? rootLabel : p.slice(p.lastIndexOf('/') + 1);
+        const node = { path: p, name, selfBytes: 0, selfFiles: 0, children: [] };
+        nodes.set(p, node);
+        if (p !== '/') ensure(parentOf(p)).children.push(node);
+        return node;
+      };
+      ensure('/');
+      for (const r of (folders || [])) { const n = ensure(r.folder || '/'); n.selfBytes += Number(r.used) || 0; n.selfFiles += Number(r.files) || 0; }
+      const total = (n) => { let b = n.selfBytes, f = n.selfFiles; for (const c of n.children) { const [cb, cf] = total(c); b += cb; f += cf; } n.totalBytes = b; n.totalFiles = f; return [b, f]; };
+      total(nodes.get('/'));
+      return nodes;
+    }
+    function squarify(items, W, Ht) {
+      const totalV = items.reduce((s, i) => s + i.value, 0) || 1;
+      const scale = (W * Ht) / totalV;
+      const data = items.map((i) => ({ ...i, area: Math.max(i.value * scale, 0) })).sort((a, b) => b.area - a.area);
+      const out = []; let rect = { x: 0, y: 0, w: W, h: Ht }; let row = [];
+      const worst = (r, len) => { const sum = r.reduce((s, x) => s + x.area, 0); const mx = Math.max(...r.map((x) => x.area)); const mn = Math.min(...r.map((x) => x.area)); const l2 = len * len, s2 = sum * sum; return Math.max((l2 * mx) / s2, s2 / (l2 * mn)); };
+      const lay = (r, rc, horiz) => { const sum = r.reduce((s, x) => s + x.area, 0); let off = 0; if (horiz) { const rh = sum / rc.w; for (const x of r) { const rw = x.area / rh; out.push({ ...x, x: rc.x + off, y: rc.y, w: rw, h: rh }); off += rw; } return { x: rc.x, y: rc.y + rh, w: rc.w, h: rc.h - rh }; } const rw = sum / rc.h; for (const x of r) { const rh = x.area / rw; out.push({ ...x, x: rc.x, y: rc.y + off, w: rw, h: rh }); off += rh; } return { x: rc.x + rw, y: rc.y, w: rc.w - rw, h: rc.h }; };
+      const rem = data.slice();
+      while (rem.length) { const horiz = rect.w >= rect.h; const len = horiz ? rect.w : rect.h; if (!row.length) { row.push(rem.shift()); continue; } if (worst(row, len) >= worst([...row, rem[0]], len)) row.push(rem.shift()); else { rect = lay(row, rect, horiz); row = []; } }
+      if (row.length) lay(row, rect, rect.w >= rect.h);
+      return out;
+    }
+    const ocean = (t) => { t = Math.max(0.08, Math.min(1, t)); return `hsl(195,75%,${64 - t * 34}%)`; };
+
+    function draw() {
+      const tree = buildTree();
+      const node = tree.get(path) || tree.get('/');
+      const tiles = node.children.filter((c) => c.totalBytes > 0).map((c) => ({ value: c.totalBytes, node: c }));
+      if (node.selfBytes > 0) tiles.push({ value: node.selfBytes, files: true, filesCount: node.selfFiles });
+      // 브레드크럼
+      const segs = path.split('/').filter(Boolean);
+      let html = (segs.length ? `<a href="#" class="tm-link" data-path="/">${escapeHtml(rootLabel)}</a>` : `<b>${escapeHtml(rootLabel)}</b>`);
+      let accP = '';
+      segs.forEach((seg, i) => { accP += '/' + seg; const last = i === segs.length - 1; html += ' <span class="muted">/</span> ' + (last ? `<b>${escapeHtml(seg)}</b>` : `<a href="#" class="tm-link" data-path="${escapeHtml(accP)}">${escapeHtml(seg)}</a>`); });
+      crumbEl.innerHTML = html;
+      crumbEl.querySelectorAll('[data-path]').forEach((a) => a.onclick = (e) => { e.preventDefault(); path = a.dataset.path; draw(); });
+
+      const W = box.clientWidth || 760;
+      box.style.height = H + 'px';
+      if (!tiles.length) { box.innerHTML = '<div class="empty" style="height:100%">이 폴더에는 파일이 없습니다.</div>'; return; }
+      const rects = squarify(tiles, W, H);
+      const maxV = Math.max(...tiles.map((t) => t.value));
+      box.innerHTML = rects.map((r) => {
+        let name, sub, color, drill = false, pathAttr = '';
+        if (r.files) { color = '#8592a0'; name = '📄 이 폴더 파일'; sub = `${bytes(r.value)} · ${r.filesCount}개`; }
+        else { const n = r.node; const kids = n.children.length; color = ocean(r.value / maxV); name = (kids ? '📁 ' : '📂 ') + n.name; sub = `${bytes(n.totalBytes)} · ${n.totalFiles}개${kids ? ' · 하위 ' + kids : ''}`; drill = kids > 0; pathAttr = ` data-tpath="${escapeHtml(n.path)}"`; }
+        const small = r.w < 60 || r.h < 32;
+        return `<div class="tm-tile${drill ? '' : ' nodrill'}" data-drill="${drill ? 1 : 0}"${pathAttr} style="left:${r.x}px;top:${r.y}px;width:${Math.max(0, r.w - 2)}px;height:${Math.max(0, r.h - 2)}px;background:${color}" data-name="${escapeHtml(name)}" data-sub="${escapeHtml(sub)}">${small ? '' : `<div class="tm-name">${escapeHtml(name)}</div><div class="tm-sub">${escapeHtml(sub)}</div>`}</div>`;
+      }).join('');
+      box.querySelectorAll('.tm-tile').forEach((el) => {
+        el.addEventListener('mousemove', (e) => { tip.style.display = 'block'; tip.innerHTML = `<b>${el.dataset.name}</b><br>${el.dataset.sub}`; const cr = container.getBoundingClientRect(); tip.style.left = (e.clientX - cr.left + 12) + 'px'; tip.style.top = (e.clientY - cr.top + 12) + 'px'; });
+        el.addEventListener('mouseleave', () => { tip.style.display = 'none'; });
+        if (el.dataset.drill === '1') el.addEventListener('click', () => { path = el.dataset.tpath; draw(); });
+      });
+    }
+    draw();
+    return { redraw: draw };
+  }
+
+  return { toast, bytes, date, fileIcon, extIcon, EXT_CATALOG, escapeHtml, sanitizeHtml, isRecent, modal, confirm, folderTreemap };
 })();

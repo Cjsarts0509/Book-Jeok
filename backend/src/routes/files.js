@@ -512,10 +512,14 @@ router.get('/usage/report', authenticate, wrap(resolveOwner), wrap(async (req, r
   const byTop = await query(
     `SELECT COALESCE(NULLIF(split_part(folder,'/',2),''),'(루트)') AS top, COUNT(*)::int AS c, COALESCE(SUM(size_bytes),0) AS b
      FROM files WHERE owner_id=$1 AND deleted_at IS NULL GROUP BY top ORDER BY b DESC LIMIT 100`, [owner]);
+  const byFolder = await query(
+    `SELECT folder, COUNT(*)::int AS c, COALESCE(SUM(size_bytes),0) AS b
+     FROM files WHERE owner_id=$1 AND deleted_at IS NULL GROUP BY folder`, [owner]);
   res.json({
     ownerId: owner, fileCount: tot.rows[0].c, usedBytes: Number(tot.rows[0].b),
     quotaBytes: Number(u.rows[0].quota_bytes), unlimited: u.rows[0].role === 'admin',
     folders: byTop.rows.map((r) => ({ name: r.top, fileCount: r.c, bytes: Number(r.b) })),
+    tree: byFolder.rows.map((r) => ({ folder: r.folder, used: Number(r.b), files: r.c })),
   });
 }));
 
