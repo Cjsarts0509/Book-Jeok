@@ -1458,13 +1458,20 @@ const App = (() => {
     m.el.querySelector('.modal').classList.add('modal-wide');
     m.q('#ocr-close').addEventListener('click', m.close);
     let curText = '';
-    function render(status, text) {
+    function confBadge(conf) {
+      if (conf == null || conf === undefined) return '';
+      const c = Number(conf);
+      const lv = c >= 80 ? ['ok', '높음'] : c >= 55 ? ['mid', '보통'] : ['low', '낮음'];
+      const hint = c < 55 ? ' · 더 밝고 반듯하게 다시 촬영하면 정확도가 올라갑니다' : '';
+      return `<div class="ocr-conf ocr-conf-${lv[0]}">인식 신뢰도 ${lv[1]} (${c}%)${hint}</div>`;
+    }
+    function render(status, text, conf) {
       curText = text || '';
       const body = m.q('#ocr-body'); const runBtn = m.q('#ocr-run'); const copyBtn = m.q('#ocr-copy');
       if (status === 'done') {
         body.innerHTML = curText.trim()
-          ? `<div class="ocr-result">${UI.escapeHtml(curText)}</div><p class="muted" style="font-size:12px;margin-top:8px">이 텍스트로 파일 검색이 됩니다.</p>`
-          : '<div class="empty" style="padding:24px">인식된 글자가 없습니다. (사진이 흐리거나 글자가 없을 수 있어요)</div>';
+          ? `${confBadge(conf)}<div class="ocr-result">${UI.escapeHtml(curText)}</div><p class="muted" style="font-size:12px;margin-top:8px">이 텍스트로 파일 검색이 됩니다.</p>`
+          : `${confBadge(conf)}<div class="empty" style="padding:24px">인식된 글자가 없습니다. (사진이 흐리거나 글자가 없을 수 있어요)</div>`;
         runBtn.textContent = '🔁 다시 인식'; runBtn.style.display = '';
         copyBtn.style.display = curText.trim() ? '' : 'none';
       } else {
@@ -1476,33 +1483,34 @@ const App = (() => {
     const withTimeout = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('t')), ms))]);
     async function load() {
       // GET 미지원(구버전 백엔드)·오류여도 404 원문 노출하지 않고 실행 가능 상태로
-      try { const r = await API.ocrText(id); render(r.status, r.text); }
+      try { const r = await API.ocrText(id); render(r.status, r.text, r.confidence); }
       catch (e) { render('', ''); } // 조회 불가 → 실행 버튼 노출(실행하면 결과 표시)
     }
     m.q('#ocr-run').addEventListener('click', async () => {
       const runBtn = m.q('#ocr-run'), copyBtn = m.q('#ocr-copy'), body = m.q('#ocr-body');
       runBtn.disabled = true; runBtn.innerHTML = '<span class="btn-spin"></span>인식 중…'; copyBtn.style.display = 'none';
       body.innerHTML = '<div class="empty" style="padding:24px">⏳ 문자 인식 중… (몇 초 걸릴 수 있어요)</div>';
-      let text = null;
+      let text = null, conf;
       try {
         // 기본: 인식 실행 응답에 텍스트 포함(신속). 구버전 응답이면 text 없을 수 있음.
         const r = await withTimeout(API.ocrFile(id), 15000);
         text = (r && r.text !== undefined) ? r.text : ((r && r.chars > 0) ? '' : '');
+        if (r) conf = r.confidence;
         if (r && r.text === undefined && r.chars > 0) {
           // 구버전 백엔드(POST에 text 없음) → 저장 결과 조회 시도
-          try { const g = await withTimeout(API.ocrText(id), 4000); text = g.text || ''; } catch (_) { text = ''; }
+          try { const g = await withTimeout(API.ocrText(id), 4000); text = g.text || ''; conf = g.confidence; } catch (_) { text = ''; }
         }
       } catch (err) {
         // 응답 지연/유실 → 저장 결과를 폴링으로 확인
         for (let i = 0; i < 15; i++) {
           await new Promise((r) => setTimeout(r, 700));
-          try { const g = await withTimeout(API.ocrText(id), 2500); if (g.status === 'done') { text = g.text || ''; break; } if (g.status === 'error') break; } catch (_) { /* 재시도 */ }
+          try { const g = await withTimeout(API.ocrText(id), 2500); if (g.status === 'done') { text = g.text || ''; conf = g.confidence; break; } if (g.status === 'error') break; } catch (_) { /* 재시도 */ }
         }
       }
       runBtn.disabled = false;
       if (text !== null) {
         const f = state.files.find((x) => String(x.id) === String(id)); if (f) f.ocrStatus = 'done';
-        render('done', text);
+        render('done', text, conf);
         UI.toast(text.trim() ? '문자 인식 완료' : '인식된 글자가 없습니다', 'success');
         renderListing();
       } else { UI.toast('OCR 처리에 실패했습니다. 다시 시도해주세요.', 'error'); }
