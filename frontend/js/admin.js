@@ -22,7 +22,7 @@ const Admin = (() => {
     root().innerHTML = `
       <div class="layout">
         <header class="appbar">
-          <a class="brand" href="index.html" title="홈으로"><img src="assets/logo.svg?v=58"><span class="brand-name">북적북적</span></a>
+          <a class="brand" href="index.html" title="홈으로"><img src="assets/logo.svg?v=59"><span class="brand-name">북적북적</span></a>
           <nav class="appbar-nav">
             ${item('dashboard', '🏠', '대시보드')}
             ${item('users', '👥', '계정')}
@@ -536,7 +536,20 @@ const Admin = (() => {
           <div class="ext-grid">${g.exts.map((e) => `
             <label class="ext-opt${on.has(e) ? ' on' : ''}"><input type="checkbox" value="${e}" ${on.has(e) ? 'checked' : ''}><span class="ei">${UI.extIcon(e)}</span> .${e}</label>`).join('')}</div>
         </div>`).join('');
+      let gen = { trashRetentionDays: 30, shareQrEnabled: true };
+      try { gen = await API.getGeneralSettings(); } catch {}
       view.innerHTML = `
+        <div class="ext-group" id="gen-settings">
+          <div class="ext-group-head"><span>⚙️ 일반 설정</span></div>
+          <div style="display:flex;flex-wrap:wrap;gap:18px;align-items:center;padding:6px 2px">
+            <label style="display:flex;align-items:center;gap:8px;font-size:14px">🗑️ 휴지통 보관일수
+              <input class="input" id="gen-trash" type="number" min="1" max="3650" value="${gen.trashRetentionDays}" style="width:90px"> 일</label>
+            <label style="display:flex;align-items:center;gap:8px;font-size:14px;cursor:pointer">📱 공유 링크 QR 코드
+              <input type="checkbox" id="gen-qr" ${gen.shareQrEnabled ? 'checked' : ''} style="width:18px;height:18px"></label>
+            <div style="flex:1"></div>
+            <button class="btn btn-secondary btn-sm" id="save-gen">일반 설정 저장</button>
+          </div>
+        </div>
         <div class="toolbar"><span class="muted" style="font-size:13px">업로드를 허용할 확장자를 선택하세요. 현재 <b id="ext-count">${on.size}</b>종 허용 중.</span><div style="flex:1"></div><button class="btn btn-primary" id="save-ext">저장</button></div>
         ${groups}
         <div class="ext-group"><div class="ext-group-head"><span>➕ 직접 추가 (쉼표/공백 구분)</span></div>
@@ -548,6 +561,12 @@ const Admin = (() => {
         const exts = b.dataset.grp.split(','); const boxes = exts.map((e) => view2.querySelector(`.ext-opt input[value="${e}"]`));
         const allOn = boxes.every((x) => x.checked); boxes.forEach((x) => { x.checked = !allOn; x.closest('.ext-opt').classList.toggle('on', !allOn); }); recount();
       }));
+      document.getElementById('save-gen').addEventListener('click', async () => {
+        try {
+          const r = await API.setGeneralSettings({ trashRetentionDays: parseInt(document.getElementById('gen-trash').value, 10), shareQrEnabled: document.getElementById('gen-qr').checked });
+          UI.toast(`일반 설정 저장됨 (휴지통 ${r.trashRetentionDays}일, QR ${r.shareQrEnabled ? 'ON' : 'OFF'})`, 'success');
+        } catch (err) { UI.toast(err.message, 'error'); }
+      });
       document.getElementById('save-ext').addEventListener('click', async () => {
         const picked = [...view2.querySelectorAll('.ext-opt input:checked')].map((c) => c.value);
         const extra = (document.getElementById('ext-custom').value || '').split(/[\s,]+/).map((s) => s.trim().replace(/^\./, '').toLowerCase()).filter(Boolean);

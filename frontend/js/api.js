@@ -69,10 +69,28 @@ const API = (() => {
     bundleShare: (bundleId, opts) => req('POST', `/files/bundle/${bundleId}/share`, opts || {}),
     bundleDownloadUrl: (bundleId) => `${BASE}/api/files/bundle/${bundleId}/download`,
     search: (q, ownerId) => req('GET', `/files/search?q=${encodeURIComponent(q)}${ownerId ? '&ownerId=' + ownerId : ''}`),
+    // 고급 검색: params = { q, exts, dateFrom, dateTo, minSize, maxSize, tagId, favOnly, sort }
+    searchAdvanced: (params, ownerId) => {
+      const qs = new URLSearchParams();
+      Object.entries(params || {}).forEach(([k, v]) => { if (v !== '' && v !== undefined && v !== null && v !== false) qs.set(k, v === true ? '1' : v); });
+      if (ownerId) qs.set('ownerId', ownerId);
+      return req('GET', `/files/search?${qs.toString()}`);
+    },
     usageReport: (ownerId) => req('GET', `/files/usage/report${ownerId ? '?ownerId=' + ownerId : ''}`),
     selfTrash: () => req('GET', '/files/trash'),
     restoreSelfFile: (id) => req('POST', `/files/trash/file/${id}/restore`),
     restoreSelfFolder: (id) => req('POST', `/files/trash/folder/${id}/restore`),
+    purgeSelfFile: (id) => req('DELETE', `/files/trash/file/${id}`),
+    purgeSelfFolder: (id) => req('DELETE', `/files/trash/folder/${id}`),
+    emptySelfTrash: () => req('POST', '/files/trash/empty'),
+    // 즐겨찾기 / 태그 / QR
+    toggleFav: (data) => req('POST', '/files/favorites/toggle', data),
+    tags: (ownerId) => req('GET', `/files/tags${ownerId ? '?ownerId=' + ownerId : ''}`),
+    createTag: (data) => req('POST', '/files/tags', data),
+    updateTag: (id, data) => req('PATCH', `/files/tags/${id}`, data),
+    deleteTag: (id, ownerId) => req('DELETE', `/files/tags/${id}${ownerId ? '?ownerId=' + ownerId : ''}`),
+    setFileTags: (id, tagIds) => req('PUT', `/files/${id}/tags`, { tagIds }),
+    qr: (text) => req('GET', `/files/qr?text=${encodeURIComponent(text)}`),
     createUploadRequest: (data) => req('POST', '/files/upload-requests', data),
     uploadRequests: (ownerId) => req('GET', `/files/upload-requests${ownerId ? '?ownerId=' + ownerId : ''}`),
     deleteUploadRequest: (id, ownerId) => req('DELETE', `/files/upload-requests/${id}${ownerId ? '?ownerId=' + ownerId : ''}`),
@@ -108,6 +126,9 @@ const API = (() => {
     // 확장자
     getExtensions: () => req('GET', '/admin/settings/extensions'),
     setExtensions: (extensions) => req('PUT', '/admin/settings/extensions', { extensions }),
+    // 일반 설정 (휴지통 보관일수 / 공유 QR)
+    getGeneralSettings: () => req('GET', '/admin/settings/general'),
+    setGeneralSettings: (data) => req('PUT', '/admin/settings/general', data),
     // 영업점
     adminBranches: () => req('GET', '/admin/branches'),
     addBranch: (name) => req('POST', '/admin/branches', { name }),

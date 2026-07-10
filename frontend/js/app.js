@@ -15,6 +15,10 @@ const App = (() => {
     anchor: null, drag: null, // 선택 앵커 / 드래그 중 항목
     extFilter: new Set(), // 확장자 필터(비어있으면 전체)
     foldersOnly: false,   // 폴더만 보기
+    favOnly: false,       // 즐겨찾기만 보기
+    tagFilter: null,      // 태그로 필터(태그 id)
+    tags: [],             // 현재 계정(owner)의 태그 목록
+    qrEnabled: true,      // 공유 QR 사용 여부(관리자 설정)
     seenAt: 0,            // 현재 폴더를 '직전에' 열람한 시각(이 이후 생긴 항목만 NEW/수정)
     seenFolder: null,     // seenAt이 캡처된 폴더 키(리프레시 시 재캡처 방지)
   };
@@ -32,6 +36,7 @@ const App = (() => {
     if (API.hasToken()) {
       try {
         state.user = (await API.me()).user;
+        state.qrEnabled = state.user.qrEnabled !== false;
         if (state.user.role === 'admin' && !state.user.totpEnabled) return force2faSetup();
         return renderApp();
       } catch { API.setToken(null); }
@@ -41,7 +46,7 @@ const App = (() => {
   // 관리자 2FA 필수: 설정 완료 전까지 앱 진입 차단
   function force2faSetup() {
     root().innerHTML = `<div class="login-screen"><div class="login-card" style="max-width:460px">
-      <img src="assets/logo.svg?v=58" class="login-logo" alt="북적북적">
+      <img src="assets/logo.svg?v=59" class="login-logo" alt="북적북적">
       <div class="login-title">2단계 인증 설정</div>
       <p class="muted" style="text-align:center;font-size:13px;margin:6px 0 12px">관리자 계정은 보안을 위해 <b>2단계 인증이 필수</b>입니다.<br>설정을 완료해야 계속할 수 있습니다.</p>
       <div id="tf-host"></div>
@@ -55,7 +60,7 @@ const App = (() => {
     root().innerHTML = `
       <div class="login-screen">
         <form class="login-card" id="login-form">
-          <img src="assets/logo.svg?v=58" class="login-logo" alt="북적북적">
+          <img src="assets/logo.svg?v=59" class="login-logo" alt="북적북적">
           <div class="login-title">북적북적</div>
           <div class="login-sub">Book-Jeok · 우리끼리 나누는 파일 창고</div>
           <div class="field"><label>아이디</label><input class="input" name="username" autocomplete="username" placeholder="아이디" required></div>
@@ -88,7 +93,7 @@ const App = (() => {
       <div class="layout">
         <header class="appbar">
           <button class="icon-btn appbar-menu" id="menu-toggle" title="폴더">☰</button>
-          <div class="brand" id="brand-home" title="홈으로"><img src="assets/logo.svg?v=58"><span class="brand-name">북적북적</span></div>
+          <div class="brand" id="brand-home" title="홈으로"><img src="assets/logo.svg?v=59"><span class="brand-name">북적북적</span></div>
           ${isPriv() ? `<select class="input account-switcher" id="account-switcher"><option value="">내 파일</option></select>` : ''}
           <div class="topbar-spacer"></div>
           <button class="icon-btn appbar-navmenu" id="nav-menu-toggle" title="메뉴" aria-label="메뉴">☰<span class="notif-badge hidden" id="notif-badge-menu">0</span></button>
@@ -193,7 +198,8 @@ const App = (() => {
 
   async function doLogout() { try { await API.logout(); } catch {} API.setToken(null); state.user = null; renderLogin(); }
 
-  async function loadAll() { await Promise.all([loadTree(), loadFiles()]); }
+  async function loadAll() { await Promise.all([loadTree(), loadFiles(), loadTags()]); }
+  async function loadTags() { try { state.tags = (await API.tags(state.ownerId)).tags || []; } catch { state.tags = []; } }
   async function loadTree() { try { const t = await API.tree(state.ownerId); state.treeFolders = t.folders; state.treeStyles = t.styles || {}; renderTree(); } catch {} }
   async function loadFiles(silent) {
     if (!silent) { state.search.on = false; const view = document.getElementById('view'); view.innerHTML = '<div class="empty"><div class="big">⏳</div>불러오는 중…</div>'; }
@@ -306,6 +312,7 @@ const App = (() => {
   function sortItems(arr, isFolder) {
     const { key, dir } = state.sort;
     const s = [...arr].sort((a, b) => {
+      if (!!a.fav !== !!b.fav) return a.fav ? -1 : 1; // 즐겨찾기는 항상 상단 고정
       const va = sortVal(a, key, isFolder), vb = sortVal(b, key, isFolder);
       const c = (typeof va === 'string') ? va.localeCompare(vb, 'ko') : (va - vb);
       return dir === 'desc' ? -c : c;
@@ -352,9 +359,15 @@ const App = (() => {
     return color ? `background:${color}22;box-shadow:inset 0 0 0 1.6px ${color};` : '';
   }
 
+  // 즐겨찾기 별 버튼 / 태그 칩
+  const favBtn = (isFolder, ref, on) => `<button class="fav-btn${on ? ' on' : ''}" data-fav-${isFolder ? 'folder' : 'file'}="${UI.escapeHtml(String(ref))}" title="${on ? '즐겨찾기 해제' : '즐겨찾기'}" aria-label="즐겨찾기">${on ? '⭐' : '☆'}</button>`;
+  const tagChips = (tags) => (tags && tags.length)
+    ? `<span class="tag-chips">${tags.map((t) => `<span class="tag-chip" style="--tc:${UI.escapeHtml(t.color || '#118AB2')}">${UI.escapeHtml(t.name)}</span>`).join('')}</span>` : '';
+
   function renderListing() {
     const box = document.getElementById('listing');
     if (state.folders.length === 0 && state.files.length === 0) { box.innerHTML = `<div class="empty"><div class="big">🗂️</div>아직 파일이 없어요. 첫 파일을 올려보세요!</div>`; return; }
+    if (filteredFolders().length === 0 && filteredFiles().length === 0) { box.innerHTML = `<div class="empty"><div class="big">🔍</div>필터에 해당하는 항목이 없습니다.</div>`; updateSelbar(); return; }
     // 모바일 리스트 뷰: 항목을 눌러 펼치는 아코디언 카드 + 텍스트 버튼
     if (isMobile() && state.view === 'list') box.innerHTML = mobileListHTML();
     else box.innerHTML = state.view === 'grid' ? gridHTML() : listHTML();
@@ -364,7 +377,7 @@ const App = (() => {
   // 모바일 전용: 기본정보(이름·크기·등록일)만 보이고, 탭하면 상세+기능이 펼쳐지는 카드
   function mobileListHTML() {
     const esc = UI.escapeHtml, isSel = (key) => state.selected.has(key);
-    const folders = sortItems(state.folders, true).map((f) => {
+    const folders = sortItems(filteredFolders(), true).map((f) => {
       const key = `folder:${f.path}`;
       return `<div class="mcard fade-in${isSel(key) ? ' sel' : ''}" data-folder-row="${esc(f.path)}" data-row-key="${esc(key)}" data-drop-folder="${esc(f.path)}">
         <div class="mcard-head">
@@ -373,6 +386,7 @@ const App = (() => {
             <div class="mcard-name"><span class="ic${f.color ? ' tint' : ''}" style="${folderIcoStyle(f.color)}">${f.icon || '📁'}</span> ${esc(f.name)}${updateBadge(f, true)}</div>
             <div class="mcard-sub">${UI.bytes(f.size)} · ${f.createdAt ? UI.date(f.createdAt) : '폴더'}</div>
           </div>
+          ${favBtn(true, f.path, f.fav)}
           <span class="mcard-caret">▾</span>
         </div>
         <div class="mcard-body">
@@ -397,7 +411,9 @@ const App = (() => {
           <div class="mcard-main">
             <div class="mcard-name"><span class="ic">${UI.fileIcon(f.name)}</span> ${esc(f.name)}${updateBadge(f, false)}</div>
             <div class="mcard-sub">${UI.bytes(f.size)} · ${UI.date(f.createdAt)}</div>
+            ${tagChips(f.tags)}
           </div>
+          ${favBtn(false, f.id, f.fav)}
           <span class="mcard-caret">▾</span>
         </div>
         <div class="mcard-body">
@@ -407,6 +423,7 @@ const App = (() => {
             <button class="mbtn mbtn-primary" data-dl="${f.id}">⬇️ 다운로드</button>
             ${canPreview(f.name) ? `<button class="mbtn" data-preview="${f.id}">👁️ 미리보기</button>` : ''}
             <button class="mbtn" data-share="${f.id}">🔗 공유</button>
+            <button class="mbtn" data-tags="${f.id}">🏷️ 태그</button>
             <button class="mbtn" data-note="${f.id}">📝 비고</button>
             <button class="mbtn" data-rename="${f.id}">✏️ 이름변경</button>
             <button class="mbtn mbtn-danger" data-del="${f.id}">🗑️ 삭제</button>
@@ -418,7 +435,7 @@ const App = (() => {
   }
 
   function gridHTML() {
-    const folders = sortItems(state.folders, true).map((f) => `
+    const folders = sortItems(filteredFolders(), true).map((f) => `
       <div class="file-card fade-in${state.selected.has(`folder:${f.path}`) ? ' sel' : ''}" data-folder-card="${UI.escapeHtml(f.path)}" data-row-key="folder:${UI.escapeHtml(f.path)}" data-drop-folder="${UI.escapeHtml(f.path)}" draggable="true" title="더블클릭하여 열기">
         <div class="file-actions">
           <button class="icon-btn" data-fshare="${UI.escapeHtml(f.path)}" title="폴더 공유(읽기전용)">🔗</button>
@@ -427,6 +444,7 @@ const App = (() => {
           <button class="icon-btn" data-fnote="${UI.escapeHtml(f.path)}" title="비고">📝</button>
           <button class="icon-btn" data-fdel="${UI.escapeHtml(f.path)}" title="삭제">🗑️</button>
         </div>
+        ${favBtn(true, f.path, f.fav)}
         <div class="file-ico${f.color ? ' tint' : ''}" style="${folderIcoStyle(f.color)}">${f.icon || '📁'}</div>
         <div class="file-name">${UI.escapeHtml(f.name)}${updateBadge(f, true)}</div>
         <div class="file-meta num">${UI.bytes(f.size)} · ${f.createdAt ? UI.date(f.createdAt) : '폴더'}</div>
@@ -437,14 +455,17 @@ const App = (() => {
         <div class="file-actions">
           ${canPreview(f.name) ? `<button class="icon-btn" data-preview="${f.id}" title="미리보기">👁️</button>` : ''}
           <button class="icon-btn" data-share="${f.id}" title="공유링크">🔗</button>
+          <button class="icon-btn" data-tags="${f.id}" title="태그">🏷️</button>
           <button class="icon-btn" data-note="${f.id}" title="비고">📝</button>
           <button class="icon-btn" data-rename="${f.id}" title="이름변경">✏️</button>
           <button class="icon-btn" data-dl="${f.id}" title="다운로드">⬇️</button>
           <button class="icon-btn" data-del="${f.id}" title="삭제">🗑️</button>
         </div>
+        ${favBtn(false, f.id, f.fav)}
         <div class="file-ico${isImage(f.name) ? ' thumb' : ''}"${isImage(f.name) ? ` data-thumb="${f.id}"` : ''}>${isImage(f.name) ? '🖼️' : UI.fileIcon(f.name)}</div>
         <div class="file-name">${UI.escapeHtml(f.name)}${updateBadge(f, false)}</div>
         <div class="file-meta num">${UI.bytes(f.size)} · ${UI.date(f.createdAt)}</div>
+        ${tagChips(f.tags)}
         ${f.note ? `<div class="file-note" title="${UI.escapeHtml(f.note)}">📝 ${UI.escapeHtml(f.note)}</div>` : ''}
       </div>`).join('');
     return `<div class="file-grid">${folders}${files}</div>`;
@@ -452,11 +473,11 @@ const App = (() => {
 
   function listHTML() {
     const isSel = (key) => state.selected.has(key);
-    const folders = sortItems(state.folders, true).map((f) => {
+    const folders = sortItems(filteredFolders(), true).map((f) => {
       const key = `folder:${f.path}`;
       return `<tr data-folder-row="${UI.escapeHtml(f.path)}" data-row-key="${UI.escapeHtml(key)}" data-drop-folder="${UI.escapeHtml(f.path)}" draggable="true" class="${isSel(key) ? 'sel' : ''}">
         <td><input type="checkbox" class="rowcheck" data-sel-folder="${UI.escapeHtml(f.path)}" data-name="${UI.escapeHtml(f.name)}" ${isSel(key) ? 'checked' : ''}></td>
-        <td class="open-cell name-cell" data-open="${UI.escapeHtml(f.path)}" title="더블클릭하여 열기"><span class="ic${f.color ? ' tint' : ''}" style="${folderIcoStyle(f.color)}">${f.icon || '📁'}</span> ${UI.escapeHtml(f.name)}${updateBadge(f, true)}</td>
+        <td class="open-cell name-cell" data-open="${UI.escapeHtml(f.path)}" title="더블클릭하여 열기">${favBtn(true, f.path, f.fav)}<span class="ic${f.color ? ' tint' : ''}" style="${folderIcoStyle(f.color)}">${f.icon || '📁'}</span> ${UI.escapeHtml(f.name)}${updateBadge(f, true)}</td>
         <td class="num muted" data-label="크기">${UI.bytes(f.size)}</td>
         <td class="num muted" data-label="등록">${f.createdAt ? UI.date(f.createdAt) : '—'}</td>
         <td class="num muted" data-label="수정">${f.noteUpdatedAt ? UI.date(f.noteUpdatedAt) : '—'}</td>
@@ -468,18 +489,18 @@ const App = (() => {
       const key = `file:${f.id}`;
       return `<tr data-file="${f.id}" data-row-key="${UI.escapeHtml(key)}" draggable="true" class="${isSel(key) ? 'sel' : ''}">
         <td><input type="checkbox" class="rowcheck" data-sel-file="${f.id}" data-name="${UI.escapeHtml(f.name)}" ${isSel(key) ? 'checked' : ''}></td>
-        <td class="name-cell"><span class="ic">${UI.fileIcon(f.name)}</span> ${UI.escapeHtml(f.name)}${updateBadge(f, false)}</td>
+        <td class="name-cell">${favBtn(false, f.id, f.fav)}<span class="ic">${UI.fileIcon(f.name)}</span> ${UI.escapeHtml(f.name)}${updateBadge(f, false)}${tagChips(f.tags)}</td>
         <td class="num muted" data-label="크기">${UI.bytes(f.size)}</td>
         <td class="num muted" data-label="등록">${UI.date(f.createdAt)}</td>
         <td class="num muted" data-label="수정">${UI.date(f.updatedAt || f.createdAt)}</td>
         <td class="note-cell" data-note="${f.id}" title="클릭하여 비고 편집">${f.note ? UI.escapeHtml(f.note) : '<span class="muted">+ 비고</span>'}</td>
-        <td class="row-actions">${canPreview(f.name) ? `<button class="icon-btn" data-preview="${f.id}" title="미리보기">👁️</button>` : ''}<button class="icon-btn" data-share="${f.id}" title="공유">🔗</button><button class="icon-btn" data-dl="${f.id}" title="다운로드">⬇️</button></td>
+        <td class="row-actions">${canPreview(f.name) ? `<button class="icon-btn" data-preview="${f.id}" title="미리보기">👁️</button>` : ''}<button class="icon-btn" data-share="${f.id}" title="공유">🔗</button><button class="icon-btn" data-tags="${f.id}" title="태그">🏷️</button><button class="icon-btn" data-dl="${f.id}" title="다운로드">⬇️</button></td>
       </tr>`;
     }).join('');
     const th = (key, label, style = '') => `<th class="sortable${state.sort.key === key ? ' sorted' : ''}" data-sort="${key}"${style ? ` style="${style}"` : ''}>${label}${sortArrow(key)}</th>`;
-    const vf = filteredFiles();
-    const total = state.folders.length + vf.length;
-    const allSel = total > 0 && state.folders.every((f) => isSel(`folder:${f.path}`)) && vf.every((f) => isSel(`file:${f.id}`));
+    const vf = filteredFiles(); const vfo = filteredFolders();
+    const total = vfo.length + vf.length;
+    const allSel = total > 0 && vfo.every((f) => isSel(`folder:${f.path}`)) && vf.every((f) => isSel(`file:${f.id}`));
     return `<div class="table-wrap fade-in"><table class="filetable">
       <thead><tr><th style="width:34px"><input type="checkbox" id="check-all" title="전체선택/해제" ${allSel ? 'checked' : ''}></th>${th('name', '이름')}${th('size', '크기', 'width:84px')}${th('createdAt', '등록일', 'width:96px')}${th('updatedAt', '수정일', 'width:96px')}${th('note', '비고')}<th style="width:70px"></th></tr></thead>
       <tbody>${folders}${files}</tbody></table></div>`;
@@ -506,28 +527,57 @@ const App = (() => {
     document.addEventListener('click', (e) => { if (!e.target.closest('#extfilter')) panel.classList.add('hidden'); });
   }
 
-  // ── 확장자 필터 ──────────────────────────
+  // ── 확장자·즐겨찾기·태그 필터 ──────────────────────────
   const extOf = (name) => (name.split('.').pop() || '').toLowerCase();
-  function filteredFiles() { if (state.foldersOnly) return []; return state.extFilter.size ? state.files.filter((f) => state.extFilter.has(extOf(f.name))) : state.files; }
-  const filterActive = () => state.extFilter.size > 0 || state.foldersOnly;
+  function filteredFiles() {
+    if (state.foldersOnly) return [];
+    let out = state.files;
+    if (state.extFilter.size) out = out.filter((f) => state.extFilter.has(extOf(f.name)));
+    if (state.favOnly) out = out.filter((f) => f.fav);
+    if (state.tagFilter) out = out.filter((f) => (f.tags || []).some((t) => String(t.id) === String(state.tagFilter)));
+    return out;
+  }
+  // 폴더도 즐겨찾기 필터 반영(태그는 파일 전용)
+  function filteredFolders() {
+    let out = state.folders;
+    if (state.favOnly) out = out.filter((f) => f.fav);
+    if (state.tagFilter) out = []; // 태그로 필터 시 폴더는 숨김
+    return out;
+  }
+  const filterActive = () => state.extFilter.size > 0 || state.foldersOnly || state.favOnly || !!state.tagFilter;
   function updateExtCount() {
     const c = document.getElementById('extfilter-count'), b = document.getElementById('extfilter-btn');
-    if (c) c.textContent = state.foldersOnly ? ' (폴더)' : (state.extFilter.size ? ` (${state.extFilter.size})` : '');
+    const extra = [state.favOnly ? '⭐' : '', state.tagFilter ? '🏷️' : ''].filter(Boolean).join('');
+    if (c) c.textContent = state.foldersOnly ? ' (폴더)' : ((state.extFilter.size || extra) ? ` (${extra}${state.extFilter.size || ''})` : '');
     if (b) b.classList.toggle('on', filterActive());
   }
   function buildExtFilterPanel() {
     const panel = document.getElementById('extfilter-panel'); if (!panel) return;
     const chips = state.allowedExt.map((e) => `<label class="ext-chip${state.extFilter.has(e) ? ' on' : ''}"><input type="checkbox" value="${e}" ${state.extFilter.has(e) ? 'checked' : ''}><span class="ei">${UI.extIcon(e)}</span> .${UI.escapeHtml(e)}</label>`).join('');
+    const tagChipsHtml = state.tags.length
+      ? state.tags.map((t) => `<label class="ext-chip tagf${String(state.tagFilter) === String(t.id) ? ' on' : ''}" data-tagf="${t.id}"><span class="ei" style="color:${UI.escapeHtml(t.color)}">●</span> ${UI.escapeHtml(t.name)}</label>`).join('')
+      : '<span class="muted" style="font-size:12px">태그가 없습니다.</span>';
     panel.innerHTML = `<div class="ext-panel-head"><b>보기 필터</b><button class="btn btn-sm btn-ghost" id="ext-clear">전체 해제</button></div>
-      <label class="ext-chip only-folders${state.foldersOnly ? ' on' : ''}" style="margin-bottom:8px"><input type="checkbox" id="only-folders" ${state.foldersOnly ? 'checked' : ''}><span class="ei">📁</span> 폴더만 보기</label>
-      <div class="ext-chip-grid"${state.foldersOnly ? ' style="opacity:.4;pointer-events:none"' : ''}>${chips || '<span class="muted">허용 확장자가 없습니다.</span>'}</div>`;
+      <label class="ext-chip only-folders${state.foldersOnly ? ' on' : ''}" style="margin-bottom:6px"><input type="checkbox" id="only-folders" ${state.foldersOnly ? 'checked' : ''}><span class="ei">📁</span> 폴더만 보기</label>
+      <label class="ext-chip only-folders${state.favOnly ? ' on' : ''}" style="margin-bottom:8px"><input type="checkbox" id="fav-only" ${state.favOnly ? 'checked' : ''}><span class="ei">⭐</span> 즐겨찾기만</label>
+      <div class="ext-chip-grid"${state.foldersOnly ? ' style="opacity:.4;pointer-events:none"' : ''}>${chips || '<span class="muted">허용 확장자가 없습니다.</span>'}</div>
+      <div class="ext-panel-head" style="margin-top:10px"><b>태그</b><button class="btn btn-sm btn-ghost" id="tag-manage">관리</button></div>
+      <div class="ext-chip-grid"${state.foldersOnly ? ' style="opacity:.4;pointer-events:none"' : ''}>${tagChipsHtml}</div>
+      <button class="btn btn-sm btn-secondary" id="adv-search" style="width:100%;margin-top:10px">🔎 고급 검색(기간·크기)</button>`;
     panel.querySelector('#only-folders').addEventListener('change', (e) => { state.foldersOnly = e.target.checked; state.selected.clear(); state.anchor = null; buildExtFilterPanel(); updateExtCount(); renderListing(); });
+    panel.querySelector('#fav-only').addEventListener('change', (e) => { state.favOnly = e.target.checked; state.selected.clear(); state.anchor = null; buildExtFilterPanel(); updateExtCount(); renderListing(); });
     panel.querySelectorAll('.ext-chip-grid input[type=checkbox]').forEach((c) => c.addEventListener('change', () => {
       if (c.checked) state.extFilter.add(c.value); else state.extFilter.delete(c.value);
       c.closest('.ext-chip').classList.toggle('on', c.checked);
       state.selected.clear(); state.anchor = null; updateExtCount(); renderListing();
     }));
-    panel.querySelector('#ext-clear')?.addEventListener('click', () => { state.extFilter.clear(); state.foldersOnly = false; buildExtFilterPanel(); updateExtCount(); state.selected.clear(); renderListing(); });
+    panel.querySelectorAll('[data-tagf]').forEach((el) => el.addEventListener('click', () => {
+      state.tagFilter = String(state.tagFilter) === el.dataset.tagf ? null : el.dataset.tagf;
+      state.selected.clear(); state.anchor = null; buildExtFilterPanel(); updateExtCount(); renderListing();
+    }));
+    panel.querySelector('#tag-manage')?.addEventListener('click', () => { panel.classList.add('hidden'); tagManageModal(); });
+    panel.querySelector('#adv-search')?.addEventListener('click', () => { panel.classList.add('hidden'); advancedSearchModal(); });
+    panel.querySelector('#ext-clear')?.addEventListener('click', () => { state.extFilter.clear(); state.foldersOnly = false; state.favOnly = false; state.tagFilter = null; buildExtFilterPanel(); updateExtCount(); state.selected.clear(); renderListing(); });
   }
 
   // ── 이름 검색 ──────────────────────────
@@ -612,7 +662,7 @@ const App = (() => {
 
   // ── 선택 모델(클릭/Ctrl/Shift) · 드래그 이동 ──────────
   function orderedItems() {
-    const fol = sortItems(state.folders, true).map((f) => ({ key: `folder:${f.path}`, item: { type: 'folder', path: f.path, name: f.name } }));
+    const fol = sortItems(filteredFolders(), true).map((f) => ({ key: `folder:${f.path}`, item: { type: 'folder', path: f.path, name: f.name } }));
     const fil = sortItems(filteredFiles(), false).map((f) => ({ key: `file:${f.id}`, item: { type: 'file', id: String(f.id), name: f.name } }));
     return [...fol, ...fil];
   }
@@ -690,6 +740,10 @@ const App = (() => {
     box.querySelectorAll('[data-share]').forEach((el) => el.addEventListener('click', (e) => { e.stopPropagation(); shareModal(el.dataset.share); }));
     box.querySelectorAll('[data-note]').forEach((el) => el.addEventListener('click', (e) => { e.stopPropagation(); noteModal(el.dataset.note); }));
     box.querySelectorAll('[data-rename]').forEach((el) => el.addEventListener('click', (e) => { e.stopPropagation(); renameFileModal(el.dataset.rename); }));
+    box.querySelectorAll('[data-tags]').forEach((el) => el.addEventListener('click', (e) => { e.stopPropagation(); tagPickerModal(el.dataset.tags); }));
+    // 즐겨찾기 별
+    box.querySelectorAll('[data-fav-file]').forEach((el) => el.addEventListener('click', (e) => { e.stopPropagation(); toggleFavFile(el.dataset.favFile); }));
+    box.querySelectorAll('[data-fav-folder]').forEach((el) => el.addEventListener('click', (e) => { e.stopPropagation(); toggleFavFolder(el.dataset.favFolder); }));
     // 폴더 액션
     box.querySelectorAll('[data-fnote]').forEach((el) => el.addEventListener('click', (e) => { e.stopPropagation(); folderNoteModal(el.dataset.fnote); }));
     box.querySelectorAll('[data-fedit]').forEach((el) => el.addEventListener('click', (e) => { e.stopPropagation(); folderSettingsModal(el.dataset.fedit); }));
@@ -1196,10 +1250,111 @@ const App = (() => {
   }
   const shareOptionValues = (m) => ({ expiresInDays: parseInt(m.q('#exp').value, 10) || 0, password: m.q('#spw').value.trim(), maxDownloads: parseInt(m.q('#smax').value, 10) || 0, reason: reasonVal(m), ...notifyValues(m) });
   function shareResult(m, url) {
-    m.animate(() => { m.q('#result').innerHTML = `<div class="field" style="margin-top:14px"><label>공유 링크 (누구나 접근 가능)</label><input class="input" id="lnk" readonly value="${UI.escapeHtml(url)}"></div><button class="btn btn-secondary btn-sm" id="copy">📋 링크 복사</button>`; });
+    const qrBtn = state.qrEnabled ? `<button class="btn btn-secondary btn-sm" id="qrbtn">📱 QR 코드</button>` : '';
+    m.animate(() => { m.q('#result').innerHTML = `<div class="field" style="margin-top:14px"><label>공유 링크 (누구나 접근 가능)</label><input class="input" id="lnk" readonly value="${UI.escapeHtml(url)}"></div><div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn btn-secondary btn-sm" id="copy">📋 링크 복사</button>${qrBtn}</div><div id="qrbox" style="text-align:center;margin-top:12px"></div>`; });
     m.q('#lnk').select();
     m.q('#copy').addEventListener('click', () => { m.q('#lnk').select(); navigator.clipboard?.writeText(url); UI.toast('링크 복사됨', 'success'); });
+    m.q('#qrbtn')?.addEventListener('click', () => showQr(m, url));
   }
+  // 공유 링크 QR 표시(토글). 관리자가 껐으면 버튼이 없으므로 호출되지 않음.
+  async function showQr(m, url) {
+    const box = m.q('#qrbox'); if (!box) return;
+    if (box.dataset.shown) { m.animate(() => { box.innerHTML = ''; box.dataset.shown = ''; }); return; }
+    try { const { qr } = await API.qr(url); m.animate(() => { box.innerHTML = `<img src="${qr}" alt="QR" style="width:200px;height:200px;border:1px solid var(--border);border-radius:8px;padding:6px;background:#fff"><div class="muted" style="font-size:12px;margin-top:6px">카메라로 스캔해 열기</div>`; box.dataset.shown = '1'; }); }
+    catch (e) { UI.toast(e.message, 'error'); }
+  }
+
+  // ── 즐겨찾기 토글 ──────────
+  async function toggleFavFile(id) {
+    try { const r = await API.toggleFav({ kind: 'file', id: Number(id) }); const f = state.files.find((x) => String(x.id) === String(id)); if (f) f.fav = r.fav; renderListing(); }
+    catch (e) { UI.toast(e.message, 'error'); }
+  }
+  async function toggleFavFolder(path) {
+    try { const r = await API.toggleFav({ kind: 'folder', path, ownerId: state.ownerId || undefined }); const f = state.folders.find((x) => x.path === path); if (f) f.fav = r.fav; renderListing(); }
+    catch (e) { UI.toast(e.message, 'error'); }
+  }
+
+  // ── 파일 태그 지정 ──────────
+  function tagPickerModal(fileId) {
+    const file = state.files.find((f) => String(f.id) === String(fileId));
+    const current = new Set((file?.tags || []).map((t) => String(t.id)));
+    const m = UI.modal(`<h3>🏷️ 태그 지정</h3><p class="muted" style="font-size:13px;margin-bottom:10px">${UI.escapeHtml(file?.name || '')}</p>
+      <div id="tp-list"></div>
+      <div class="field" style="margin-top:12px"><label>새 태그 추가</label><div style="display:flex;gap:6px"><input class="input" id="tp-new" placeholder="태그 이름" maxlength="40"><input type="color" id="tp-color" value="#118AB2" style="width:46px;padding:2px"><button class="btn btn-secondary btn-sm" id="tp-add">추가</button></div></div>
+      <div class="modal-actions"><button class="btn btn-ghost" id="tp-cancel">취소</button><button class="btn btn-primary" id="tp-save">저장</button></div>`);
+    function renderList() {
+      m.q('#tp-list').innerHTML = state.tags.length
+        ? state.tags.map((t) => `<label class="tag-pick"><input type="checkbox" value="${t.id}" ${current.has(String(t.id)) ? 'checked' : ''}><span class="tag-chip" style="--tc:${UI.escapeHtml(t.color)}">${UI.escapeHtml(t.name)}</span></label>`).join('')
+        : '<p class="muted" style="font-size:13px">태그가 없습니다. 아래에서 추가하세요.</p>';
+      m.el.querySelectorAll('#tp-list input').forEach((c) => c.addEventListener('change', () => { if (c.checked) current.add(c.value); else current.delete(c.value); }));
+    }
+    renderList();
+    m.q('#tp-cancel').addEventListener('click', m.close);
+    m.q('#tp-add').addEventListener('click', async () => {
+      const name = m.q('#tp-new').value.trim(); if (!name) return;
+      try { const t = await API.createTag({ name, color: m.q('#tp-color').value, ownerId: state.ownerId }); state.tags.push({ id: t.id, name: t.name, color: t.color, count: 0 }); state.tags.sort((a, b) => a.name.localeCompare(b.name, 'ko')); current.add(String(t.id)); m.q('#tp-new').value = ''; renderList(); }
+      catch (e) { UI.toast(e.message, 'error'); }
+    });
+    m.q('#tp-save').addEventListener('click', async () => {
+      try { await API.setFileTags(fileId, [...current].map(Number)); UI.toast('태그 저장됨', 'success'); m.close(); await loadFiles(true); }
+      catch (e) { UI.toast(e.message, 'error'); }
+    });
+  }
+
+  // ── 태그 관리 ──────────
+  function tagManageModal() {
+    const m = UI.modal(`<h3>🏷️ 태그 관리</h3><div id="tm-list"><p class="muted">불러오는 중…</p></div>
+      <div class="field" style="margin-top:12px"><label>새 태그</label><div style="display:flex;gap:6px"><input class="input" id="tm-new" placeholder="이름" maxlength="40"><input type="color" id="tm-color" value="#118AB2" style="width:46px;padding:2px"><button class="btn btn-secondary btn-sm" id="tm-add">추가</button></div></div>
+      <div class="modal-actions"><button class="btn btn-primary" id="tm-close">닫기</button></div>`);
+    m.q('#tm-close').addEventListener('click', () => { m.close(); loadTags().then(() => { if (document.getElementById('listing')) renderListing(); }); });
+    async function load() {
+      try {
+        const { tags } = await API.tags(state.ownerId); state.tags = tags;
+        m.q('#tm-list').innerHTML = tags.length
+          ? tags.map((t) => `<div class="tag-row"><span class="tag-chip" style="--tc:${UI.escapeHtml(t.color)}">${UI.escapeHtml(t.name)}</span><span class="muted" style="font-size:12px;margin-left:8px">${t.count}개</span><div style="flex:1"></div><button class="btn btn-sm btn-ghost" data-td="${t.id}">삭제</button></div>`).join('')
+          : '<p class="muted" style="font-size:13px">태그가 없습니다.</p>';
+        m.el.querySelectorAll('[data-td]').forEach((b) => b.addEventListener('click', async () => { if (!(await UI.confirm({ title: '태그 삭제', message: '이 태그를 삭제할까요? 파일에서도 제거됩니다.', danger: true, confirmText: '삭제' }))) return; try { await API.deleteTag(b.dataset.td, state.ownerId); load(); } catch (e) { UI.toast(e.message, 'error'); } }));
+      } catch (e) { m.q('#tm-list').innerHTML = `<p class="muted" style="color:var(--danger)">${UI.escapeHtml(e.message)}</p>`; }
+    }
+    m.q('#tm-add').addEventListener('click', async () => { const name = m.q('#tm-new').value.trim(); if (!name) return; try { await API.createTag({ name, color: m.q('#tm-color').value, ownerId: state.ownerId }); m.q('#tm-new').value = ''; load(); } catch (e) { UI.toast(e.message, 'error'); } });
+    load();
+  }
+
+  // ── 고급 검색 (유형·기간·크기·태그·즐겨찾기) ──────────
+  function advancedSearchModal() {
+    const m = UI.modal(`<h3>🔎 고급 검색</h3>
+      <div class="field"><label>이름 포함</label><input class="input" id="as-q" placeholder="파일 이름"></div>
+      <div class="field"><label>유형(확장자)</label><div class="ext-chip-grid" id="as-exts">${state.allowedExt.map((e) => `<label class="ext-chip"><input type="checkbox" value="${e}"><span class="ei">${UI.extIcon(e)}</span> .${UI.escapeHtml(e)}</label>`).join('')}</div></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+        <div class="field"><label>등록일(부터)</label><input class="input" type="date" id="as-from"></div>
+        <div class="field"><label>등록일(까지)</label><input class="input" type="date" id="as-to"></div>
+        <div class="field"><label>최소 크기(MB)</label><input class="input" type="number" id="as-min" min="0" step="0.1"></div>
+        <div class="field"><label>최대 크기(MB)</label><input class="input" type="number" id="as-max" min="0" step="0.1"></div>
+      </div>
+      <div class="field"><label>태그</label><select class="input" id="as-tag"><option value="">전체</option>${state.tags.map((t) => `<option value="${t.id}">${UI.escapeHtml(t.name)}</option>`).join('')}</select></div>
+      <label class="autosort" style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="as-fav"> ⭐ 즐겨찾기만</label>
+      <div class="modal-actions"><button class="btn btn-ghost" id="as-cancel">취소</button><button class="btn btn-primary" id="as-go">검색</button></div>`);
+    m.el.querySelector('.modal').classList.add('modal-wide');
+    m.q('#as-cancel').addEventListener('click', m.close);
+    m.q('#as-go').addEventListener('click', () => {
+      const params = {
+        q: m.q('#as-q').value.trim(),
+        exts: [...m.el.querySelectorAll('#as-exts input:checked')].map((c) => c.value).join(','),
+        dateFrom: m.q('#as-from').value, dateTo: m.q('#as-to').value,
+        minSize: m.q('#as-min').value, maxSize: m.q('#as-max').value,
+        tagId: m.q('#as-tag').value, favOnly: m.q('#as-fav').checked,
+      };
+      m.close(); runAdvancedSearch(params);
+    });
+  }
+  function runAdvancedSearch(params) {
+    API.searchAdvanced(params, state.ownerId).then((r) => {
+      state.search = { on: true, q: params.q || '고급검색' };
+      state.folders = r.folders || []; state.files = r.files || [];
+      state.selected.clear(); state.anchor = null; renderContent();
+    }).catch((e) => UI.toast(e.message, 'error'));
+  }
+
   async function shareModal(id) {
     const f = state.files.find((x) => String(x.id) === String(id));
     const m = UI.modal(`<h3>🔗 공유 링크</h3><p class="muted" style="font-size:13px;margin-bottom:8px">${UI.escapeHtml(f ? f.name : '')}</p>${shareOptionFields()}<div class="modal-actions"><button class="btn btn-ghost" id="c">닫기</button><button class="btn btn-primary" id="gen">링크 생성</button></div><div id="result"></div>`);
@@ -1211,19 +1366,33 @@ const App = (() => {
   }
 
   function trashModal() {
-    const m = UI.modal(`<h3>🗑️ 내 휴지통 <span class="muted" style="font-size:13px;font-weight:400">· 최근 30일 이내 복원 가능</span></h3><div id="trash-body"><p class="muted">불러오는 중…</p></div><div class="modal-actions"><button class="btn btn-ghost" id="tc">닫기</button></div>`);
+    const m = UI.modal(`<h3>🗑️ 내 휴지통 <span class="muted" id="trash-sub" style="font-size:13px;font-weight:400"></span></h3><div id="trash-body"><p class="muted">불러오는 중…</p></div><div class="modal-actions"><button class="btn btn-danger" id="empty" style="margin-right:auto">휴지통 비우기</button><button class="btn btn-ghost" id="tc">닫기</button></div>`);
     m.el.querySelector('.modal').classList.add('modal-wide');
     m.q('#tc').addEventListener('click', m.close);
-    const daysLeft = (iso) => Math.max(0, 30 - Math.floor((Date.now() - new Date(iso).getTime()) / 86400000));
+    let days = 30;
+    const daysLeft = (iso) => Math.max(0, days - Math.floor((Date.now() - new Date(iso).getTime()) / 86400000));
+    m.q('#empty').addEventListener('click', async () => {
+      if (!(await UI.confirm({ title: '휴지통 비우기', danger: true, confirmText: '영구 삭제', message: '휴지통의 모든 항목을 영구 삭제합니다. 복원할 수 없습니다.' }))) return;
+      try { await API.emptySelfTrash(); UI.toast('휴지통을 비웠습니다', 'success'); load(); loadAll(); } catch (e) { UI.toast(e.message, 'error'); }
+    });
+    async function purge(kind, id) {
+      if (!(await UI.confirm({ title: '영구 삭제', danger: true, confirmText: '영구 삭제', message: '이 항목을 영구 삭제합니다. 복원할 수 없습니다.' }))) return;
+      try { await (kind === 'folder' ? API.purgeSelfFolder(id) : API.purgeSelfFile(id)); UI.toast('영구 삭제됨', 'success'); load(); loadAll(); } catch (e) { UI.toast(e.message, 'error'); }
+    }
     async function load() {
       try {
-        const { folders, files } = await API.selfTrash();
+        const res = await API.selfTrash(); const { folders, files } = res; days = res.days || 30;
+        m.q('#trash-sub').textContent = `· 최근 ${days}일 이내 복원 가능`;
+        m.q('#empty').style.display = (folders.length || files.length) ? '' : 'none';
         if (!folders.length && !files.length) { m.q('#trash-body').innerHTML = '<p class="muted" style="text-align:center;padding:24px">휴지통이 비어 있습니다.</p>'; return; }
-        const frows = folders.map((f) => `<tr><td>📁 <b>${UI.escapeHtml(f.name)}</b> <span class="muted" style="font-size:12px">(${f.fileCount}개)</span><br><span class="muted" style="font-size:11px">${UI.escapeHtml(f.path)}</span></td><td class="num muted">${daysLeft(f.deletedAt)}일 남음</td><td style="text-align:right"><button class="btn btn-sm btn-secondary" data-rf="${f.id}">복원</button></td></tr>`).join('');
-        const rows = files.map((f) => `<tr><td>📄 ${UI.escapeHtml(f.name)}<br><span class="muted" style="font-size:11px">${UI.escapeHtml(f.folder)} · ${UI.bytes(f.size)}</span></td><td class="num muted">${daysLeft(f.deletedAt)}일 남음</td><td style="text-align:right"><button class="btn btn-sm btn-secondary" data-rfile="${f.id}">복원</button></td></tr>`).join('');
+        const acts = (kind, id, restore) => `<button class="btn btn-sm btn-secondary" data-${restore}="${id}">복원</button> <button class="btn btn-sm btn-ghost" data-p${kind}="${id}" title="영구 삭제">🗑️</button>`;
+        const frows = folders.map((f) => `<tr><td>📁 <b>${UI.escapeHtml(f.name)}</b> <span class="muted" style="font-size:12px">(${f.fileCount}개)</span><br><span class="muted" style="font-size:11px">${UI.escapeHtml(f.path)}</span></td><td class="num muted">${daysLeft(f.deletedAt)}일 남음</td><td style="text-align:right;white-space:nowrap">${acts('folder', f.id, 'rf')}</td></tr>`).join('');
+        const rows = files.map((f) => `<tr><td>📄 ${UI.escapeHtml(f.name)}<br><span class="muted" style="font-size:11px">${UI.escapeHtml(f.folder)} · ${UI.bytes(f.size)}</span></td><td class="num muted">${daysLeft(f.deletedAt)}일 남음</td><td style="text-align:right;white-space:nowrap">${acts('file', f.id, 'rfile')}</td></tr>`).join('');
         m.q('#trash-body').innerHTML = `<div class="table-wrap"><table><tbody>${frows}${rows}</tbody></table></div>`;
         m.el.querySelectorAll('[data-rf]').forEach((b) => b.addEventListener('click', async () => { try { await API.restoreSelfFolder(b.dataset.rf); UI.toast('폴더 복원됨', 'success'); load(); loadAll(); } catch (e) { UI.toast(e.message, 'error'); } }));
         m.el.querySelectorAll('[data-rfile]').forEach((b) => b.addEventListener('click', async () => { try { await API.restoreSelfFile(b.dataset.rfile); UI.toast('파일 복원됨', 'success'); load(); loadAll(); } catch (e) { UI.toast(e.message, 'error'); } }));
+        m.el.querySelectorAll('[data-pfolder]').forEach((b) => b.addEventListener('click', () => purge('folder', b.dataset.pfolder)));
+        m.el.querySelectorAll('[data-pfile]').forEach((b) => b.addEventListener('click', () => purge('file', b.dataset.pfile)));
       } catch (e) { m.q('#trash-body').innerHTML = `<p class="muted" style="color:var(--danger)">${UI.escapeHtml(e.message)}</p>`; }
     }
     load();

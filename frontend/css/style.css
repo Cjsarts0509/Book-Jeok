@@ -217,6 +217,22 @@ textarea.input { resize: vertical; }
 .ext-chip input { display: none; }
 .ext-chip.on { border-color: var(--primary); background: var(--hover); font-weight: 600; }
 .ext-chip .ei, .ext-opt .ei { font-size: 14px; }
+.ext-chip.tagf { cursor: pointer; }
+
+/* 즐겨찾기 별 / 태그 칩 */
+.fav-btn { border: none; background: transparent; cursor: pointer; font-size: 16px; line-height: 1; padding: 1px 4px; color: var(--text-muted); vertical-align: middle; transition: transform .12s; }
+.fav-btn.on { color: #F0BC3C; }
+.fav-btn:hover { transform: scale(1.25); }
+.file-card { position: relative; }
+.file-card > .fav-btn { position: absolute; top: 7px; left: 7px; z-index: 2; }
+.tag-chips { display: inline-flex; flex-wrap: wrap; gap: 4px; vertical-align: middle; }
+.name-cell .tag-chips { margin-left: 6px; }
+.tag-chip { display: inline-flex; align-items: center; font-size: 11px; font-weight: 600; padding: 1px 8px; border-radius: 999px; color: #fff; background: var(--tc, #118AB2); white-space: nowrap; }
+.file-card .tag-chips { justify-content: center; margin-top: 5px; }
+.mcard-sub + .tag-chips { display: flex; margin-top: 5px; }
+.tag-pick { display: flex; align-items: center; gap: 8px; padding: 7px 4px; cursor: pointer; }
+.tag-row { display: flex; align-items: center; gap: 4px; padding: 9px 4px; border-bottom: 1px solid var(--border); }
+.tag-row:last-child { border-bottom: none; }
 
 /* 관리자 확장자 선택 그리드 */
 .ext-group { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px; margin-bottom: 12px; }
