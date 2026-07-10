@@ -21,7 +21,7 @@ const Admin = (() => {
     root().innerHTML = `
       <div class="layout">
         <header class="appbar">
-          <a class="brand" href="index.html" title="홈으로"><img src="assets/logo.svg?v=33"><span class="brand-name">북적북적</span></a>
+          <a class="brand" href="index.html" title="홈으로"><img src="assets/logo.svg?v=34"><span class="brand-name">북적북적</span></a>
           <nav class="appbar-nav">
             ${item('dashboard', '🏠', '대시보드')}
             ${item('users', '👥', '계정')}
@@ -591,13 +591,13 @@ const Admin = (() => {
   }
 
   // ── 용량 리포트 (SpaceSniffer식 트리맵) ────────
-  const capState = { data: null, ownerId: null };
+  const capState = { data: null, ownerId: null, path: '/' };
   async function loadCapacity() {
     const view = document.getElementById('view');
     view.innerHTML = '<div class="empty"><div class="big">⏳</div>불러오는 중…</div>';
     try {
       capState.data = await API.usageTree();
-      capState.ownerId = null;
+      capState.ownerId = null; capState.path = '/';
       const s = capState.data;
       view.innerHTML = `
         <div class="stat-grid">
@@ -634,42 +634,75 @@ const Admin = (() => {
     return out;
   }
 
+  // 계정의 폴더 경로들로 트리 구성(중간 폴더 자동 생성) + 하위합계 계산
+  function buildAccountTree(ownerId) {
+    const rows = capState.data.folders.filter((f) => f.ownerId === ownerId);
+    const nodes = new Map();
+    const parentOf = (p) => { const i = p.lastIndexOf('/'); return i <= 0 ? '/' : p.slice(0, i); };
+    const ensure = (p) => {
+      if (nodes.has(p)) return nodes.get(p);
+      const name = p === '/' ? '홈(최상위)' : p.slice(p.lastIndexOf('/') + 1);
+      const node = { path: p, name, selfBytes: 0, selfFiles: 0, children: [] };
+      nodes.set(p, node);
+      if (p !== '/') ensure(parentOf(p)).children.push(node);
+      return node;
+    };
+    ensure('/');
+    for (const r of rows) { const n = ensure(r.folder); n.selfBytes += r.used; n.selfFiles += r.files; }
+    const total = (n) => { let b = n.selfBytes, f = n.selfFiles; for (const c of n.children) { const [cb, cf] = total(c); b += cb; f += cf; } n.totalBytes = b; n.totalFiles = f; return [b, f]; };
+    total(nodes.get('/'));
+    return nodes;
+  }
+
   function drawTreemap() {
     const box = document.getElementById('treemap'); if (!box || !capState.data) return;
     const W = box.clientWidth || 900, H = 520;
     const s = capState.data;
+    const crumb = document.getElementById('tm-crumb');
     let tiles, level;
+
     if (capState.ownerId == null) {
       level = 'account';
       tiles = s.accounts.filter((a) => a.used > 0).map((a) => ({ value: a.used, a }));
+      crumb.innerHTML = '<b>전체 계정</b>';
     } else {
-      const acc = s.accounts.find((a) => a.id === capState.ownerId);
-      const fs = s.folders.filter((f) => f.ownerId === capState.ownerId && f.used > 0);
       level = 'folder';
-      tiles = fs.map((f) => ({ value: f.used, f, acc }));
+      const acc = s.accounts.find((a) => a.id === capState.ownerId);
+      const tree = buildAccountTree(capState.ownerId);
+      const node = tree.get(capState.path) || tree.get('/');
+      tiles = node.children.filter((c) => c.totalBytes > 0).map((c) => ({ value: c.totalBytes, node: c }));
+      if (node.selfBytes > 0) tiles.push({ value: node.selfBytes, files: true, filesCount: node.selfFiles });
+      // 브레드크럼: 전체 계정 / 계정명 / seg / seg …
+      let html = '<a href="#" class="tm-link" data-goto="root">전체 계정</a>';
+      const segs = capState.path.split('/').filter(Boolean);
+      html += ' <span class="muted">/</span> ' + (segs.length ? `<a href="#" class="tm-link" data-path="/">${UI.escapeHtml(acc ? acc.displayName : '')}</a>` : `<b>${UI.escapeHtml(acc ? acc.displayName : '')}</b>`);
+      let accP = '';
+      segs.forEach((seg, i) => { accP += '/' + seg; const last = i === segs.length - 1; html += ' <span class="muted">/</span> ' + (last ? `<b>${UI.escapeHtml(seg)}</b>` : `<a href="#" class="tm-link" data-path="${UI.escapeHtml(accP)}">${UI.escapeHtml(seg)}</a>`); });
+      crumb.innerHTML = html;
     }
-    const crumb = document.getElementById('tm-crumb');
-    if (capState.ownerId == null) crumb.innerHTML = '<b>전체 계정</b>';
-    else { const acc = s.accounts.find((a) => a.id === capState.ownerId); crumb.innerHTML = `<a href="#" id="tm-back" class="tm-link">← 전체 계정</a> <span class="muted">/</span> <b>${UI.escapeHtml(acc ? acc.displayName : '')}</b>`; }
 
-    if (!tiles.length) { box.innerHTML = '<div class="empty" style="height:100%">표시할 사용량이 없습니다.</div>'; wireCrumb(); return; }
+    if (!tiles.length) { box.innerHTML = '<div class="empty" style="height:100%">이 폴더에는 파일이 없습니다.</div>'; wireCrumb(); return; }
     const rects = squarify(tiles, W, H);
     const maxV = Math.max(...tiles.map((t) => t.value));
     box.style.height = H + 'px';
     box.innerHTML = rects.map((r) => {
-      let name, sub, color, key;
+      let name, sub, color, key, drill = false, pathAttr = '';
       if (level === 'account') {
         const a = r.a; const q = a.quotaBytes;
         const fill = q > 0 ? Math.min(100, Math.round(a.used / q * 100)) : null;
         color = q > 0 ? heat(fill / 100) : ocean(r.value / maxV);
-        name = a.displayName; sub = `${UI.bytes(a.used)}${q > 0 ? ' · ' + fill + '%' : ''} · ${a.files}개`; key = `acc:${a.id}`;
+        name = a.displayName; sub = `${UI.bytes(a.used)}${q > 0 ? ' · ' + fill + '%' : ''} · ${a.files}개`; key = `acc:${a.id}`; drill = a.used > 0;
+      } else if (r.files) {
+        color = '#8592a0'; name = '📄 이 폴더 파일'; sub = `${UI.bytes(r.value)} · ${r.filesCount}개`; key = 'files';
       } else {
+        const n = r.node; const kids = n.children.length;
         color = ocean(r.value / maxV);
-        const fn = r.f.folder === '/' ? '홈(최상위)' : r.f.folder;
-        name = fn; sub = `${UI.bytes(r.f.used)} · ${r.f.files}개`; key = `fol:${UI.escapeHtml(r.f.folder)}`;
+        name = (kids ? '📁 ' : '📂 ') + n.name;
+        sub = `${UI.bytes(n.totalBytes)} · ${n.totalFiles}개${kids ? ' · 하위 ' + kids : ''}`;
+        key = 'fol'; drill = kids > 0; pathAttr = ` data-path="${UI.escapeHtml(n.path)}"`;
       }
       const small = r.w < 64 || r.h < 34;
-      return `<div class="tm-tile" data-key="${key}" style="left:${r.x}px;top:${r.y}px;width:${Math.max(0, r.w - 2)}px;height:${Math.max(0, r.h - 2)}px;background:${color}"
+      return `<div class="tm-tile${drill ? '' : ' nodrill'}" data-key="${key}" data-drill="${drill ? 1 : 0}"${pathAttr} style="left:${r.x}px;top:${r.y}px;width:${Math.max(0, r.w - 2)}px;height:${Math.max(0, r.h - 2)}px;background:${color}"
         data-name="${UI.escapeHtml(name)}" data-sub="${UI.escapeHtml(sub)}">
         ${small ? '' : `<div class="tm-name">${UI.escapeHtml(name)}</div><div class="tm-sub">${UI.escapeHtml(sub)}</div>`}</div>`;
     }).join('');
@@ -678,10 +711,19 @@ const Admin = (() => {
     box.querySelectorAll('.tm-tile').forEach((el) => {
       el.addEventListener('mousemove', (e) => { tip.style.display = 'block'; tip.innerHTML = `<b>${el.dataset.name}</b><br>${el.dataset.sub}`; const vr = document.getElementById('view').getBoundingClientRect(); tip.style.left = (e.clientX - vr.left + 12) + 'px'; tip.style.top = (e.clientY - vr.top + 12) + 'px'; });
       el.addEventListener('mouseleave', () => { tip.style.display = 'none'; });
-      if (level === 'account') el.addEventListener('click', () => { capState.ownerId = parseInt(el.dataset.key.split(':')[1], 10); drawTreemap(); });
+      if (el.dataset.drill !== '1') return;
+      el.addEventListener('click', () => {
+        if (el.dataset.key.startsWith('acc:')) { capState.ownerId = parseInt(el.dataset.key.split(':')[1], 10); capState.path = '/'; }
+        else if (el.dataset.key === 'fol') { capState.path = el.dataset.path; }
+        drawTreemap();
+      });
     });
   }
-  function wireCrumb() { const b = document.getElementById('tm-back'); if (b) b.addEventListener('click', (e) => { e.preventDefault(); capState.ownerId = null; drawTreemap(); }); }
+  function wireCrumb() {
+    const crumb = document.getElementById('tm-crumb'); if (!crumb) return;
+    crumb.querySelectorAll('[data-goto="root"]').forEach((a) => a.addEventListener('click', (e) => { e.preventDefault(); capState.ownerId = null; capState.path = '/'; drawTreemap(); }));
+    crumb.querySelectorAll('[data-path]').forEach((a) => a.addEventListener('click', (e) => { e.preventDefault(); capState.path = a.dataset.path; drawTreemap(); }));
+  }
   // 색상: 사용률 heat(0=파랑→1=빨강), 크기 ocean(옅은→진한 청록)
   function heat(t) { t = Math.max(0, Math.min(1, t)); const h = (1 - t) * 200; return `hsl(${h},70%,${t >= 0.9 ? 46 : 52}%)`; }
   function ocean(t) { t = Math.max(0.08, Math.min(1, t)); return `hsl(195,75%,${64 - t * 34}%)`; }
