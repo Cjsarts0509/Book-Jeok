@@ -8,6 +8,7 @@ const Admin = (() => {
     try {
       const { user } = await API.me();
       if (user.role !== 'admin') { UI.toast('관리자만 접근할 수 있습니다', 'error'); return (location.href = 'index.html'); }
+      if (!user.totpEnabled) { UI.toast('2단계 인증 설정이 필요합니다', 'error'); return (location.href = 'index.html'); }
       state.user = user;
       renderShell();
       loadDashboard();
@@ -21,7 +22,7 @@ const Admin = (() => {
     root().innerHTML = `
       <div class="layout">
         <header class="appbar">
-          <a class="brand" href="index.html" title="홈으로"><img src="assets/logo.svg?v=40"><span class="brand-name">북적북적</span></a>
+          <a class="brand" href="index.html" title="홈으로"><img src="assets/logo.svg?v=41"><span class="brand-name">북적북적</span></a>
           <nav class="appbar-nav">
             ${item('dashboard', '🏠', '대시보드')}
             ${item('users', '👥', '계정')}

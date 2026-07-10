@@ -5,9 +5,11 @@ const jwt = require('jsonwebtoken');
 const rateLimit = require('express-rate-limit');
 const config = require('../config');
 const { query } = require('../db');
-const { hashPassword, verifyPassword, encryptSecret } = require('../crypto');
+const { hashPassword, verifyPassword, encryptSecret, decryptSecret } = require('../crypto');
 const { authenticate } = require('../middleware/auth');
 const { audit, wrap } = require('../util');
+const totp = require('../totp');
+const QRCode = require('qrcode');
 
 const router = express.Router();
 
@@ -47,7 +49,7 @@ router.post('/login', loginLimiter, wrap(async (req, res) => {
   }
 
   const result = await query(
-    'SELECT id, username, display_name, role, password_hash, is_active FROM users WHERE username = $1',
+    'SELECT id, username, display_name, role, password_hash, is_active, totp_enabled, totp_secret FROM users WHERE username = $1',
     [username]
   );
   const user = result.rows[0];
@@ -58,10 +60,25 @@ router.post('/login', loginLimiter, wrap(async (req, res) => {
     return res.status(401).json({ error: '아이디 또는 비밀번호가 올바르지 않습니다.' });
   }
 
+  // 2단계 인증(TOTP)이 켜진 계정은 6자리 코드 확인
+  if (user.totp_enabled) {
+    const code = String(req.body.token || '').trim();
+    if (!code) return res.status(401).json({ error: '인증 앱의 6자리 코드를 입력하세요.', need2fa: true });
+    let sec = '';
+    try { sec = decryptSecret(user.totp_secret); } catch (_) { sec = ''; }
+    if (!totp.verify(sec, code)) {
+      await audit(req, 'login_failed', `${username} (2fa)`);
+      return res.status(401).json({ error: '인증 코드가 올바르지 않습니다.', need2fa: true });
+    }
+  }
+
   const token = issueToken(res, user);
   await audit({ ...req, user }, 'login', '');
+  // 관리자는 2FA 필수 — 미설정 시 강제 설정 안내
+  const mustSetup2fa = user.role === 'admin' && !user.totp_enabled;
   res.json({
     token,
+    mustSetup2fa,
     user: {
       id: user.id,
       username: user.username,
@@ -80,7 +97,7 @@ router.post('/logout', authenticate, wrap(async (req, res) => {
 
 // GET /api/auth/me
 router.get('/me', authenticate, wrap(async (req, res) => {
-  const s = await query('SELECT email, notify_email, upload_conflict FROM users WHERE id=$1', [req.user.id]);
+  const s = await query('SELECT email, notify_email, upload_conflict, totp_enabled FROM users WHERE id=$1', [req.user.id]);
   const row = s.rows[0] || {};
   res.json({
     user: {
@@ -91,8 +108,41 @@ router.get('/me', authenticate, wrap(async (req, res) => {
       email: row.email || '',
       notifyEmail: row.notify_email !== false,
       uploadConflict: row.upload_conflict || 'rename',
+      totpEnabled: !!row.totp_enabled,
     },
   });
+}));
+
+// ── 2단계 인증(TOTP) ──────────
+// 등록 시작: 새 시크릿을 pending에 저장하고 QR 반환(기존 활성 2FA는 확인 전까지 유지)
+router.post('/2fa/setup', authenticate, wrap(async (req, res) => {
+  const secret = totp.generateSecret();
+  await query('UPDATE users SET totp_pending=$1 WHERE id=$2', [encryptSecret(secret), req.user.id]);
+  const url = totp.otpauthURL(req.user.username, secret);
+  const qr = await QRCode.toDataURL(url);
+  res.json({ secret, otpauthUrl: url, qr });
+}));
+// 등록 확인: pending 시크릿으로 코드 검증 후 활성화
+router.post('/2fa/enable', authenticate, wrap(async (req, res) => {
+  const code = String(req.body.token || '').trim();
+  const r = await query('SELECT totp_pending FROM users WHERE id=$1', [req.user.id]);
+  const pending = r.rows[0] && r.rows[0].totp_pending;
+  if (!pending) return res.status(400).json({ error: '먼저 2단계 인증 설정을 시작하세요.' });
+  let sec = '';
+  try { sec = decryptSecret(pending); } catch (_) { sec = ''; }
+  if (!totp.verify(sec, code)) return res.status(400).json({ error: '인증 코드가 올바르지 않습니다. 앱의 최신 코드를 입력하세요.' });
+  await query("UPDATE users SET totp_secret=$1, totp_enabled=true, totp_pending='' WHERE id=$2", [pending, req.user.id]);
+  await audit(req, '2fa_enabled', '');
+  res.json({ ok: true });
+}));
+// 해제: 관리자는 불가(필수). 비밀번호 확인 후 해제.
+router.post('/2fa/disable', authenticate, wrap(async (req, res) => {
+  if (req.user.role === 'admin') return res.status(403).json({ error: '관리자는 2단계 인증을 해제할 수 없습니다.' });
+  const r = await query('SELECT password_hash FROM users WHERE id=$1', [req.user.id]);
+  if (!(await verifyPassword(String(req.body.password || ''), r.rows[0].password_hash))) return res.status(400).json({ error: '비밀번호가 올바르지 않습니다.' });
+  await query("UPDATE users SET totp_secret='', totp_enabled=false, totp_pending='' WHERE id=$1", [req.user.id]);
+  await audit(req, '2fa_disabled', '');
+  res.json({ ok: true });
 }));
 
 // PATCH /api/auth/settings  (본인 설정: 동일이름 처리 등. 제공된 필드만 갱신)

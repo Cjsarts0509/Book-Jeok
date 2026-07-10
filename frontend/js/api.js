@@ -23,7 +23,7 @@ const API = (() => {
       return res;
     }
     const data = await res.json();
-    if (!res.ok) throw new Error(data.error || '요청 실패');
+    if (!res.ok) { const e = new Error(data.error || '요청 실패'); e.data = data; e.status = res.status; throw e; }
     return data;
   }
 
@@ -35,7 +35,10 @@ const API = (() => {
     getToken: () => token,
     base: BASE,
     // auth
-    login: (username, password) => req('POST', '/auth/login', { username, password }),
+    login: (username, password, token) => req('POST', '/auth/login', { username, password, token }),
+    setup2fa: () => req('POST', '/auth/2fa/setup'),
+    enable2fa: (token) => req('POST', '/auth/2fa/enable', { token }),
+    disable2fa: (password) => req('POST', '/auth/2fa/disable', { password }),
     logout: () => req('POST', '/auth/logout'),
     me: () => req('GET', '/auth/me'),
     changePassword: (currentPassword, newPassword) => req('POST', '/auth/change-password', { currentPassword, newPassword }),

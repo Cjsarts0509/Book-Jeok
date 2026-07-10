@@ -29,19 +29,38 @@ const App = (() => {
 
   async function boot() {
     setupGlobal();
-    if (API.hasToken()) { try { state.user = (await API.me()).user; return renderApp(); } catch { API.setToken(null); } }
+    if (API.hasToken()) {
+      try {
+        state.user = (await API.me()).user;
+        if (state.user.role === 'admin' && !state.user.totpEnabled) return force2faSetup();
+        return renderApp();
+      } catch { API.setToken(null); }
+    }
     renderLogin();
+  }
+  // 관리자 2FA 필수: 설정 완료 전까지 앱 진입 차단
+  function force2faSetup() {
+    root().innerHTML = `<div class="login-screen"><div class="login-card" style="max-width:460px">
+      <img src="assets/logo.svg?v=41" class="login-logo" alt="북적북적">
+      <div class="login-title">2단계 인증 설정</div>
+      <p class="muted" style="text-align:center;font-size:13px;margin:6px 0 12px">관리자 계정은 보안을 위해 <b>2단계 인증이 필수</b>입니다.<br>설정을 완료해야 계속할 수 있습니다.</p>
+      <div id="tf-host"></div>
+      <button class="btn btn-ghost" id="tf-logout" style="width:100%;margin-top:10px">로그아웃</button>
+    </div></div>`;
+    document.getElementById('tf-logout').addEventListener('click', doLogout);
+    twoFactorEnroll(document.getElementById('tf-host'), () => { UI.toast('2단계 인증이 설정되었습니다 🔐', 'success'); boot(); });
   }
 
   function renderLogin() {
     root().innerHTML = `
       <div class="login-screen">
         <form class="login-card" id="login-form">
-          <img src="assets/logo.svg?v=40" class="login-logo" alt="북적북적">
+          <img src="assets/logo.svg?v=41" class="login-logo" alt="북적북적">
           <div class="login-title">북적북적</div>
           <div class="login-sub">Book-Jeok · 우리끼리 나누는 파일 창고</div>
           <div class="field"><label>아이디</label><input class="input" name="username" autocomplete="username" placeholder="아이디" required></div>
           <div class="field"><label>비밀번호</label><input class="input" name="password" type="password" autocomplete="current-password" placeholder="비밀번호" required></div>
+          <div class="field hidden" id="tfa-field"><label>2단계 인증 코드</label><input class="input num" name="token" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="인증 앱의 6자리"></div>
           <button class="btn btn-primary" style="width:100%;margin-top:6px" type="submit">로그인</button>
         </form>
       </div>`;
@@ -49,9 +68,17 @@ const App = (() => {
       e.preventDefault(); const f = e.target, btn = f.querySelector('button');
       btn.disabled = true; btn.textContent = '로그인 중…';
       try {
-        const { token, user } = await API.login(f.username.value.trim(), f.password.value);
-        API.setToken(token); state.user = user; UI.toast(`${user.displayName}님 환영합니다 🎉`, 'success'); renderApp();
-      } catch (err) { UI.toast(err.message, 'error'); btn.disabled = false; btn.textContent = '로그인'; }
+        const r = await API.login(f.username.value.trim(), f.password.value, f.token.value.trim());
+        API.setToken(r.token); state.user = r.user;
+        if (r.mustSetup2fa) return force2faSetup();
+        UI.toast(`${r.user.displayName}님 환영합니다 🎉`, 'success'); renderApp();
+      } catch (err) {
+        if (err.data && err.data.need2fa) {
+          f.querySelector('#tfa-field').classList.remove('hidden'); f.token.focus();
+          UI.toast(err.message, err.data.need2fa && f.token.value ? 'error' : 'info');
+        } else UI.toast(err.message, 'error');
+        btn.disabled = false; btn.textContent = '로그인';
+      }
     });
   }
 
@@ -61,7 +88,7 @@ const App = (() => {
       <div class="layout">
         <header class="appbar">
           <button class="icon-btn appbar-menu" id="menu-toggle" title="폴더">☰</button>
-          <div class="brand" id="brand-home" title="홈으로"><img src="assets/logo.svg?v=40"><span class="brand-name">북적북적</span></div>
+          <div class="brand" id="brand-home" title="홈으로"><img src="assets/logo.svg?v=41"><span class="brand-name">북적북적</span></div>
           ${isPriv() ? `<select class="input account-switcher" id="account-switcher"><option value="">내 파일</option></select>` : ''}
           <div class="topbar-spacer"></div>
           <nav class="appbar-nav">
@@ -1147,6 +1174,29 @@ const App = (() => {
     load();
   }
 
+  // 2FA 등록 UI를 host 요소에 렌더(QR + 시크릿 + 코드 확인). 완료 시 onDone().
+  async function twoFactorEnroll(host, onDone) {
+    host.innerHTML = '<p class="muted" style="text-align:center">준비 중…</p>';
+    let data;
+    try { data = await API.setup2fa(); } catch (e) { host.innerHTML = `<p class="muted" style="color:var(--danger)">${UI.escapeHtml(e.message)}</p>`; return; }
+    host.innerHTML = `
+      <p class="muted" style="font-size:13px;margin-bottom:8px">① 인증 앱(Google Authenticator, Authy 등)으로 아래 QR을 스캔하거나 키를 입력하세요.</p>
+      <div style="text-align:center"><img src="${data.qr}" alt="QR" style="width:180px;height:180px;border:1px solid var(--border);border-radius:8px"></div>
+      <div class="field" style="margin-top:8px"><label>설정 키(수동 입력용)</label><input class="input" readonly value="${UI.escapeHtml(data.secret)}" style="font-family:monospace;letter-spacing:1px"></div>
+      <p class="muted" style="font-size:13px;margin:10px 0 6px">② 앱에 표시된 6자리 코드를 입력하세요.</p>
+      <div class="field"><input class="input num" id="tf-code" inputmode="numeric" maxlength="6" placeholder="6자리 코드"></div>
+      <button class="btn btn-primary" id="tf-confirm" style="width:100%">확인하고 켜기</button>
+      <p id="tf-msg" class="muted" style="text-align:center;font-size:13px;margin-top:8px"></p>`;
+    const confirm = async () => {
+      const msg = host.querySelector('#tf-msg'); const btn = host.querySelector('#tf-confirm');
+      btn.disabled = true; msg.style.color = ''; msg.textContent = '확인 중…';
+      try { await API.enable2fa(host.querySelector('#tf-code').value.trim()); onDone(); }
+      catch (e) { msg.style.color = 'var(--danger)'; msg.textContent = e.message; btn.disabled = false; }
+    };
+    host.querySelector('#tf-confirm').addEventListener('click', confirm);
+    host.querySelector('#tf-code').addEventListener('keydown', (e) => { if (e.key === 'Enter') confirm(); });
+  }
+
   async function settingsModal() {
     const m = UI.modal(`<h3>⚙️ 내 설정</h3><div id="set-body"><p class="muted">불러오는 중…</p></div><div class="modal-actions"><button class="btn btn-primary" id="set-close">닫기</button></div>`);
     m.el.querySelector('.modal').classList.add('modal-wide');
@@ -1163,12 +1213,35 @@ const App = (() => {
       </div>
       <hr class="manual-hr" style="margin:16px 0">
       <div class="set-sec">
+        <div class="dash-h">🔐 2단계 인증 (TOTP)</div>
+        <div id="tf-section"></div>
+      </div>
+      <hr class="manual-hr" style="margin:16px 0">
+      <div class="set-sec">
         <div class="dash-h">🔑 비밀번호 변경</div>
         <div class="field"><label>현재 비밀번호</label><input class="input" type="password" id="cur"></div>
         <div class="field"><label>새 비밀번호 (8자 이상)</label><input class="input" type="password" id="nw"></div>
         <div class="field"><label>새 비밀번호 확인</label><input class="input" type="password" id="nw2"><span class="pw-match muted" id="match"></span></div>
         <div style="text-align:right"><button class="btn btn-secondary btn-sm" id="pw-save">비밀번호 변경</button></div>
       </div>`;
+    const tf = m.q('#tf-section');
+    function renderTf(enabled) {
+      if (enabled) {
+        tf.innerHTML = `<p style="font-size:14px"><span class="badge on">사용 중</span> 로그인 시 인증 앱의 6자리 코드를 요구합니다.</p>${u.role === 'admin' ? '<p class="muted" style="font-size:12px">관리자 계정은 필수라 해제할 수 없습니다.</p>' : '<div style="text-align:right"><button class="btn btn-sm btn-danger" id="tf-disable">해제</button></div>'}`;
+        const db = tf.querySelector('#tf-disable');
+        if (db) db.addEventListener('click', () => {
+          tf.innerHTML = `<div class="field"><label>해제하려면 비밀번호 확인</label><input class="input" type="password" id="tf-pw" placeholder="현재 비밀번호"></div><div style="text-align:right"><button class="btn btn-sm btn-ghost" id="tf-cancel">취소</button> <button class="btn btn-sm btn-danger" id="tf-do">해제</button></div>`;
+          tf.querySelector('#tf-cancel').addEventListener('click', () => renderTf(true));
+          tf.querySelector('#tf-do').addEventListener('click', async () => {
+            try { await API.disable2fa(tf.querySelector('#tf-pw').value); UI.toast('2단계 인증이 해제되었습니다', 'success'); renderTf(false); } catch (e) { UI.toast(e.message, 'error'); }
+          });
+        });
+      } else {
+        tf.innerHTML = `<p class="muted" style="font-size:13px">로그인 보안을 위해 인증 앱 기반 2단계 인증을 켤 수 있습니다.</p><div style="text-align:right"><button class="btn btn-sm btn-primary" id="tf-start">＋ 설정</button></div>`;
+        tf.querySelector('#tf-start').addEventListener('click', () => twoFactorEnroll(tf, () => { UI.toast('2단계 인증이 켜졌습니다 🔐', 'success'); renderTf(true); }));
+      }
+    }
+    renderTf(!!u.totpEnabled);
     m.q('#s-save').addEventListener('click', async () => {
       try {
         await API.updateSettings({ uploadConflict: m.el.querySelector('input[name=s-conf]:checked').value });

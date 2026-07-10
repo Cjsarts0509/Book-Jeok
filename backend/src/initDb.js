@@ -119,6 +119,11 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS email TEXT NOT NULL DEFAULT '';
 ALTER TABLE users ADD COLUMN IF NOT EXISTS notify_email BOOLEAN NOT NULL DEFAULT TRUE;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS upload_conflict VARCHAR(16) NOT NULL DEFAULT 'rename'; -- rename | overwrite
 
+-- 2단계 인증(TOTP): 암호화된 시크릿 + 활성화 여부 + 등록중(pending) 시크릿
+ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_secret TEXT NOT NULL DEFAULT '';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_enabled BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_pending TEXT NOT NULL DEFAULT '';
+
 -- notices: 노출 대상 권한 (기본: 전체)
 ALTER TABLE notices ADD COLUMN IF NOT EXISTS target_roles TEXT[] NOT NULL DEFAULT ARRAY['admin','manager','user'];
 
