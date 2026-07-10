@@ -194,6 +194,7 @@ textarea.input { resize: vertical; }
 
 /* 툴바 좌/우 배치 + 검색 */
 .tools-left { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.tools-break { display: none; }  /* 모바일에서만 줄바꿈용(검색줄을 분리) */
 .head-right { margin-left: auto; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; min-width: 0; }
 .head-right .breadcrumb { justify-content: flex-end; }
 .head-right .usage-line { justify-content: flex-end; flex-wrap: wrap; margin-bottom: 0; }
@@ -350,12 +351,12 @@ textarea.input { resize: vertical; }
   .head-right .breadcrumb, .head-right .usage-line { justify-content: flex-start; }
   .head-right .usage-line { flex-wrap: nowrap; }
   .head-right .usage-line .usage-bar { display: none; }  /* 좁은 화면: 게이지 숨기고 📊는 한 줄 유지 */
-  /* 상단 아이콘행: 업로드~필터 그룹을 우측(상단바 햄버거 끝)에 맞춰 정렬 */
-  #upload-btn { margin-left: auto; }
+  /* 검색줄을 윗줄(업로드·새폴더)과 분리 */
+  .tools-break { display: block; flex: 0 0 100%; height: 0; }
+  /* 검색줄: 이름검색(좌측, 넓게) + 조회 + 필터가 한 줄에 오도록 검색폼을 축소 가능하게 */
+  .searchbox { flex: 1 1 60px; justify-content: flex-start; min-width: 0; }
+  .searchbox .input { flex: 1 1 60px; width: auto; min-width: 0; }
   .extfilter { flex: 0 0 auto; }
-  /* 이름검색창: 폭 줄이고 자기 줄에서 우측 정렬 → 🔎가 위 필터/햄버거 라인에 맞음 */
-  .searchbox { flex: 1 1 100%; justify-content: flex-end; min-width: 0; }
-  .searchbox .input { flex: 0 0 auto; width: 180px; min-width: 0; }
   .rep-row { grid-template-columns: 1fr auto; }
   .rep-row .rep-bar { grid-column: 1 / -1; order: 3; }
 }
@@ -528,9 +529,15 @@ th { background: var(--bg); font-weight: 700; color: var(--text-muted); font-siz
   .tree-sidebar.open { transform: none; }
   .tree-backdrop.show { display: block; position: fixed; inset: var(--appbar-h) 0 0 0; background: rgba(52,58,64,.4); z-index: 44; }
 
-  .content { padding: 14px 12px 40px; }
-  .content-head { gap: 8px; }
-  .content-head .btn .label { display: none; }
+  .content { padding: 10px 12px 12px; }
+  .content-head { gap: 6px; margin-bottom: 8px; }
+  .selbar { margin-bottom: 8px; }
+  /* 업로드·새폴더·조회·필터는 텍스트 버튼으로 (라벨 노출), 네비/뷰토글만 아이콘 */
+  .content-head .btn .label { display: inline; }
+  .content-head .btn-sm { padding: 6px 9px; gap: 5px; }   /* 텍스트 버튼이 두 줄에 담기도록 여백 축소 */
+  .content-head .nav-btn { width: 30px; height: 30px; }   /* 네비/뷰토글 살짝 축소해 업로드+새폴더 한 줄에 */
+  .content-head .navcon { gap: 4px; }
+  .content-head .viewtoggle .vt { width: 30px; height: 30px; }
   .autosort { font-size: 12px; }
   .file-grid { grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 10px; }
   .file-ico { font-size: 32px; }
@@ -576,10 +583,11 @@ th { background: var(--bg); font-weight: 700; color: var(--text-muted); font-siz
   .selbar .btn { flex: 1 1 auto; justify-content: center; min-height: 38px; }
   /* PC처럼 선택 전에도 버튼을 보여주되 비활성 상태로 (가시성 확보) */
 
-  /* ── 모바일 아코디언 리스트 카드 ── */
-  .mlist { display: flex; flex-direction: column; }
-  .mcard { border: 1px solid var(--border); border-radius: var(--radius-sm); margin-bottom: 8px; background: var(--surface); overflow: hidden; transition: border-color .15s, box-shadow .15s; }
-  .mcard.sel { border-color: var(--primary); box-shadow: inset 0 0 0 2px var(--primary); background: #FFF9E8; }
+  /* ── 모바일 아코디언 리스트 카드 (여백 없이 촘촘하게, 테두리로만 구분) ── */
+  .mlist { display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: var(--radius-sm); overflow: hidden; }
+  .mcard { border: 0; border-bottom: 1px solid var(--border); margin: 0; background: var(--surface); transition: box-shadow .15s, background .15s; }
+  .mcard:last-child { border-bottom: 0; }
+  .mcard.sel { box-shadow: inset 0 0 0 2px var(--primary); background: #FFF9E8; }
   .mcard-head { display: flex; align-items: center; gap: 11px; padding: 12px; cursor: pointer; }
   .mcard-head .rowcheck { width: 20px; height: 20px; flex: 0 0 auto; }
   .mcard-main { flex: 1 1 auto; min-width: 0; }
