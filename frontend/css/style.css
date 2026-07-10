@@ -350,9 +350,12 @@ textarea.input { resize: vertical; }
   .head-right .breadcrumb, .head-right .usage-line { justify-content: flex-start; }
   .head-right .usage-line { flex-wrap: nowrap; }
   .head-right .usage-line .usage-bar { display: none; }  /* 좁은 화면: 게이지 숨기고 📊는 한 줄 유지 */
-  .searchbox { flex: 1 1 150px; min-width: 0; }
-  .searchbox .input { flex: 1; width: auto; min-width: 0; }
+  /* 상단 아이콘행: 업로드~필터 그룹을 우측(상단바 햄버거 끝)에 맞춰 정렬 */
+  #upload-btn { margin-left: auto; }
   .extfilter { flex: 0 0 auto; }
+  /* 이름검색창: 폭 줄이고 자기 줄에서 우측 정렬 → 🔎가 위 필터/햄버거 라인에 맞음 */
+  .searchbox { flex: 1 1 100%; justify-content: flex-end; min-width: 0; }
+  .searchbox .input { flex: 0 0 auto; width: 180px; min-width: 0; }
   .rep-row { grid-template-columns: 1fr auto; }
   .rep-row .rep-bar { grid-column: 1 / -1; order: 3; }
 }
@@ -362,6 +365,8 @@ textarea.input { resize: vertical; }
 
 /* ── 선택 일괄작업 바 ── */
 .selbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 14px; margin-bottom: 12px; background: #FFF3CF; border: 1px solid var(--primary); border-radius: var(--radius-sm); position: sticky; top: 0; z-index: 5; animation: slideDown .2s ease; }
+/* 모든 버튼에 1px 테두리(색 없으면 투명) → 높이 완전 동일 (border-box라 테두리 유무로 2px 차이 남) */
+.selbar .btn { border: 1px solid transparent; }
 /* 이름변경·선택해제도 다운로드/폴더이동/삭제처럼 테두리를 줘 통일감 (PC·모바일 공통) */
 .selbar .btn-ghost { border: 1px solid var(--border); background: var(--surface); color: var(--text-muted); }
 .selbar .btn-ghost:hover:not(:disabled) { background: var(--hover); color: var(--text); }
