@@ -21,15 +21,17 @@ const Admin = (() => {
     root().innerHTML = `
       <div class="layout">
         <header class="appbar">
-          <a class="brand" href="index.html" title="홈으로"><img src="assets/logo.svg?v=32"><span class="brand-name">북적북적</span></a>
+          <a class="brand" href="index.html" title="홈으로"><img src="assets/logo.svg?v=33"><span class="brand-name">북적북적</span></a>
           <nav class="appbar-nav">
             ${item('dashboard', '🏠', '대시보드')}
             ${item('users', '👥', '계정')}
             ${item('branches', '🏢', '영업점')}
             ${item('notices', '📢', '공지')}
             ${item('ext', '🧩', '확장자')}
+            ${item('shares', '🔗', '공유')}
             ${item('trash', '🗑️', '휴지통')}
             ${item('capacity', '📊', '용량')}
+            ${item('report', '📧', '리포트')}
             ${item('db', '🗄️', 'DB')}
             ${item('audit', '📜', '로그')}
             ${item('manual', '📖', '매뉴얼')}
@@ -54,12 +56,14 @@ const Admin = (() => {
     else if (tab === 'branches') loadBranches();
     else if (tab === 'notices') loadNotices();
     else if (tab === 'ext') loadExt();
+    else if (tab === 'shares') loadShares();
     else if (tab === 'trash') loadTrash();
     else if (tab === 'db') loadDb();
     else if (tab === 'audit') loadAudit();
     else if (tab === 'capacity') loadCapacity();
+    else if (tab === 'report') loadReport();
     else if (tab === 'manual') loadManual();
-    const titles = { dashboard: '대시보드', users: '계정 관리', branches: '영업점 관리', notices: '공지사항', ext: '허용 확장자', trash: '휴지통', capacity: '용량 리포트', db: 'DB 상태', audit: '감사 로그', manual: '사용자 매뉴얼' };
+    const titles = { dashboard: '대시보드', users: '계정 관리', branches: '영업점 관리', notices: '공지사항', ext: '허용 확장자', shares: '공유 통합 관리', trash: '휴지통', capacity: '용량 리포트', report: '주간 리포트', db: 'DB 상태', audit: '감사 로그', manual: '사용자 매뉴얼' };
     document.getElementById('page-title').textContent = titles[tab];
   }
 
@@ -546,29 +550,167 @@ const Admin = (() => {
   }
 
   // ── 용량 리포트 (전 계정) ──────────────
+  // ── 공유 통합 관리 (전 계정) ──────────────
+  async function loadShares() {
+    const view = document.getElementById('view');
+    view.innerHTML = '<div class="empty"><div class="big">⏳</div>불러오는 중…</div>';
+    try {
+      const d = await API.adminShares();
+      const kindIco = { file: '📄', zip: '🗜️' };
+      const owner = (r) => `<span class="muted" style="font-size:11px">${UI.escapeHtml(r.ownerName)} @${UI.escapeHtml(r.ownerUsername)}</span>`;
+      const exp = (r) => (r.expiresAt ? UI.date(r.expiresAt) + '까지' : '무기한');
+      const fileRows = d.fileShares.map((r) => {
+        const meta = [r.hasPassword ? '🔒' : '', r.maxDownloads != null ? `${r.downloadCount}/${r.maxDownloads}회` : `${r.downloadCount}회`, exp(r)].filter(Boolean).join(' · ');
+        return `<tr><td>${kindIco[r.kind] || '📄'} <b>${UI.escapeHtml(r.name || '(삭제된 대상)')}</b></td><td>${owner(r)}</td><td class="muted" style="font-size:12px">${meta}</td>
+          <td style="text-align:right"><button class="btn btn-sm btn-ghost" data-copy="${UI.escapeHtml(location.origin + '/share.html?t=' + r.token)}">📋</button><button class="btn btn-sm btn-danger" data-del="file:${r.id}">폐기</button></td></tr>`;
+      }).join('') || '<tr><td colspan="4" class="muted">파일/압축 공유 없음</td></tr>';
+      const folderRows = d.folderShares.map((r) => {
+        const meta = [r.hasPassword ? '🔒' : '', r.disabled ? '중지' : '', exp(r), '조회 ' + r.viewCount].filter(Boolean).join(' · ');
+        return `<tr><td>📁 <b>${UI.escapeHtml(r.label)}</b> <span class="muted" style="font-size:11px">${UI.escapeHtml(r.folder)}</span></td><td>${owner(r)}</td><td class="muted" style="font-size:12px">${meta}</td>
+          <td style="text-align:right"><button class="btn btn-sm btn-ghost" data-copy="${UI.escapeHtml(location.origin + '/folder.html?t=' + r.token)}">📋</button><button class="btn btn-sm btn-danger" data-del="folder:${r.id}">폐기</button></td></tr>`;
+      }).join('') || '<tr><td colspan="4" class="muted">폴더 공유 없음</td></tr>';
+      const reqRows = d.uploadRequests.map((r) => {
+        const cap = [r.maxFiles ? `${r.uploadedCount}/${r.maxFiles}개` : `${r.uploadedCount}개`, r.maxBytes ? `${UI.bytes(r.uploadedBytes)}/${UI.bytes(r.maxBytes)}` : UI.bytes(r.uploadedBytes)].join(' · ');
+        const meta = [r.hasPassword ? '🔒' : '', r.disabled ? '중지' : '', exp(r), '받음 ' + cap].filter(Boolean).join(' · ');
+        return `<tr><td>📥 <b>${UI.escapeHtml(r.label)}</b> <span class="muted" style="font-size:11px">${UI.escapeHtml(r.folder)}</span></td><td>${owner(r)}</td><td class="muted" style="font-size:12px">${meta}</td>
+          <td style="text-align:right"><button class="btn btn-sm btn-ghost" data-copy="${UI.escapeHtml(location.origin + '/upload.html?t=' + r.token)}">📋</button><button class="btn btn-sm btn-danger" data-del="upload:${r.id}">폐기</button></td></tr>`;
+      }).join('') || '<tr><td colspan="4" class="muted">업로드 요청 없음</td></tr>';
+      const sec = (title, count, rows) => `<div class="dash-h" style="margin-top:16px">${title} <span class="muted" style="font-weight:400;font-size:12px">${count}건</span></div>
+        <div class="table-wrap"><table><tbody>${rows}</tbody></table></div>`;
+      view.innerHTML = `<p class="muted" style="font-size:13px;margin-bottom:4px">모든 계정의 외부 공유 링크를 한 곳에서 관리·폐기합니다.</p>
+        ${sec('📄 파일 · 압축 공유', d.fileShares.length, fileRows)}
+        ${sec('📁 폴더 공유(읽기 전용)', d.folderShares.length, folderRows)}
+        ${sec('📥 업로드 요청(외부 업로드)', d.uploadRequests.length, reqRows)}`;
+      view.querySelectorAll('[data-copy]').forEach((x) => x.addEventListener('click', () => { navigator.clipboard?.writeText(x.dataset.copy); UI.toast('링크 복사됨', 'success'); }));
+      view.querySelectorAll('[data-del]').forEach((x) => x.addEventListener('click', async () => {
+        const [kind, id] = x.dataset.del.split(':');
+        if (!(await UI.confirm({ title: '공유 폐기', message: '이 공유 링크를 폐기할까요?\n외부에서 더 이상 접근할 수 없습니다.', confirmText: '폐기', danger: true }))) return;
+        try { await API.deleteAdminShare(kind, id); UI.toast('폐기됨', 'success'); loadShares(); } catch (e) { UI.toast(e.message, 'error'); }
+      }));
+    } catch (err) { view.innerHTML = `<div class="empty">⚠️ ${UI.escapeHtml(err.message)}</div>`; }
+  }
+
+  // ── 용량 리포트 (SpaceSniffer식 트리맵) ────────
+  const capState = { data: null, ownerId: null };
   async function loadCapacity() {
     const view = document.getElementById('view');
     view.innerHTML = '<div class="empty"><div class="big">⏳</div>불러오는 중…</div>';
     try {
-      const [{ users }, disk] = await Promise.all([API.adminUsers(), API.diskInfo()]);
-      const totalUsed = users.reduce((s, u) => s + Number(u.usedBytes || 0), 0);
-      const max = Math.max(1, ...users.map((u) => Number(u.usedBytes || 0)));
-      const rows = users.slice().sort((a, b) => Number(b.usedBytes) - Number(a.usedBytes)).map((u) => {
-        const used = Number(u.usedBytes || 0), quota = Number(u.quotaBytes || 0);
-        const pctQ = quota > 0 ? Math.min(100, used / quota * 100) : 0;
-        const label = quota > 0 ? `${UI.bytes(used)} / ${UI.bytes(quota)} (${pctQ.toFixed(0)}%)` : `${UI.bytes(used)}${u.role === 'admin' ? ' · 무제한' : ' · 미할당'}`;
-        return `<div class="rep-row"><div class="rep-name">${UI.escapeHtml(u.displayName)} <span class="muted" style="font-size:11px">@${UI.escapeHtml(u.username)}</span></div>
-          <div class="rep-bar"><span style="width:${(used / max * 100).toFixed(1)}%"></span></div>
-          <div class="rep-val num">${label} · ${u.fileCount}개</div></div>`;
-      }).join('');
+      capState.data = await API.usageTree();
+      capState.ownerId = null;
+      const s = capState.data;
       view.innerHTML = `
         <div class="stat-grid">
-          <div class="stat"><div class="k">디스크 전체</div><div class="v num">${UI.bytes(disk.totalBytes)}</div></div>
-          <div class="stat"><div class="k">사용 중 (전 계정)</div><div class="v num">${UI.bytes(totalUsed)}</div></div>
-          <div class="stat"><div class="k">할당 합계</div><div class="v num">${UI.bytes(disk.allocatedBytes || 0)}</div></div>
-          <div class="stat"><div class="k">할당 가능 (남음)</div><div class="v num">${UI.bytes(disk.availableBytes || 0)}</div></div>
+          <div class="stat"><div class="k">디스크 전체</div><div class="v num">${UI.bytes(s.diskTotal)}</div></div>
+          <div class="stat"><div class="k">사용 중 (전 계정)</div><div class="v num">${UI.bytes(s.accounts.reduce((a, x) => a + x.used, 0))}</div></div>
+          <div class="stat"><div class="k">할당 합계</div><div class="v num">${UI.bytes(s.allocated)}</div></div>
+          <div class="stat"><div class="k">할당 가능 (남음)</div><div class="v num">${UI.bytes(s.available)}</div></div>
         </div>
-        <div class="muted" style="font-size:12px;margin-bottom:8px">계정별 사용량 (많은 순)</div>${rows || '<p class="muted">계정이 없습니다.</p>'}`;
+        <div class="tm-bar"><div id="tm-crumb"></div><div class="tm-legend"><span class="muted" style="font-size:12px">타일 크기 = 사용량 · 클릭하면 폴더별로 열림</span></div></div>
+        <div id="treemap" class="treemap"></div>
+        <div id="tm-tip" class="tm-tip" style="display:none"></div>`;
+      window.addEventListener('resize', drawTreemapDebounced);
+      drawTreemap();
+    } catch (err) { view.innerHTML = `<div class="empty">⚠️ ${UI.escapeHtml(err.message)}</div>`; }
+  }
+  let tmTimer = null;
+  function drawTreemapDebounced() { clearTimeout(tmTimer); tmTimer = setTimeout(() => { if (document.getElementById('treemap')) drawTreemap(); }, 150); }
+
+  function squarify(items, W, H) {
+    const total = items.reduce((s, i) => s + i.value, 0) || 1;
+    const scale = (W * H) / total;
+    const data = items.map((i) => ({ ...i, area: Math.max(i.value * scale, 0) })).sort((a, b) => b.area - a.area);
+    const out = []; let rect = { x: 0, y: 0, w: W, h: H }; let row = [];
+    const worst = (r, len) => { const sum = r.reduce((s, x) => s + x.area, 0); const mx = Math.max(...r.map((x) => x.area)); const mn = Math.min(...r.map((x) => x.area)); const l2 = len * len, s2 = sum * sum; return Math.max((l2 * mx) / s2, s2 / (l2 * mn)); };
+    const layout = (r, rc, horiz) => { const sum = r.reduce((s, x) => s + x.area, 0); let off = 0; if (horiz) { const rh = sum / rc.w; for (const x of r) { const rw = x.area / rh; out.push({ ...x, x: rc.x + off, y: rc.y, w: rw, h: rh }); off += rw; } return { x: rc.x, y: rc.y + rh, w: rc.w, h: rc.h - rh }; } const rw = sum / rc.h; for (const x of r) { const rh = x.area / rw; out.push({ ...x, x: rc.x, y: rc.y + off, w: rw, h: rh }); off += rh; } return { x: rc.x + rw, y: rc.y, w: rc.w - rw, h: rc.h }; };
+    const rem = data.slice();
+    while (rem.length) {
+      const horiz = rect.w >= rect.h; const len = horiz ? rect.w : rect.h;
+      if (!row.length) { row.push(rem.shift()); continue; }
+      if (worst(row, len) >= worst([...row, rem[0]], len)) row.push(rem.shift());
+      else { rect = layout(row, rect, horiz); row = []; }
+    }
+    if (row.length) layout(row, rect, rect.w >= rect.h);
+    return out;
+  }
+
+  function drawTreemap() {
+    const box = document.getElementById('treemap'); if (!box || !capState.data) return;
+    const W = box.clientWidth || 900, H = 520;
+    const s = capState.data;
+    let tiles, level;
+    if (capState.ownerId == null) {
+      level = 'account';
+      tiles = s.accounts.filter((a) => a.used > 0).map((a) => ({ value: a.used, a }));
+    } else {
+      const acc = s.accounts.find((a) => a.id === capState.ownerId);
+      const fs = s.folders.filter((f) => f.ownerId === capState.ownerId && f.used > 0);
+      level = 'folder';
+      tiles = fs.map((f) => ({ value: f.used, f, acc }));
+    }
+    const crumb = document.getElementById('tm-crumb');
+    if (capState.ownerId == null) crumb.innerHTML = '<b>전체 계정</b>';
+    else { const acc = s.accounts.find((a) => a.id === capState.ownerId); crumb.innerHTML = `<a href="#" id="tm-back" class="tm-link">← 전체 계정</a> <span class="muted">/</span> <b>${UI.escapeHtml(acc ? acc.displayName : '')}</b>`; }
+
+    if (!tiles.length) { box.innerHTML = '<div class="empty" style="height:100%">표시할 사용량이 없습니다.</div>'; wireCrumb(); return; }
+    const rects = squarify(tiles, W, H);
+    const maxV = Math.max(...tiles.map((t) => t.value));
+    box.style.height = H + 'px';
+    box.innerHTML = rects.map((r) => {
+      let name, sub, color, key;
+      if (level === 'account') {
+        const a = r.a; const q = a.quotaBytes;
+        const fill = q > 0 ? Math.min(100, Math.round(a.used / q * 100)) : null;
+        color = q > 0 ? heat(fill / 100) : ocean(r.value / maxV);
+        name = a.displayName; sub = `${UI.bytes(a.used)}${q > 0 ? ' · ' + fill + '%' : ''} · ${a.files}개`; key = `acc:${a.id}`;
+      } else {
+        color = ocean(r.value / maxV);
+        const fn = r.f.folder === '/' ? '홈(최상위)' : r.f.folder;
+        name = fn; sub = `${UI.bytes(r.f.used)} · ${r.f.files}개`; key = `fol:${UI.escapeHtml(r.f.folder)}`;
+      }
+      const small = r.w < 64 || r.h < 34;
+      return `<div class="tm-tile" data-key="${key}" style="left:${r.x}px;top:${r.y}px;width:${Math.max(0, r.w - 2)}px;height:${Math.max(0, r.h - 2)}px;background:${color}"
+        data-name="${UI.escapeHtml(name)}" data-sub="${UI.escapeHtml(sub)}">
+        ${small ? '' : `<div class="tm-name">${UI.escapeHtml(name)}</div><div class="tm-sub">${UI.escapeHtml(sub)}</div>`}</div>`;
+    }).join('');
+    wireCrumb();
+    const tip = document.getElementById('tm-tip');
+    box.querySelectorAll('.tm-tile').forEach((el) => {
+      el.addEventListener('mousemove', (e) => { tip.style.display = 'block'; tip.innerHTML = `<b>${el.dataset.name}</b><br>${el.dataset.sub}`; const vr = document.getElementById('view').getBoundingClientRect(); tip.style.left = (e.clientX - vr.left + 12) + 'px'; tip.style.top = (e.clientY - vr.top + 12) + 'px'; });
+      el.addEventListener('mouseleave', () => { tip.style.display = 'none'; });
+      if (level === 'account') el.addEventListener('click', () => { capState.ownerId = parseInt(el.dataset.key.split(':')[1], 10); drawTreemap(); });
+    });
+  }
+  function wireCrumb() { const b = document.getElementById('tm-back'); if (b) b.addEventListener('click', (e) => { e.preventDefault(); capState.ownerId = null; drawTreemap(); }); }
+  // 색상: 사용률 heat(0=파랑→1=빨강), 크기 ocean(옅은→진한 청록)
+  function heat(t) { t = Math.max(0, Math.min(1, t)); const h = (1 - t) * 200; return `hsl(${h},70%,${t >= 0.9 ? 46 : 52}%)`; }
+  function ocean(t) { t = Math.max(0.08, Math.min(1, t)); return `hsl(195,75%,${64 - t * 34}%)`; }
+
+  // ── 주간 리포트 (미리보기 · 즉시 발송) ────────
+  async function loadReport() {
+    const view = document.getElementById('view');
+    view.innerHTML = '<div class="empty"><div class="big">⏳</div>불러오는 중…</div>';
+    try {
+      const d = await API.reportPreview();
+      const m = d.mail || {};
+      const status = m.enabled
+        ? `<span class="badge on">SMTP 설정됨</span> 수신자: ${m.to && m.to.length ? UI.escapeHtml(m.to.join(', ')) : '<span style="color:var(--danger)">REPORT_TO 미설정</span>'}`
+        : '<span class="badge off">SMTP 미설정</span> — 서버 환경변수 설정 후 자동 발송됩니다.';
+      view.innerHTML = `
+        <div class="dash-card" style="margin-bottom:14px">
+          <div class="dash-h">주간 리포트 자동 발송</div>
+          <p class="muted" style="font-size:13px;margin:6px 0">매주 <b>월요일 오전</b>(기본 08:00, Asia/Seoul) 계정별 디스크·활동·실패 이력·특이사항을 이메일로 보냅니다.</p>
+          <p style="font-size:13px;margin:6px 0">${status}</p>
+          <div style="margin-top:8px"><button class="btn btn-primary btn-sm" id="rp-send">📧 지금 테스트 발송</button>
+            <span class="muted" style="font-size:12px;margin-left:8px">아래는 이번 주 리포트 미리보기입니다.</span></div>
+          <p class="muted" style="font-size:12px;margin-top:8px">설정: SMTP_HOST · SMTP_PORT · SMTP_USER · SMTP_PASS · MAIL_FROM · REPORT_TO(수신자) · REPORT_CRON(기본 <code>0 8 * * 1</code>) · REPORT_TZ(기본 Asia/Seoul)</p>
+        </div>
+        <div class="rp-preview">${d.html}</div>`;
+      document.getElementById('rp-send').addEventListener('click', async (e) => {
+        const btn = e.currentTarget; btn.disabled = true; btn.textContent = '발송 중…';
+        try { const r = await API.reportSend(); UI.toast('리포트를 발송했습니다 ✅', 'success'); btn.textContent = '✅ 발송됨'; }
+        catch (err) { UI.toast(err.message, 'error'); btn.disabled = false; btn.textContent = '📧 지금 테스트 발송'; }
+      });
     } catch (err) { view.innerHTML = `<div class="empty">⚠️ ${UI.escapeHtml(err.message)}</div>`; }
   }
 

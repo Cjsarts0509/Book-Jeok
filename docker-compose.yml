@@ -42,6 +42,18 @@ services:
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:4000}
       SUPER_ADMINS: ${SUPER_ADMINS:-admin}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      # 주간 리포트 이메일(선택) — 설정 시 매주 월요일 자동 발송. 미설정 시 미리보기만.
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_SECURE: ${SMTP_SECURE:-}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      MAIL_FROM: ${MAIL_FROM:-}
+      REPORT_TO: ${REPORT_TO:-}
+      REPORT_CRON: ${REPORT_CRON:-0 8 * * 1}
+      REPORT_TZ: ${REPORT_TZ:-Asia/Seoul}
+      # YARA 악성 패턴 검사(선택): 끄려면 0, 룰 경로 변경 시 YARA_RULES
+      YARA_ENABLED: ${YARA_ENABLED:-}
     volumes:
       # 파일 저장소도 독립 디스크에
       - ${DATA_ROOT:-/mnt/bookjeok-data}/storage:/data/storage

@@ -432,4 +432,81 @@ router.delete('/notices/:id', wrap(async (req, res) => {
   res.json({ ok: true });
 }));
 
+// ══════════ 공유 통합 관리 (전 계정) ══════════
+router.get('/shares', wrap(async (req, res) => {
+  const [fileR, folderR, reqR] = await Promise.all([
+    query(`SELECT s.id, s.token, s.expires_at, s.download_count, s.max_downloads, s.created_at,
+             (s.password_hash IS NOT NULL) AS has_pw,
+             CASE WHEN s.file_id IS NOT NULL THEN 'file' ELSE 'zip' END AS kind,
+             COALESCE(f.original_name, b.display_name) AS name,
+             COALESCE(fo.username, bo.username) AS owner_username,
+             COALESCE(fo.display_name, bo.display_name) AS owner_name,
+             cu.username AS creator
+           FROM share_links s
+           LEFT JOIN files f ON f.id=s.file_id
+           LEFT JOIN users fo ON fo.id=f.owner_id
+           LEFT JOIN zip_bundles b ON b.id=s.bundle_id
+           LEFT JOIN users bo ON bo.id=b.owner_id
+           LEFT JOIN users cu ON cu.id=s.created_by
+           ORDER BY s.created_at DESC`),
+    query(`SELECT fs.id, fs.token, fs.label, fs.folder, fs.expires_at, fs.view_count, fs.disabled, fs.created_at,
+             (fs.password_hash IS NOT NULL) AS has_pw, u.username AS owner_username, u.display_name AS owner_name
+           FROM folder_shares fs JOIN users u ON u.id=fs.owner_id ORDER BY fs.created_at DESC`),
+    query(`SELECT ur.id, ur.token, ur.label, ur.folder, ur.expires_at, ur.disabled, ur.uploaded_count, ur.uploaded_bytes, ur.max_files, ur.max_bytes, ur.created_at,
+             (ur.password_hash IS NOT NULL) AS has_pw, u.username AS owner_username, u.display_name AS owner_name
+           FROM upload_requests ur JOIN users u ON u.id=ur.owner_id ORDER BY ur.created_at DESC`),
+  ]);
+  const num = (v) => (v == null ? null : Number(v));
+  res.json({
+    fileShares: fileR.rows.map((r) => ({ id: r.id, token: r.token, kind: r.kind, name: r.name, ownerUsername: r.owner_username, ownerName: r.owner_name, creator: r.creator, hasPassword: r.has_pw, downloadCount: r.download_count, maxDownloads: r.max_downloads, expiresAt: r.expires_at, createdAt: r.created_at })),
+    folderShares: folderR.rows.map((r) => ({ id: r.id, token: r.token, label: r.label, folder: r.folder, ownerUsername: r.owner_username, ownerName: r.owner_name, hasPassword: r.has_pw, disabled: r.disabled, viewCount: r.view_count, expiresAt: r.expires_at, createdAt: r.created_at })),
+    uploadRequests: reqR.rows.map((r) => ({ id: r.id, token: r.token, label: r.label, folder: r.folder, ownerUsername: r.owner_username, ownerName: r.owner_name, hasPassword: r.has_pw, disabled: r.disabled, uploadedCount: r.uploaded_count, uploadedBytes: num(r.uploaded_bytes), maxFiles: r.max_files, maxBytes: num(r.max_bytes), expiresAt: r.expires_at, createdAt: r.created_at })),
+  });
+}));
+const shareTables = { file: 'share_links', folder: 'folder_shares', upload: 'upload_requests' };
+router.delete('/shares/:kind(file|folder|upload)/:id(\\d+)', wrap(async (req, res) => {
+  const table = shareTables[req.params.kind];
+  const r = await query(`DELETE FROM ${table} WHERE id=$1 RETURNING id`, [req.params.id]);
+  if (r.rowCount === 0) return res.status(404).json({ error: '공유를 찾을 수 없습니다.' });
+  await audit(req, 'admin_delete_share', `${req.params.kind}#${req.params.id}`);
+  res.json({ ok: true });
+}));
+
+// ══════════ 용량 트리맵 데이터 (계정 → 폴더) ══════════
+router.get('/usage/tree', wrap(async (req, res) => {
+  const [total, alloc, accR, folderR] = await Promise.all([
+    diskTotalBytes(), allocatedBytes(),
+    query(`SELECT u.id, u.username, u.display_name, u.role, u.quota_bytes,
+             COALESCE(SUM(f.size_bytes),0) AS used, COUNT(f.id)::int AS files
+           FROM users u LEFT JOIN files f ON f.owner_id=u.id AND f.deleted_at IS NULL
+           GROUP BY u.id ORDER BY used DESC`),
+    query(`SELECT owner_id, folder, COALESCE(SUM(size_bytes),0) AS used, COUNT(*)::int AS files
+           FROM files WHERE deleted_at IS NULL GROUP BY owner_id, folder`),
+  ]);
+  res.json({
+    diskTotal: total, allocated: alloc, available: Math.max(0, total - alloc),
+    accounts: accR.rows.map((r) => ({ id: r.id, username: r.username, displayName: r.display_name, role: r.role, quotaBytes: Number(r.quota_bytes), used: Number(r.used), files: r.files })),
+    folders: folderR.rows.map((r) => ({ ownerId: r.owner_id, folder: r.folder, used: Number(r.used), files: r.files })),
+  });
+}));
+
+// ══════════ 주간 리포트 (미리보기 / 즉시 발송) ══════════
+router.get('/report/preview', wrap(async (req, res) => {
+  const report = require('../report');
+  const mailer = require('../mailer');
+  const built = await report.buildWeekly();
+  res.json({ subject: built.subject, html: built.html, mail: { enabled: mailer.enabled(), ...mailer.config() } });
+}));
+router.post('/report/send', wrap(async (req, res) => {
+  const scheduler = require('../scheduler');
+  try {
+    const info = await scheduler.runOnce('manual');
+    await audit(req, 'send_report', mailer_to());
+    res.json({ ok: true, messageId: info.messageId || null });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+}));
+function mailer_to() { try { return require('../mailer').recipients().join(', '); } catch (_) { return ''; } }
+
 module.exports = router;

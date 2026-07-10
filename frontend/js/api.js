@@ -84,6 +84,11 @@ const API = (() => {
     updateUser: (id, data) => req('PATCH', `/admin/users/${id}`, data),
     deleteUser: (id) => req('DELETE', `/admin/users/${id}`),
     dashboard: () => req('GET', '/admin/dashboard'),
+    adminShares: () => req('GET', '/admin/shares'),
+    deleteAdminShare: (kind, id) => req('DELETE', `/admin/shares/${kind}/${id}`),
+    usageTree: () => req('GET', '/admin/usage/tree'),
+    reportPreview: () => req('GET', '/admin/report/preview'),
+    reportSend: () => req('POST', '/admin/report/send'),
     dbStatus: () => req('GET', '/admin/db-status'),
     audit: (limit = 50) => req('GET', `/admin/audit?limit=${limit}`),
     // trash
