@@ -41,7 +41,7 @@ const App = (() => {
   // 관리자 2FA 필수: 설정 완료 전까지 앱 진입 차단
   function force2faSetup() {
     root().innerHTML = `<div class="login-screen"><div class="login-card" style="max-width:460px">
-      <img src="assets/logo.svg?v=49" class="login-logo" alt="북적북적">
+      <img src="assets/logo.svg?v=50" class="login-logo" alt="북적북적">
       <div class="login-title">2단계 인증 설정</div>
       <p class="muted" style="text-align:center;font-size:13px;margin:6px 0 12px">관리자 계정은 보안을 위해 <b>2단계 인증이 필수</b>입니다.<br>설정을 완료해야 계속할 수 있습니다.</p>
       <div id="tf-host"></div>
@@ -55,7 +55,7 @@ const App = (() => {
     root().innerHTML = `
       <div class="login-screen">
         <form class="login-card" id="login-form">
-          <img src="assets/logo.svg?v=49" class="login-logo" alt="북적북적">
+          <img src="assets/logo.svg?v=50" class="login-logo" alt="북적북적">
           <div class="login-title">북적북적</div>
           <div class="login-sub">Book-Jeok · 우리끼리 나누는 파일 창고</div>
           <div class="field"><label>아이디</label><input class="input" name="username" autocomplete="username" placeholder="아이디" required></div>
@@ -88,10 +88,12 @@ const App = (() => {
       <div class="layout">
         <header class="appbar">
           <button class="icon-btn appbar-menu" id="menu-toggle" title="폴더">☰</button>
-          <div class="brand" id="brand-home" title="홈으로"><img src="assets/logo.svg?v=49"><span class="brand-name">북적북적</span></div>
+          <div class="brand" id="brand-home" title="홈으로"><img src="assets/logo.svg?v=50"><span class="brand-name">북적북적</span></div>
           ${isPriv() ? `<select class="input account-switcher" id="account-switcher"><option value="">내 파일</option></select>` : ''}
           <div class="topbar-spacer"></div>
-          <nav class="appbar-nav">
+          <button class="icon-btn appbar-navmenu" id="nav-menu-toggle" title="메뉴" aria-label="메뉴">☰<span class="notif-badge hidden" id="notif-badge-menu">0</span></button>
+          <nav class="appbar-nav" id="appbar-nav">
+            <div class="nav-user">${UI.escapeHtml(state.user.displayName)} · ${roleLabel(state.user.role)}</div>
             <div class="nav-item" data-nav="files"><span class="ico">📁</span><span class="t">내 파일</span></div>
             <div class="nav-item" data-nav="shares"><span class="ico">🔗</span><span class="t">공유</span></div>
             <div class="nav-item" data-nav="trash"><span class="ico">🗑️</span><span class="t">휴지통</span></div>
@@ -115,8 +117,13 @@ const App = (() => {
       <div class="drop-overlay hidden" id="drop-overlay"><div class="drop-inner"><div class="drop-ic">📥</div>여기에 놓아 업로드<div class="drop-sub">현재 폴더로 올라갑니다</div></div></div>`;
     root().querySelectorAll('.appbar-nav [data-nav]').forEach((el) => el.addEventListener('click', () => {
       const n = el.dataset.nav;
+      closeNavMenu();
       if (n === 'logout') doLogout(); else if (n === 'settings') settingsModal(); else if (n === 'files') resetToOwn(); else if (n === 'help') helpModal(); else if (n === 'trash') trashModal(); else if (n === 'shares') shareManageModal(); else if (n === 'notif') notifModal();
     }));
+    // 모바일: 상단바 메뉴(햄버거) → 텍스트 리스트 드롭다운
+    const navMenuBtn = document.getElementById('nav-menu-toggle');
+    navMenuBtn.addEventListener('click', (e) => { e.stopPropagation(); document.getElementById('appbar-nav').classList.toggle('open'); });
+    document.addEventListener('click', (e) => { if (!e.target.closest('#appbar-nav, #nav-menu-toggle')) closeNavMenu(); });
     document.getElementById('menu-toggle').addEventListener('click', toggleTree);
     refreshNotifBadge(); startNotifPolling();
     document.getElementById('tree-backdrop').addEventListener('click', toggleTree);
@@ -166,6 +173,8 @@ const App = (() => {
   }
 
   function toggleTree() { document.getElementById('tree-sidebar').classList.toggle('open'); document.getElementById('tree-backdrop').classList.toggle('show'); }
+  function closeNavMenu() { document.getElementById('appbar-nav')?.classList.remove('open'); }
+  const isMobile = () => window.matchMedia('(max-width: 640px)').matches;
   function resetToOwn() { state.ownerId = null; state.ownerName = null; state.folder = '/'; state.selected.clear(); resetNav(); const sw = document.getElementById('account-switcher'); if (sw) sw.value = ''; loadAll(); }
 
   async function setupAccountSwitcher() {
@@ -345,8 +354,66 @@ const App = (() => {
   function renderListing() {
     const box = document.getElementById('listing');
     if (state.folders.length === 0 && state.files.length === 0) { box.innerHTML = `<div class="empty"><div class="big">🗂️</div>아직 파일이 없어요. 첫 파일을 올려보세요!</div>`; return; }
-    box.innerHTML = state.view === 'grid' ? gridHTML() : listHTML();
+    // 모바일 리스트 뷰: 항목을 눌러 펼치는 아코디언 카드 + 텍스트 버튼
+    if (isMobile() && state.view === 'list') box.innerHTML = mobileListHTML();
+    else box.innerHTML = state.view === 'grid' ? gridHTML() : listHTML();
     wireListing(); updateSelbar(); if (state.view === 'grid') loadThumbs();
+  }
+
+  // 모바일 전용: 기본정보(이름·크기·등록일)만 보이고, 탭하면 상세+기능이 펼쳐지는 카드
+  function mobileListHTML() {
+    const esc = UI.escapeHtml, isSel = (key) => state.selected.has(key);
+    const folders = sortItems(state.folders, true).map((f) => {
+      const key = `folder:${f.path}`;
+      return `<div class="mcard fade-in${isSel(key) ? ' sel' : ''}" data-folder-row="${esc(f.path)}" data-row-key="${esc(key)}" data-drop-folder="${esc(f.path)}">
+        <div class="mcard-head">
+          <input type="checkbox" class="rowcheck" data-sel-folder="${esc(f.path)}" data-name="${esc(f.name)}" ${isSel(key) ? 'checked' : ''}>
+          <div class="mcard-main">
+            <div class="mcard-name"><span class="ic${f.color ? ' tint' : ''}" style="${folderIcoStyle(f.color)}">${f.icon || '📁'}</span> ${esc(f.name)}${updateBadge(f, true)}</div>
+            <div class="mcard-sub">${UI.bytes(f.size)} · ${f.createdAt ? UI.date(f.createdAt) : '폴더'}</div>
+          </div>
+          <span class="mcard-caret">▾</span>
+        </div>
+        <div class="mcard-body">
+          ${f.noteUpdatedAt ? `<div class="mcard-info"><span class="k">수정</span> ${UI.date(f.noteUpdatedAt)}</div>` : ''}
+          ${f.note ? `<div class="mcard-info"><span class="k">비고</span> ${esc(f.note)}</div>` : ''}
+          <div class="mcard-acts">
+            <button class="mbtn mbtn-primary" data-open="${esc(f.path)}">📂 열기</button>
+            <button class="mbtn" data-fshare="${esc(f.path)}">🔗 폴더공유</button>
+            <button class="mbtn" data-freq="${esc(f.path)}">📥 업로드요청</button>
+            <button class="mbtn" data-fnote="${esc(f.path)}">📝 비고</button>
+            <button class="mbtn" data-fedit="${esc(f.path)}">⚙️ 설정</button>
+            <button class="mbtn mbtn-danger" data-fdel="${esc(f.path)}">🗑️ 삭제</button>
+          </div>
+        </div>
+      </div>`;
+    }).join('');
+    const files = sortItems(filteredFiles(), false).map((f) => {
+      const key = `file:${f.id}`;
+      return `<div class="mcard fade-in${isSel(key) ? ' sel' : ''}" data-file="${f.id}" data-row-key="${esc(key)}">
+        <div class="mcard-head">
+          <input type="checkbox" class="rowcheck" data-sel-file="${f.id}" data-name="${esc(f.name)}" ${isSel(key) ? 'checked' : ''}>
+          <div class="mcard-main">
+            <div class="mcard-name"><span class="ic">${UI.fileIcon(f.name)}</span> ${esc(f.name)}${updateBadge(f, false)}</div>
+            <div class="mcard-sub">${UI.bytes(f.size)} · ${UI.date(f.createdAt)}</div>
+          </div>
+          <span class="mcard-caret">▾</span>
+        </div>
+        <div class="mcard-body">
+          <div class="mcard-info"><span class="k">수정</span> ${UI.date(f.updatedAt || f.createdAt)}</div>
+          ${f.note ? `<div class="mcard-info"><span class="k">비고</span> ${esc(f.note)}</div>` : ''}
+          <div class="mcard-acts">
+            <button class="mbtn mbtn-primary" data-dl="${f.id}">⬇️ 다운로드</button>
+            ${canPreview(f.name) ? `<button class="mbtn" data-preview="${f.id}">👁️ 미리보기</button>` : ''}
+            <button class="mbtn" data-share="${f.id}">🔗 공유</button>
+            <button class="mbtn" data-note="${f.id}">📝 비고</button>
+            <button class="mbtn" data-rename="${f.id}">✏️ 이름변경</button>
+            <button class="mbtn mbtn-danger" data-del="${f.id}">🗑️ 삭제</button>
+          </div>
+        </div>
+      </div>`;
+    }).join('');
+    return `<div class="mlist fade-in">${folders}${files}</div>`;
   }
 
   function gridHTML() {
@@ -562,8 +629,17 @@ const App = (() => {
   function wireListing() {
     const box = document.getElementById('listing');
     const actionSel = '.file-actions, .row-actions, .rowcheck, button, a, input';
-    // 항목: 클릭=선택, 더블클릭=열기/다운로드, 드래그=이동
+    // 모바일 아코디언 카드: 헤더 탭 = 펼치기/접기 (선택은 체크박스, 열기/다운로드는 버튼)
+    box.querySelectorAll('.mcard').forEach((el) => {
+      el.querySelector('.mcard-head').addEventListener('click', (e) => {
+        if (e.target.closest('.rowcheck, button, a')) return;
+        el.classList.toggle('expanded');
+      });
+    });
+    box.querySelectorAll('button[data-open]').forEach((el) => el.addEventListener('click', (e) => { e.stopPropagation(); openFolder(el.dataset.open); }));
+    // 항목: 클릭=선택, 더블클릭=열기/다운로드, 드래그=이동 (모바일 카드는 위에서 별도 처리)
     box.querySelectorAll('[data-row-key]').forEach((el) => {
+      if (el.classList.contains('mcard')) return;
       const key = el.dataset.rowKey; const isFolder = key.startsWith('folder:');
       const found = isFolder ? state.folders.find((f) => `folder:${f.path}` === key) : state.files.find((f) => `file:${f.id}` === key);
       const item = isFolder ? { type: 'folder', path: key.slice(7), name: found ? found.name : '' } : { type: 'file', id: key.slice(5), name: found ? found.name : '' };
@@ -1149,13 +1225,16 @@ const App = (() => {
   }
 
   // ── 인앱 알림 ──────────
-  let notifTimer = null, refreshTimer = null, lastUnread = -1, visHooked = false;
+  let notifTimer = null, refreshTimer = null, lastUnread = -1, visHooked = false, resizeHooked = false, lastMobile = null;
   async function refreshNotifBadge() {
     try {
       const d = await API.notifications(1);
-      const badge = document.getElementById('notif-badge'); if (!badge) return;
-      if (d.unread > 0) { badge.textContent = d.unread > 99 ? '99+' : d.unread; badge.classList.remove('hidden'); }
-      else badge.classList.add('hidden');
+      const badges = [document.getElementById('notif-badge'), document.getElementById('notif-badge-menu')].filter(Boolean);
+      if (!badges.length) return;
+      badges.forEach((badge) => {
+        if (d.unread > 0) { badge.textContent = d.unread > 99 ? '99+' : d.unread; badge.classList.remove('hidden'); }
+        else badge.classList.add('hidden');
+      });
       // 새 알림이 늘었으면 토스트 + 현재 목록 자동 새로고침(최초 로드 때는 제외)
       if (lastUnread >= 0 && d.unread > lastUnread) { UI.toast(`🔔 새 알림 ${d.unread - lastUnread}건`, 'info'); maybeAutoRefresh(); }
       lastUnread = d.unread;
@@ -1175,6 +1254,13 @@ const App = (() => {
     notifTimer = setInterval(refreshNotifBadge, 30000);      // 알림 30초 폴링
     refreshTimer = setInterval(maybeAutoRefresh, 45000);     // 목록 45초 자동 새로고침
     if (!visHooked) { visHooked = true; document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { refreshNotifBadge(); maybeAutoRefresh(); } }); }
+    if (!resizeHooked) {
+      resizeHooked = true; lastMobile = isMobile();
+      window.addEventListener('resize', () => {
+        const m = isMobile(); if (m === lastMobile) return; lastMobile = m; // 브레이크포인트 넘을 때만 다시 그림
+        if (state.user && document.getElementById('listing')) renderListing();
+      });
+    }
   }
   function notifModal() {
     const m = UI.modal(`<h3>🔔 알림</h3><div id="nf-body"><p class="muted">불러오는 중…</p></div><div class="modal-actions"><button class="btn btn-ghost" id="nf-read">모두 읽음</button><button class="btn btn-primary" id="nf-close">닫기</button></div>`);
