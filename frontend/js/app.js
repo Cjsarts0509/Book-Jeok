@@ -41,7 +41,7 @@ const App = (() => {
   // 관리자 2FA 필수: 설정 완료 전까지 앱 진입 차단
   function force2faSetup() {
     root().innerHTML = `<div class="login-screen"><div class="login-card" style="max-width:460px">
-      <img src="assets/logo.svg?v=54" class="login-logo" alt="북적북적">
+      <img src="assets/logo.svg?v=55" class="login-logo" alt="북적북적">
       <div class="login-title">2단계 인증 설정</div>
       <p class="muted" style="text-align:center;font-size:13px;margin:6px 0 12px">관리자 계정은 보안을 위해 <b>2단계 인증이 필수</b>입니다.<br>설정을 완료해야 계속할 수 있습니다.</p>
       <div id="tf-host"></div>
@@ -55,7 +55,7 @@ const App = (() => {
     root().innerHTML = `
       <div class="login-screen">
         <form class="login-card" id="login-form">
-          <img src="assets/logo.svg?v=54" class="login-logo" alt="북적북적">
+          <img src="assets/logo.svg?v=55" class="login-logo" alt="북적북적">
           <div class="login-title">북적북적</div>
           <div class="login-sub">Book-Jeok · 우리끼리 나누는 파일 창고</div>
           <div class="field"><label>아이디</label><input class="input" name="username" autocomplete="username" placeholder="아이디" required></div>
@@ -88,7 +88,7 @@ const App = (() => {
       <div class="layout">
         <header class="appbar">
           <button class="icon-btn appbar-menu" id="menu-toggle" title="폴더">☰</button>
-          <div class="brand" id="brand-home" title="홈으로"><img src="assets/logo.svg?v=54"><span class="brand-name">북적북적</span></div>
+          <div class="brand" id="brand-home" title="홈으로"><img src="assets/logo.svg?v=55"><span class="brand-name">북적북적</span></div>
           ${isPriv() ? `<select class="input account-switcher" id="account-switcher"><option value="">내 파일</option></select>` : ''}
           <div class="topbar-spacer"></div>
           <button class="icon-btn appbar-navmenu" id="nav-menu-toggle" title="메뉴" aria-label="메뉴">☰<span class="notif-badge hidden" id="notif-badge-menu">0</span></button>
@@ -125,7 +125,7 @@ const App = (() => {
     navMenuBtn.addEventListener('click', (e) => { e.stopPropagation(); document.getElementById('appbar-nav').classList.toggle('open'); });
     document.addEventListener('click', (e) => { if (!e.target.closest('#appbar-nav, #nav-menu-toggle')) closeNavMenu(); });
     document.getElementById('menu-toggle').addEventListener('click', toggleTree);
-    refreshNotifBadge(); startNotifPolling();
+    refreshNotifBadge(); startNotifPolling(); setupBackTrap();
     document.getElementById('tree-backdrop').addEventListener('click', toggleTree);
     document.getElementById('brand-home').addEventListener('click', () => goTo('/'));
     document.getElementById('expand-all').addEventListener('click', expandAll);
@@ -558,6 +558,31 @@ const App = (() => {
   function navUp() { if (state.folder === '/') return; goTo(state.folder.slice(0, state.folder.lastIndexOf('/')) || '/'); }
   function resetNav() { state.nav = { stack: [state.folder || '/'], idx: 0 }; }
   function openFolder(path) { goTo(path); }
+
+  // ── 브라우저 뒤로가기 가로채기 ──────────
+  // 모바일 웹에서 실수로 뒤로가기를 눌러 사이트를 벗어나는 걸 막고,
+  // 대신 앱 내 뒤로(모달 닫기 → 선택 해제 → 검색 종료 → 상위/이전 폴더)로 동작시킨다.
+  // 홈에서 되돌릴 게 없으면 "한 번 더 누르면 나가기"로 실수 이탈만 방지.
+  function setupBackTrap() {
+    if (backHooked) return; backHooked = true;
+    const rearm = () => history.pushState({ bjGuard: 1 }, '');
+    rearm(); // 상단에 가드 상태 하나를 항상 유지
+    let exitArmed = false, exitTimer = null;
+    window.addEventListener('popstate', () => {
+      if (!state.user) return; // 로그아웃 상태면 그냥 통과
+      const modals = document.querySelectorAll('.modal-backdrop');
+      if (modals.length) { modals[modals.length - 1].querySelector('.modal-x')?.click(); rearm(); return; }
+      if (state.selected && state.selected.size) { state.selected.clear(); applySelectionClasses(); rearm(); return; }
+      if (state.search.on) { clearSearch(); rearm(); return; }
+      if (state.nav && state.nav.idx > 0) { navBack(); rearm(); return; }
+      if (state.folder && state.folder !== '/') { navUp(); rearm(); return; }
+      // 홈 + 되돌릴 것 없음 → 두 번 눌러야 이탈
+      if (exitArmed) { history.back(); return; } // 재무장하지 않음 → 실제로 나감
+      exitArmed = true; UI.toast('뒤로가기를 한 번 더 누르면 나갑니다', 'info');
+      clearTimeout(exitTimer); exitTimer = setTimeout(() => { exitArmed = false; }, 2000);
+      rearm();
+    });
+  }
 
   // ── 전역: 화면 어디든 드롭 업로드 · 백스페이스=폴더 뒤로 ──
   let globalsBound = false;
@@ -1226,7 +1251,7 @@ const App = (() => {
   }
 
   // ── 인앱 알림 ──────────
-  let notifTimer = null, refreshTimer = null, lastUnread = -1, visHooked = false, resizeHooked = false, lastMobile = null;
+  let notifTimer = null, refreshTimer = null, lastUnread = -1, visHooked = false, resizeHooked = false, lastMobile = null, backHooked = false;
   async function refreshNotifBadge() {
     try {
       const d = await API.notifications(1);
