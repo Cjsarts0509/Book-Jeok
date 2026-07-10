@@ -123,8 +123,13 @@ router.post('/:token', uploadLimiter, attemptLimiter, wrap(gate), upload.array('
     saved++; savedBytes += f.size;
   }
   if (saved) await query('UPDATE upload_requests SET uploaded_count = uploaded_count + $2, uploaded_bytes = uploaded_bytes + $3 WHERE id=$1', [u.id, saved, savedBytes]);
-  if (saved && u.notify_inapp && u.created_by) {
-    notify.push({ userId: u.created_by, type: 'upload_request', title: `업로드 요청에 파일 ${saved}개 도착`, body: `'${u.label}' (${u.folder}) 에 파일 ${saved}개가 업로드되었습니다.` }).catch(() => {});
+  if (saved) {
+    // 계정 소유자에게 항상 알림(외부 업로드)
+    notify.push({ userId: owner, type: 'upload', title: `파일 ${saved}개가 업로드되었습니다`, body: `업로드 요청 '${u.label}' (${u.folder}) 으로 외부에서 파일 ${saved}개가 들어왔습니다.` }).catch(() => {});
+    // 링크 생성자가 소유자와 다르면(담당자가 만든 경우) 옵트인 시 추가 알림
+    if (u.notify_inapp && u.created_by && Number(u.created_by) !== Number(owner)) {
+      notify.push({ userId: u.created_by, type: 'upload_request', title: `업로드 요청에 파일 ${saved}개 도착`, body: `'${u.label}' (${u.folder}) 에 파일 ${saved}개가 업로드되었습니다.` }).catch(() => {});
+    }
   }
   if (saved === 0 && rejected.length) return res.status(422).json({ error: `업로드가 차단되었습니다: ${rejected.map((r) => r.reason).join(', ')}` });
   res.status(201).json({ uploaded: saved, rejected });

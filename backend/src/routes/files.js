@@ -280,6 +280,10 @@ router.post('/upload', authenticate, wrap(resolveOwner), upload.array('file', 30
     saved.push({ id: row.rows[0].id, name, size: f.size, folder });
   }
   await audit(req, 'upload', `owner=${req.targetOwnerId} count=${saved.length}`);
+  // 다른 사람(담당자·관리자)이 내 계정에 올리면 소유자에게 인앱 알림
+  if (saved.length && Number(req.user.id) !== Number(req.targetOwnerId)) {
+    notify.push({ userId: req.targetOwnerId, type: 'upload', title: `파일 ${saved.length}개가 업로드되었습니다`, body: `${req.user.display_name || req.user.username}님이 '${folder}' 폴더에 파일 ${saved.length}개를 올렸습니다.` }).catch(() => {});
+  }
   if (saved.length === 0 && rejected.length) return res.status(422).json({ error: `업로드가 차단되었습니다: ${rejected.map((r) => r.reason).join(', ')}`, rejected });
   res.status(201).json({ uploaded: saved, rejected });
 }));

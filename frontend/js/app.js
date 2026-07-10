@@ -41,7 +41,7 @@ const App = (() => {
   // 관리자 2FA 필수: 설정 완료 전까지 앱 진입 차단
   function force2faSetup() {
     root().innerHTML = `<div class="login-screen"><div class="login-card" style="max-width:460px">
-      <img src="assets/logo.svg?v=47" class="login-logo" alt="북적북적">
+      <img src="assets/logo.svg?v=48" class="login-logo" alt="북적북적">
       <div class="login-title">2단계 인증 설정</div>
       <p class="muted" style="text-align:center;font-size:13px;margin:6px 0 12px">관리자 계정은 보안을 위해 <b>2단계 인증이 필수</b>입니다.<br>설정을 완료해야 계속할 수 있습니다.</p>
       <div id="tf-host"></div>
@@ -55,7 +55,7 @@ const App = (() => {
     root().innerHTML = `
       <div class="login-screen">
         <form class="login-card" id="login-form">
-          <img src="assets/logo.svg?v=47" class="login-logo" alt="북적북적">
+          <img src="assets/logo.svg?v=48" class="login-logo" alt="북적북적">
           <div class="login-title">북적북적</div>
           <div class="login-sub">Book-Jeok · 우리끼리 나누는 파일 창고</div>
           <div class="field"><label>아이디</label><input class="input" name="username" autocomplete="username" placeholder="아이디" required></div>
@@ -88,7 +88,7 @@ const App = (() => {
       <div class="layout">
         <header class="appbar">
           <button class="icon-btn appbar-menu" id="menu-toggle" title="폴더">☰</button>
-          <div class="brand" id="brand-home" title="홈으로"><img src="assets/logo.svg?v=47"><span class="brand-name">북적북적</span></div>
+          <div class="brand" id="brand-home" title="홈으로"><img src="assets/logo.svg?v=48"><span class="brand-name">북적북적</span></div>
           ${isPriv() ? `<select class="input account-switcher" id="account-switcher"><option value="">내 파일</option></select>` : ''}
           <div class="topbar-spacer"></div>
           <nav class="appbar-nav">
@@ -186,10 +186,9 @@ const App = (() => {
 
   async function loadAll() { await Promise.all([loadTree(), loadFiles()]); }
   async function loadTree() { try { const t = await API.tree(state.ownerId); state.treeFolders = t.folders; state.treeStyles = t.styles || {}; renderTree(); } catch {} }
-  async function loadFiles() {
-    state.search.on = false; // 폴더 이동 시 검색 모드 해제
+  async function loadFiles(silent) {
+    if (!silent) { state.search.on = false; const view = document.getElementById('view'); view.innerHTML = '<div class="empty"><div class="big">⏳</div>불러오는 중…</div>'; }
     const view = document.getElementById('view');
-    view.innerHTML = '<div class="empty"><div class="big">⏳</div>불러오는 중…</div>';
     try {
       const [list, usage] = await Promise.all([API.listFiles(state.folder, state.ownerId), API.usage(state.ownerId)]);
       // 방어적 정규화 (구버전 백엔드가 문자열 배열을 줘도 안전)
@@ -1150,22 +1149,39 @@ const App = (() => {
   }
 
   // ── 인앱 알림 ──────────
-  let notifTimer = null;
+  let notifTimer = null, refreshTimer = null, lastUnread = -1, visHooked = false;
   async function refreshNotifBadge() {
     try {
       const d = await API.notifications(1);
       const badge = document.getElementById('notif-badge'); if (!badge) return;
       if (d.unread > 0) { badge.textContent = d.unread > 99 ? '99+' : d.unread; badge.classList.remove('hidden'); }
       else badge.classList.add('hidden');
+      // 새 알림이 늘었으면 토스트 + 현재 목록 자동 새로고침(최초 로드 때는 제외)
+      if (lastUnread >= 0 && d.unread > lastUnread) { UI.toast(`🔔 새 알림 ${d.unread - lastUnread}건`, 'info'); maybeAutoRefresh(); }
+      lastUnread = d.unread;
     } catch {}
   }
-  function startNotifPolling() { if (notifTimer) clearInterval(notifTimer); notifTimer = setInterval(refreshNotifBadge, 60000); }
+  // 안전할 때만 조용히 현재 폴더를 다시 불러온다(선택/검색/모달/숨김 탭이면 건너뜀).
+  function maybeAutoRefresh() {
+    if (document.visibilityState !== 'visible') return;
+    if (!state.user || state.search.on) return;
+    if (state.selected.size > 0) return;
+    if (document.querySelector('.modal-backdrop')) return;
+    loadTree(); loadFiles(true);
+  }
+  function startNotifPolling() {
+    if (notifTimer) clearInterval(notifTimer);
+    if (refreshTimer) clearInterval(refreshTimer);
+    notifTimer = setInterval(refreshNotifBadge, 30000);      // 알림 30초 폴링
+    refreshTimer = setInterval(maybeAutoRefresh, 45000);     // 목록 45초 자동 새로고침
+    if (!visHooked) { visHooked = true; document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { refreshNotifBadge(); maybeAutoRefresh(); } }); }
+  }
   function notifModal() {
     const m = UI.modal(`<h3>🔔 알림</h3><div id="nf-body"><p class="muted">불러오는 중…</p></div><div class="modal-actions"><button class="btn btn-ghost" id="nf-read">모두 읽음</button><button class="btn btn-primary" id="nf-close">닫기</button></div>`);
     m.el.querySelector('.modal').classList.add('modal-wide');
     m.q('#nf-close').addEventListener('click', m.close);
     const when = (iso) => { const s = Math.floor((Date.now() - new Date(iso).getTime()) / 1000); if (s < 60) return '방금'; if (s < 3600) return Math.floor(s / 60) + '분 전'; if (s < 86400) return Math.floor(s / 3600) + '시간 전'; return UI.date(iso); };
-    const ico = { upload_request: '📥', share_download: '⬇️', folder_share_download: '📁' };
+    const ico = { upload: '📤', upload_request: '📥', share_download: '⬇️', folder_share_download: '📁' };
     async function load() {
       try {
         const d = await API.notifications(30);
