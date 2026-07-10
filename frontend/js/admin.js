@@ -21,7 +21,7 @@ const Admin = (() => {
     root().innerHTML = `
       <div class="layout">
         <header class="appbar">
-          <a class="brand" href="index.html" title="홈으로"><img src="assets/logo.svg?v=31"><span class="brand-name">북적북적</span></a>
+          <a class="brand" href="index.html" title="홈으로"><img src="assets/logo.svg?v=32"><span class="brand-name">북적북적</span></a>
           <nav class="appbar-nav">
             ${item('dashboard', '🏠', '대시보드')}
             ${item('users', '👥', '계정')}
@@ -93,7 +93,7 @@ const Admin = (() => {
           <div class="stat"><div class="k">전체 파일</div><div class="v num">${d.fileCount.toLocaleString()}</div></div>
           <div class="stat"><div class="k">사용 중</div><div class="v num">${UI.bytes(s.diskUsed)}</div><div class="k">디스크 ${UI.bytes(s.diskTotal)} · ${s.usedPct}%</div></div>
           <div class="stat"><div class="k">할당 / 남음</div><div class="v num">${UI.bytes(s.allocated)}</div><div class="k">남음 ${UI.bytes(s.available)}</div></div>
-          <div class="stat"><div class="k">파일형식 검증</div><div class="v num" style="font-size:20px">🛡️ 켜짐</div><div class="k">실행파일 위장 차단</div></div>
+          <div class="stat"><div class="k">파일 보안 검사</div><div class="v num" style="font-size:16px">🛡️ 형식검증 ON</div><div class="k">악성패턴(YARA): ${d.yara ? '켜짐' : '꺼짐'}</div></div>
         </div>
         <div class="dash-card">
           <div class="dash-h">최근 14일 추이 <span class="muted" style="font-size:12px;font-weight:400">· <span class="dash-leg up"></span> 업로드 <span class="dash-leg lg"></span> 로그인</span></div>

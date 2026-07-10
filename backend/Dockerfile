@@ -2,11 +2,15 @@ FROM node:20-alpine
 
 WORKDIR /app
 
+# YARA(로컬 악성 패턴 검사) — Alpine community 저장소, 외부 통신 없음
+RUN apk add --no-cache yara
+
 # 의존성 먼저 설치 (레이어 캐시)
 COPY package.json ./
 RUN npm install --omit=dev
 
 COPY src ./src
+COPY yara-rules ./yara-rules
 
 # 프런트엔드는 compose 에서 볼륨 마운트하거나 별도 배포
 ENV NODE_ENV=production

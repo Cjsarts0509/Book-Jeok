@@ -337,6 +337,7 @@ router.get('/dashboard', wrap(async (req, res) => {
     daily: days,
     topAccounts: topR.rows.map((r) => ({ username: r.username, displayName: r.display_name, fileCount: r.c, usedBytes: Number(r.b) })),
     recent: recentR.rows.map((r) => ({ action: r.action, detail: r.detail, username: r.username, createdAt: r.created_at })),
+    yara: require('../yara').enabled(),
   });
 }));
 

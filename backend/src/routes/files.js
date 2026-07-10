@@ -12,6 +12,7 @@ const { authenticate } = require('../middleware/auth');
 const { audit, wrap, canAccessOwner } = require('../util');
 const { generateToken, hashPassword } = require('../crypto');
 const filetype = require('../filetype');
+const yara = require('../yara');
 const { isAllowed, allowedLabel, getAllowedExtensions } = require('../settings');
 
 const router = express.Router();
@@ -258,6 +259,9 @@ router.post('/upload', authenticate, wrap(resolveOwner), upload.array('file', 30
     // 매직바이트 검증: 실행파일 위장·확장자-내용 불일치 차단 (데몬 불필요)
     const ft = await filetype.verify(f.path, originalName);
     if (!ft.ok) { await fsp.unlink(f.path).catch(() => {}); rejected.push({ name: originalName, reason: ft.reason }); await audit(req, 'file_blocked', `${originalName} (${ft.reason})`); continue; }
+    // YARA 악성 패턴 검사(로컬, 오프라인). 매칭되면 저장하지 않고 삭제.
+    const mal = await yara.scanFile(f.path);
+    if (!mal.ok) { await fsp.unlink(f.path).catch(() => {}); rejected.push({ name: originalName, reason: `악성 패턴 감지(${mal.rule})` }); await audit(req, 'malware_blocked', `${originalName} (${mal.rule})`); continue; }
     const name = await uniqueFileName(req.targetOwnerId, folder, originalName);
     const row = await query(
       `INSERT INTO files (owner_id, folder, original_name, stored_name, size_bytes, mime_type)
