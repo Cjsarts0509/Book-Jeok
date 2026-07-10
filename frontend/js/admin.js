@@ -22,7 +22,7 @@ const Admin = (() => {
     root().innerHTML = `
       <div class="layout">
         <header class="appbar">
-          <a class="brand" href="index.html" title="홈으로"><img src="assets/logo.svg?v=45"><span class="brand-name">북적북적</span></a>
+          <a class="brand" href="index.html" title="홈으로"><img src="assets/logo.svg?v=46"><span class="brand-name">북적북적</span></a>
           <nav class="appbar-nav">
             ${item('dashboard', '🏠', '대시보드')}
             ${item('users', '👥', '계정')}
@@ -646,18 +646,18 @@ const Admin = (() => {
       const exp = (r) => (r.expiresAt ? UI.date(r.expiresAt) + '까지' : '무기한');
       const fileRows = d.fileShares.map((r) => {
         const meta = [r.hasPassword ? '🔒' : '', r.maxDownloads != null ? `${r.downloadCount}/${r.maxDownloads}회` : `${r.downloadCount}회`, exp(r)].filter(Boolean).join(' · ');
-        return `<tr><td>${kindIco[r.kind] || '📄'} <b>${UI.escapeHtml(r.name || '(삭제된 대상)')}</b></td><td>${owner(r)}</td><td class="muted" style="font-size:12px">${meta}</td>
+        return `<tr><td>${kindIco[r.kind] || '📄'} <b>${UI.escapeHtml(r.name || '(삭제된 대상)')}</b></td><td>${owner(r)}</td><td class="muted" style="font-size:12px">${meta}${r.reason ? `<br>💬 ${UI.escapeHtml(r.reason)}` : ''}</td>
           <td style="text-align:right"><button class="btn btn-sm btn-ghost" data-copy="${UI.escapeHtml(location.origin + '/share.html?t=' + r.token)}">📋</button><button class="btn btn-sm btn-danger" data-del="file:${r.id}">폐기</button></td></tr>`;
       }).join('') || '<tr><td colspan="4" class="muted">파일/압축 공유 없음</td></tr>';
       const folderRows = d.folderShares.map((r) => {
         const meta = [r.hasPassword ? '🔒' : '', r.disabled ? '중지' : '', exp(r), '조회 ' + r.viewCount].filter(Boolean).join(' · ');
-        return `<tr><td>📁 <b>${UI.escapeHtml(r.label)}</b> <span class="muted" style="font-size:11px">${UI.escapeHtml(r.folder)}</span></td><td>${owner(r)}</td><td class="muted" style="font-size:12px">${meta}</td>
+        return `<tr><td>📁 <b>${UI.escapeHtml(r.label)}</b> <span class="muted" style="font-size:11px">${UI.escapeHtml(r.folder)}</span></td><td>${owner(r)}</td><td class="muted" style="font-size:12px">${meta}${r.reason ? `<br>💬 ${UI.escapeHtml(r.reason)}` : ''}</td>
           <td style="text-align:right"><button class="btn btn-sm btn-ghost" data-copy="${UI.escapeHtml(location.origin + '/folder.html?t=' + r.token)}">📋</button><button class="btn btn-sm btn-danger" data-del="folder:${r.id}">폐기</button></td></tr>`;
       }).join('') || '<tr><td colspan="4" class="muted">폴더 공유 없음</td></tr>';
       const reqRows = d.uploadRequests.map((r) => {
         const cap = [r.maxFiles ? `${r.uploadedCount}/${r.maxFiles}개` : `${r.uploadedCount}개`, r.maxBytes ? `${UI.bytes(r.uploadedBytes)}/${UI.bytes(r.maxBytes)}` : UI.bytes(r.uploadedBytes)].join(' · ');
         const meta = [r.hasPassword ? '🔒' : '', r.disabled ? '중지' : '', exp(r), '받음 ' + cap].filter(Boolean).join(' · ');
-        return `<tr><td>📥 <b>${UI.escapeHtml(r.label)}</b> <span class="muted" style="font-size:11px">${UI.escapeHtml(r.folder)}</span></td><td>${owner(r)}</td><td class="muted" style="font-size:12px">${meta}</td>
+        return `<tr><td>📥 <b>${UI.escapeHtml(r.label)}</b> <span class="muted" style="font-size:11px">${UI.escapeHtml(r.folder)}</span></td><td>${owner(r)}</td><td class="muted" style="font-size:12px">${meta}${r.reason ? `<br>💬 ${UI.escapeHtml(r.reason)}` : ''}</td>
           <td style="text-align:right"><button class="btn btn-sm btn-ghost" data-copy="${UI.escapeHtml(location.origin + '/upload.html?t=' + r.token)}">📋</button><button class="btn btn-sm btn-danger" data-del="upload:${r.id}">폐기</button></td></tr>`;
       }).join('') || '<tr><td colspan="4" class="muted">업로드 요청 없음</td></tr>';
       const sec = (title, count, rows) => `<div class="dash-h" style="margin-top:16px">${title} <span class="muted" style="font-weight:400;font-size:12px">${count}건</span></div>

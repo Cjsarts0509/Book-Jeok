@@ -435,7 +435,7 @@ router.delete('/notices/:id', wrap(async (req, res) => {
 // ══════════ 공유 통합 관리 (전 계정) ══════════
 router.get('/shares', wrap(async (req, res) => {
   const [fileR, folderR, reqR] = await Promise.all([
-    query(`SELECT s.id, s.token, s.expires_at, s.download_count, s.max_downloads, s.created_at,
+    query(`SELECT s.id, s.token, s.expires_at, s.download_count, s.max_downloads, s.created_at, s.reason,
              (s.password_hash IS NOT NULL) AS has_pw,
              CASE WHEN s.file_id IS NOT NULL THEN 'file' ELSE 'zip' END AS kind,
              COALESCE(f.original_name, b.display_name) AS name,
@@ -449,18 +449,18 @@ router.get('/shares', wrap(async (req, res) => {
            LEFT JOIN users bo ON bo.id=b.owner_id
            LEFT JOIN users cu ON cu.id=s.created_by
            ORDER BY s.created_at DESC`),
-    query(`SELECT fs.id, fs.token, fs.label, fs.folder, fs.expires_at, fs.view_count, fs.disabled, fs.created_at,
+    query(`SELECT fs.id, fs.token, fs.label, fs.folder, fs.expires_at, fs.view_count, fs.disabled, fs.created_at, fs.reason,
              (fs.password_hash IS NOT NULL) AS has_pw, u.username AS owner_username, u.display_name AS owner_name
            FROM folder_shares fs JOIN users u ON u.id=fs.owner_id ORDER BY fs.created_at DESC`),
-    query(`SELECT ur.id, ur.token, ur.label, ur.folder, ur.expires_at, ur.disabled, ur.uploaded_count, ur.uploaded_bytes, ur.max_files, ur.max_bytes, ur.created_at,
+    query(`SELECT ur.id, ur.token, ur.label, ur.folder, ur.expires_at, ur.disabled, ur.uploaded_count, ur.uploaded_bytes, ur.max_files, ur.max_bytes, ur.created_at, ur.reason,
              (ur.password_hash IS NOT NULL) AS has_pw, u.username AS owner_username, u.display_name AS owner_name
            FROM upload_requests ur JOIN users u ON u.id=ur.owner_id ORDER BY ur.created_at DESC`),
   ]);
   const num = (v) => (v == null ? null : Number(v));
   res.json({
-    fileShares: fileR.rows.map((r) => ({ id: r.id, token: r.token, kind: r.kind, name: r.name, ownerUsername: r.owner_username, ownerName: r.owner_name, creator: r.creator, hasPassword: r.has_pw, downloadCount: r.download_count, maxDownloads: r.max_downloads, expiresAt: r.expires_at, createdAt: r.created_at })),
-    folderShares: folderR.rows.map((r) => ({ id: r.id, token: r.token, label: r.label, folder: r.folder, ownerUsername: r.owner_username, ownerName: r.owner_name, hasPassword: r.has_pw, disabled: r.disabled, viewCount: r.view_count, expiresAt: r.expires_at, createdAt: r.created_at })),
-    uploadRequests: reqR.rows.map((r) => ({ id: r.id, token: r.token, label: r.label, folder: r.folder, ownerUsername: r.owner_username, ownerName: r.owner_name, hasPassword: r.has_pw, disabled: r.disabled, uploadedCount: r.uploaded_count, uploadedBytes: num(r.uploaded_bytes), maxFiles: r.max_files, maxBytes: num(r.max_bytes), expiresAt: r.expires_at, createdAt: r.created_at })),
+    fileShares: fileR.rows.map((r) => ({ id: r.id, token: r.token, kind: r.kind, name: r.name, ownerUsername: r.owner_username, ownerName: r.owner_name, creator: r.creator, hasPassword: r.has_pw, downloadCount: r.download_count, maxDownloads: r.max_downloads, expiresAt: r.expires_at, createdAt: r.created_at, reason: r.reason })),
+    folderShares: folderR.rows.map((r) => ({ id: r.id, token: r.token, label: r.label, folder: r.folder, ownerUsername: r.owner_username, ownerName: r.owner_name, hasPassword: r.has_pw, disabled: r.disabled, viewCount: r.view_count, expiresAt: r.expires_at, createdAt: r.created_at, reason: r.reason })),
+    uploadRequests: reqR.rows.map((r) => ({ id: r.id, token: r.token, label: r.label, folder: r.folder, ownerUsername: r.owner_username, ownerName: r.owner_name, hasPassword: r.has_pw, disabled: r.disabled, uploadedCount: r.uploaded_count, uploadedBytes: num(r.uploaded_bytes), maxFiles: r.max_files, maxBytes: num(r.max_bytes), expiresAt: r.expires_at, createdAt: r.created_at, reason: r.reason })),
   });
 }));
 const shareTables = { file: 'share_links', folder: 'folder_shares', upload: 'upload_requests' };

@@ -191,6 +191,11 @@ CREATE TABLE IF NOT EXISTS notifications (
 );
 CREATE INDEX IF NOT EXISTS idx_notif_user ON notifications(user_id, is_read, created_at DESC);
 
+-- 공유 생성 사유(선택 메모)
+ALTER TABLE share_links     ADD COLUMN IF NOT EXISTS reason TEXT NOT NULL DEFAULT '';
+ALTER TABLE folder_shares   ADD COLUMN IF NOT EXISTS reason TEXT NOT NULL DEFAULT '';
+ALTER TABLE upload_requests ADD COLUMN IF NOT EXISTS reason TEXT NOT NULL DEFAULT '';
+
 -- 공유별 알림 옵트인 (인앱 / 이메일)
 ALTER TABLE share_links     ADD COLUMN IF NOT EXISTS notify_inapp BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE share_links     ADD COLUMN IF NOT EXISTS notify_email BOOLEAN NOT NULL DEFAULT FALSE;

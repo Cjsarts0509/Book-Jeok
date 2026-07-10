@@ -491,9 +491,9 @@ router.post('/bundle/:id(\\d+)/share', authenticate, wrap(async (req, res) => {
   const b = await loadBundleForUser(req.user, req.params.id);
   if (!b) return res.status(404).json({ error: '압축 파일을 찾을 수 없습니다.' });
   if (b === 'forbidden') return res.status(403).json({ error: '권한이 없습니다.' });
-  const { passwordHash, maxDownloads, expiresAt, notifyInapp, notifyEmail } = await shareOptions(req);
+  const { passwordHash, maxDownloads, expiresAt, notifyInapp, notifyEmail, reason } = await shareOptions(req);
   const token = generateToken(24);
-  await query('INSERT INTO share_links (bundle_id, token, created_by, expires_at, password_hash, max_downloads, notify_inapp, notify_email) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)', [b.id, token, req.user.id, expiresAt, passwordHash, maxDownloads, notifyInapp, notifyEmail]);
+  await query('INSERT INTO share_links (bundle_id, token, created_by, expires_at, password_hash, max_downloads, notify_inapp, notify_email, reason) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)', [b.id, token, req.user.id, expiresAt, passwordHash, maxDownloads, notifyInapp, notifyEmail, reason]);
   await audit(req, 'create_share', `bundle=${b.id}`);
   res.status(201).json({ token, url: `${shareWebBase(req)}/share.html?t=${token}`, fileName: b.display_name, expiresAt });
 }));
@@ -592,15 +592,15 @@ async function shareOptions(req) {
   const maxDownloads = (Number.isFinite(mx) && mx > 0) ? mx : null;
   const days = parseInt(req.body.expiresInDays || '0', 10);
   const expiresAt = days > 0 ? new Date(Date.now() + days * 86400000) : null;
-  return { passwordHash, maxDownloads, expiresAt, notifyInapp: !!req.body.notifyInapp, notifyEmail: !!req.body.notifyEmail };
+  return { passwordHash, maxDownloads, expiresAt, notifyInapp: !!req.body.notifyInapp, notifyEmail: !!req.body.notifyEmail, reason: String(req.body.reason || '').slice(0, 300).trim() };
 }
 router.post('/:id(\\d+)/share', authenticate, wrap(async (req, res) => {
   const r = await query('SELECT owner_id, original_name FROM files WHERE id=$1 AND deleted_at IS NULL', [req.params.id]);
   if (r.rowCount === 0) return res.status(404).json({ error: '파일을 찾을 수 없습니다.' });
   if (!(await canAccessOwner(req.user, r.rows[0].owner_id))) return res.status(403).json({ error: '권한이 없습니다.' });
-  const { passwordHash, maxDownloads, expiresAt, notifyInapp, notifyEmail } = await shareOptions(req);
+  const { passwordHash, maxDownloads, expiresAt, notifyInapp, notifyEmail, reason } = await shareOptions(req);
   const token = generateToken(24);
-  await query('INSERT INTO share_links (file_id, token, created_by, expires_at, password_hash, max_downloads, notify_inapp, notify_email) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)', [req.params.id, token, req.user.id, expiresAt, passwordHash, maxDownloads, notifyInapp, notifyEmail]);
+  await query('INSERT INTO share_links (file_id, token, created_by, expires_at, password_hash, max_downloads, notify_inapp, notify_email, reason) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)', [req.params.id, token, req.user.id, expiresAt, passwordHash, maxDownloads, notifyInapp, notifyEmail, reason]);
   await audit(req, 'create_share', `file=${req.params.id}`);
   res.status(201).json({ token, url: `${shareWebBase(req)}/share.html?t=${token}`, fileName: r.rows[0].original_name, expiresAt });
 }));
@@ -628,13 +628,13 @@ router.post('/upload-requests', authenticate, wrap(resolveOwner), wrap(async (re
   const mf = parseInt(req.body.maxFiles, 10); const maxFiles = (Number.isFinite(mf) && mf > 0) ? mf : null;
   const mgb = parseFloat(req.body.maxGb); const maxBytes = (Number.isFinite(mgb) && mgb > 0) ? Math.round(mgb * 1073741824) : null;
   const token = generateToken(24);
-  const r = await query('INSERT INTO upload_requests (owner_id, folder, token, label, password_hash, max_files, max_bytes, expires_at, created_by, notify_inapp, notify_email) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id', [owner, folder, token, label, passwordHash, maxFiles, maxBytes, expiresAt, req.user.id, !!req.body.notifyInapp, !!req.body.notifyEmail]);
+  const r = await query('INSERT INTO upload_requests (owner_id, folder, token, label, password_hash, max_files, max_bytes, expires_at, created_by, notify_inapp, notify_email, reason) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id', [owner, folder, token, label, passwordHash, maxFiles, maxBytes, expiresAt, req.user.id, !!req.body.notifyInapp, !!req.body.notifyEmail, String(req.body.reason || '').slice(0, 300).trim()]);
   await audit(req, 'create_upload_request', `owner=${owner} ${folder}`);
   res.status(201).json({ id: r.rows[0].id, token, url: `${shareWebBase(req)}/upload.html?t=${token}`, label });
 }));
 router.get('/upload-requests', authenticate, wrap(resolveOwner), wrap(async (req, res) => {
-  const r = await query('SELECT id, folder, token, label, password_hash IS NOT NULL AS has_password, max_files, max_bytes, uploaded_count, uploaded_bytes, disabled, expires_at, created_at FROM upload_requests WHERE owner_id=$1 ORDER BY created_at DESC', [req.targetOwnerId]);
-  res.json({ requests: r.rows.map((x) => ({ id: x.id, folder: x.folder, label: x.label, token: x.token, hasPassword: x.has_password, maxFiles: x.max_files, maxBytes: x.max_bytes != null ? Number(x.max_bytes) : null, uploadedCount: x.uploaded_count, uploadedBytes: Number(x.uploaded_bytes), disabled: x.disabled, expiresAt: x.expires_at, createdAt: x.created_at })) });
+  const r = await query('SELECT id, folder, token, label, password_hash IS NOT NULL AS has_password, max_files, max_bytes, uploaded_count, uploaded_bytes, disabled, expires_at, created_at, reason FROM upload_requests WHERE owner_id=$1 ORDER BY created_at DESC', [req.targetOwnerId]);
+  res.json({ requests: r.rows.map((x) => ({ id: x.id, folder: x.folder, label: x.label, token: x.token, hasPassword: x.has_password, maxFiles: x.max_files, maxBytes: x.max_bytes != null ? Number(x.max_bytes) : null, uploadedCount: x.uploaded_count, uploadedBytes: Number(x.uploaded_bytes), disabled: x.disabled, expiresAt: x.expires_at, createdAt: x.created_at, reason: x.reason })) });
 }));
 router.delete('/upload-requests/:id(\\d+)', authenticate, wrap(resolveOwner), wrap(async (req, res) => {
   const r = await query('DELETE FROM upload_requests WHERE id=$1 AND owner_id=$2 RETURNING id', [req.params.id, req.targetOwnerId]);
@@ -646,11 +646,11 @@ router.delete('/upload-requests/:id(\\d+)', authenticate, wrap(resolveOwner), wr
 // ── 공유 링크 관리 (내가 만든 파일/압축 공유) ──────────
 router.get('/shares', authenticate, wrap(async (req, res) => {
   const r = await query(
-    `SELECT s.id, s.token, s.expires_at, s.password_hash IS NOT NULL AS has_pw, s.max_downloads, s.download_count, s.created_at,
+    `SELECT s.id, s.token, s.expires_at, s.password_hash IS NOT NULL AS has_pw, s.max_downloads, s.download_count, s.created_at, s.reason,
             f.original_name AS file_name, b.display_name AS bundle_name
      FROM share_links s LEFT JOIN files f ON f.id=s.file_id LEFT JOIN zip_bundles b ON b.id=s.bundle_id
      WHERE s.created_by=$1 ORDER BY s.created_at DESC`, [req.user.id]);
-  res.json({ shares: r.rows.map((x) => ({ id: x.id, token: x.token, kind: x.bundle_name ? 'zip' : 'file', name: x.file_name || x.bundle_name || '(원본 삭제됨)', hasPassword: x.has_pw, maxDownloads: x.max_downloads, downloadCount: x.download_count, expiresAt: x.expires_at, createdAt: x.created_at })) });
+  res.json({ shares: r.rows.map((x) => ({ id: x.id, token: x.token, kind: x.bundle_name ? 'zip' : 'file', name: x.file_name || x.bundle_name || '(원본 삭제됨)', hasPassword: x.has_pw, maxDownloads: x.max_downloads, downloadCount: x.download_count, expiresAt: x.expires_at, createdAt: x.created_at, reason: x.reason })) });
 }));
 router.delete('/shares/:id(\\d+)', authenticate, wrap(async (req, res) => {
   const r = await query('DELETE FROM share_links WHERE id=$1 AND created_by=$2 RETURNING id', [req.params.id, req.user.id]);
@@ -667,13 +667,13 @@ router.post('/folder-shares', authenticate, wrap(resolveOwner), wrap(async (req,
   const password = String(req.body.password || '').trim(); const passwordHash = password ? await hashPassword(password) : null;
   const days = parseInt(req.body.expiresInDays || '0', 10); const expiresAt = days > 0 ? new Date(Date.now() + days * 86400000) : null;
   const token = generateToken(24);
-  const r = await query('INSERT INTO folder_shares (owner_id, folder, token, label, password_hash, expires_at, created_by, notify_inapp, notify_email) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id', [owner, folder, token, label, passwordHash, expiresAt, req.user.id, !!req.body.notifyInapp, !!req.body.notifyEmail]);
+  const r = await query('INSERT INTO folder_shares (owner_id, folder, token, label, password_hash, expires_at, created_by, notify_inapp, notify_email, reason) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id', [owner, folder, token, label, passwordHash, expiresAt, req.user.id, !!req.body.notifyInapp, !!req.body.notifyEmail, String(req.body.reason || '').slice(0, 300).trim()]);
   await audit(req, 'create_folder_share', `owner=${owner} ${folder}`);
   res.status(201).json({ id: r.rows[0].id, token, url: `${shareWebBase(req)}/folder.html?t=${token}`, label });
 }));
 router.get('/folder-shares', authenticate, wrap(resolveOwner), wrap(async (req, res) => {
-  const r = await query('SELECT id, folder, token, label, password_hash IS NOT NULL AS has_pw, disabled, expires_at, view_count, created_at FROM folder_shares WHERE owner_id=$1 ORDER BY created_at DESC', [req.targetOwnerId]);
-  res.json({ shares: r.rows.map((x) => ({ id: x.id, folder: x.folder, label: x.label, token: x.token, hasPassword: x.has_pw, disabled: x.disabled, expiresAt: x.expires_at, viewCount: x.view_count, createdAt: x.created_at })) });
+  const r = await query('SELECT id, folder, token, label, password_hash IS NOT NULL AS has_pw, disabled, expires_at, view_count, created_at, reason FROM folder_shares WHERE owner_id=$1 ORDER BY created_at DESC', [req.targetOwnerId]);
+  res.json({ shares: r.rows.map((x) => ({ id: x.id, folder: x.folder, label: x.label, token: x.token, hasPassword: x.has_pw, disabled: x.disabled, expiresAt: x.expires_at, viewCount: x.view_count, createdAt: x.created_at, reason: x.reason })) });
 }));
 router.delete('/folder-shares/:id(\\d+)', authenticate, wrap(resolveOwner), wrap(async (req, res) => {
   const r = await query('DELETE FROM folder_shares WHERE id=$1 AND owner_id=$2 RETURNING id', [req.params.id, req.targetOwnerId]);
