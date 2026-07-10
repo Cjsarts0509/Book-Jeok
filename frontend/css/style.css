@@ -269,6 +269,20 @@ textarea.input { resize: vertical; }
 .tm-bar { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 4px 0 10px; flex-wrap: wrap; }
 .tm-link { color: var(--secondary); text-decoration: none; font-weight: 600; }
 .tm-link:hover { text-decoration: underline; }
+/* 영업점 그리드 (5열) */
+.branch-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; }
+.branch-card { display: flex; align-items: center; gap: 6px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; }
+.branch-card .bc-name { flex: 1; min-width: 0; font-weight: 600; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.branch-card .bc-actions { display: flex; gap: 2px; flex: none; }
+@media (max-width: 1100px) { .branch-grid { grid-template-columns: repeat(4, 1fr); } }
+@media (max-width: 860px) { .branch-grid { grid-template-columns: repeat(3, 1fr); } }
+@media (max-width: 600px) { .branch-grid { grid-template-columns: repeat(2, 1fr); } }
+
+/* 휴지통 일괄 작업 바 */
+.trash-bulk { display: none; align-items: center; gap: 8px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 8px 12px; margin-bottom: 10px; }
+.trash-bulk.active { display: flex; }
+.trash-bulk #tb-count { font-weight: 600; font-size: 13px; }
+
 /* 알림 벨 · 목록 */
 .nav-bell { position: relative; }
 .notif-badge { position: absolute; top: 2px; right: 4px; min-width: 16px; height: 16px; padding: 0 4px; background: var(--danger); color: #fff; font-size: 10px; font-weight: 700; line-height: 16px; text-align: center; border-radius: 8px; box-shadow: 0 0 0 2px var(--surface); }

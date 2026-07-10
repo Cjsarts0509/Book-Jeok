@@ -22,7 +22,7 @@ const Admin = (() => {
     root().innerHTML = `
       <div class="layout">
         <header class="appbar">
-          <a class="brand" href="index.html" title="홈으로"><img src="assets/logo.svg?v=41"><span class="brand-name">북적북적</span></a>
+          <a class="brand" href="index.html" title="홈으로"><img src="assets/logo.svg?v=42"><span class="brand-name">북적북적</span></a>
           <nav class="appbar-nav">
             ${item('dashboard', '🏠', '대시보드')}
             ${item('users', '👥', '계정')}
@@ -290,8 +290,9 @@ const Admin = (() => {
     view.innerHTML = '<div class="empty"><div class="big">⏳</div>불러오는 중…</div>';
     try {
       const t = await API.trash();
+      const ck = (type, id) => `<td style="width:34px"><input type="checkbox" class="tck" data-type="${type}" data-id="${id}"></td>`;
       const folderRows = t.folders.map((f) => `
-        <tr class="fade-in">
+        <tr class="fade-in">${ck('folder', f.id)}
           <td>📁 <b>${UI.escapeHtml(f.path)}</b><br><span class="muted" style="font-size:12px">폴더 · 파일 ${f.fileCount}개</span></td>
           <td>${UI.escapeHtml(f.displayName || f.username || '—')}</td>
           <td class="num muted">${new Date(f.deletedAt).toLocaleString('ko-KR')}</td>
@@ -300,7 +301,7 @@ const Admin = (() => {
             <button class="btn btn-sm btn-danger" data-pf="${f.id}">🗑️ 영구삭제</button>
           </td></tr>`).join('');
       const fileRows = t.files.map((f) => `
-        <tr class="fade-in">
+        <tr class="fade-in">${ck('file', f.id)}
           <td>${UI.fileIcon(f.name)} <b>${UI.escapeHtml(f.name)}</b><br><span class="muted" style="font-size:12px">${UI.escapeHtml(f.folder)} · ${UI.bytes(f.size)}</span></td>
           <td>${UI.escapeHtml(f.displayName || f.username || '—')}</td>
           <td class="num muted">${new Date(f.deletedAt).toLocaleString('ko-KR')}</td>
@@ -310,15 +311,56 @@ const Admin = (() => {
           </td></tr>`).join('');
       const empty = t.folders.length === 0 && t.files.length === 0;
       view.innerHTML = `
-        <p class="muted" style="margin-bottom:14px">삭제된 항목은 여기에 보관되며, <b>${t.retentionDays}일(1년) 후 자동으로 영구 삭제</b>됩니다. 복원 시 원래 위치로 돌아가고, 같은 이름이 있으면 자동으로 번호가 붙습니다.</p>
+        <p class="muted" style="margin-bottom:12px">삭제된 항목은 여기에 보관되며, <b>${t.retentionDays}일(1년) 후 자동으로 영구 삭제</b>됩니다. 복원 시 원래 위치로 돌아가고, 같은 이름이 있으면 자동으로 번호가 붙습니다.</p>
         ${empty ? '<div class="empty"><div class="big">🗑️</div>휴지통이 비어 있습니다.</div>' : `
-        <div class="table-wrap fade-in"><table><thead><tr><th>항목</th><th>소유 계정</th><th>삭제 시각</th><th></th></tr></thead>
+        <div class="trash-bulk" id="trash-bulk"><span id="tb-count">0개 선택</span><div style="flex:1"></div>
+          <button class="btn btn-sm btn-secondary" id="tb-restore">↩️ 선택 복원</button>
+          <button class="btn btn-sm btn-danger" id="tb-purge">🗑️ 선택 영구삭제</button></div>
+        <div class="table-wrap fade-in"><table><thead><tr><th style="width:34px"><input type="checkbox" id="tck-all" title="전체 선택/해제"></th><th>항목</th><th>소유 계정</th><th>삭제 시각</th><th></th></tr></thead>
         <tbody>${folderRows}${fileRows}</tbody></table></div>`}`;
       view.querySelectorAll('[data-rf]').forEach((el) => el.addEventListener('click', () => restore('folder', el.dataset.rf)));
       view.querySelectorAll('[data-rfi]').forEach((el) => el.addEventListener('click', () => restore('file', el.dataset.rfi)));
       view.querySelectorAll('[data-pf]').forEach((el) => el.addEventListener('click', () => purge('folder', el.dataset.pf)));
       view.querySelectorAll('[data-pfi]').forEach((el) => el.addEventListener('click', () => purge('file', el.dataset.pfi)));
+      if (!empty) wireTrashBulk(view);
     } catch (err) { view.innerHTML = `<div class="empty">⚠️ ${UI.escapeHtml(err.message)}</div>`; }
+  }
+
+  function wireTrashBulk(view) {
+    const boxes = [...view.querySelectorAll('.tck')];
+    const all = view.querySelector('#tck-all');
+    const bar = view.querySelector('#trash-bulk');
+    const count = view.querySelector('#tb-count');
+    const sync = () => {
+      const sel = boxes.filter((b) => b.checked);
+      count.textContent = `${sel.length}개 선택`;
+      bar.classList.toggle('active', sel.length > 0);
+      all.checked = sel.length > 0 && sel.length === boxes.length;
+      all.indeterminate = sel.length > 0 && sel.length < boxes.length;
+    };
+    boxes.forEach((b) => b.addEventListener('change', sync));
+    all.addEventListener('change', () => { boxes.forEach((b) => { b.checked = all.checked; }); sync(); });
+    view.querySelector('#tb-restore').addEventListener('click', () => bulkTrash('restore', boxes));
+    view.querySelector('#tb-purge').addEventListener('click', () => bulkTrash('purge', boxes));
+    sync();
+  }
+  async function bulkTrash(kind, boxes) {
+    const items = boxes.filter((b) => b.checked).map((b) => ({ type: b.dataset.type, id: b.dataset.id }));
+    if (!items.length) return UI.toast('선택된 항목이 없습니다', 'error');
+    if (kind === 'purge') {
+      const ok = await UI.confirm({ title: '선택 영구 삭제', danger: true, confirmText: `${items.length}개 영구삭제`, message: `선택한 ${items.length}개 항목을 완전히 삭제합니다.\n디스크에서도 제거되며 복원할 수 없습니다.` });
+      if (!ok) return;
+    }
+    let done = 0, fail = 0;
+    for (const it of items) {
+      try {
+        if (kind === 'restore') { if (it.type === 'folder') await API.restoreFolder(it.id); else await API.restoreFile(it.id); }
+        else { if (it.type === 'folder') await API.purgeFolder(it.id); else await API.purgeFile(it.id); }
+        done++;
+      } catch { fail++; }
+    }
+    UI.toast(`${done}개 ${kind === 'restore' ? '복원' : '영구삭제'}됨${fail ? `, ${fail}개 실패` : ''}`, fail ? 'error' : 'success');
+    loadTrash();
   }
 
   async function restore(type, id) {
@@ -342,15 +384,17 @@ const Admin = (() => {
     view.innerHTML = '<div class="empty"><div class="big">⏳</div>불러오는 중…</div>';
     try {
       const { branches } = await API.adminBranches();
-      const rows = branches.map((b) => `
-        <tr class="fade-in"><td><b>${UI.escapeHtml(b.name)}</b></td>
-          <td class="row-actions" style="text-align:right">
-            <button class="btn btn-sm btn-ghost" data-eb="${b.id}" data-name="${UI.escapeHtml(b.name)}">✏️ 수정</button>
-            <button class="btn btn-sm btn-danger" data-db="${b.id}" data-name="${UI.escapeHtml(b.name)}">🗑️ 삭제</button>
-          </td></tr>`).join('');
+      const cards = branches.map((b) => `
+        <div class="branch-card fade-in">
+          <div class="bc-name" title="${UI.escapeHtml(b.name)}">${UI.escapeHtml(b.name)}</div>
+          <div class="bc-actions">
+            <button class="icon-btn" data-eb="${b.id}" data-name="${UI.escapeHtml(b.name)}" title="수정">✏️</button>
+            <button class="icon-btn" data-db="${b.id}" data-name="${UI.escapeHtml(b.name)}" title="삭제">🗑️</button>
+          </div>
+        </div>`).join('');
       view.innerHTML = `
         <div class="toolbar"><span class="muted">사용자가 '새 폴더 → 영업점 폴더'에서 선택하는 목록입니다. 총 ${branches.length}개</span><div style="flex:1"></div><button class="btn btn-primary" id="add-branch">＋ 영업점 추가</button></div>
-        <div class="table-wrap fade-in"><table><thead><tr><th>영업점</th><th></th></tr></thead><tbody>${rows || '<tr><td colspan=2 class="muted">등록된 영업점이 없습니다.</td></tr>'}</tbody></table></div>`;
+        ${branches.length ? `<div class="branch-grid fade-in">${cards}</div>` : '<div class="empty"><div class="big">🏢</div>등록된 영업점이 없습니다.</div>'}`;
       document.getElementById('add-branch').addEventListener('click', () => branchModal());
       view.querySelectorAll('[data-eb]').forEach((el) => el.addEventListener('click', () => branchModal(el.dataset.eb, el.dataset.name)));
       view.querySelectorAll('[data-db]').forEach((el) => el.addEventListener('click', async () => {
@@ -514,7 +558,8 @@ const Admin = (() => {
     view.innerHTML = '<div class="empty"><div class="big">⏳</div>확인 중…</div>';
     try {
       const s = await API.dbStatus();
-      const tables = (s.tables || []).map((t) => `<tr><td>${UI.escapeHtml(t.table)}</td><td class="num">${t.rows.toLocaleString()}</td></tr>`).join('');
+      const TKO = { users: '사용자(계정)', files: '파일', folders: '폴더', share_links: '공유 링크', folder_shares: '폴더 공유', upload_requests: '업로드 요청', zip_bundles: '압축 번들', notifications: '알림', notices: '공지사항', branches: '영업점', settings: '설정', audit_log: '감사 로그' };
+      const tables = (s.tables || []).map((t) => `<tr><td>${UI.escapeHtml(TKO[t.table] || t.table)} <span class="muted" style="font-size:11px">${UI.escapeHtml(t.table)}</span></td><td class="num">${t.rows.toLocaleString()}</td></tr>`).join('');
       view.innerHTML = `
         <div class="stat-grid">
           <div class="stat"><div class="k">연결 상태</div><div class="v"><span class="dot ok"></span>정상</div></div>
