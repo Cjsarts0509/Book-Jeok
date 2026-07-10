@@ -11,6 +11,7 @@ const config = require('../config');
 const { query } = require('../db');
 const { wrap } = require('../util');
 const { verifyPassword } = require('../crypto');
+const notify = require('../notify');
 
 const router = express.Router();
 const attemptLimiter = rateLimit({ windowMs: 10 * 60 * 1000, max: 30, skipSuccessfulRequests: true, standardHeaders: true, legacyHeaders: false, message: { error: '시도가 너무 많습니다. 잠시 후 다시 시도하세요.' } });
@@ -73,6 +74,9 @@ router.get('/:token/download', attemptLimiter, wrap(async (req, res) => {
   if (f.owner_id !== s.owner_id || !withinScope(s.folder, normFolder(f.folder))) return res.status(403).json({ error: '접근 권한이 없습니다.' });
   const disk = path.join(config.storageRoot, String(f.owner_id), f.stored_name);
   if (!fs.existsSync(disk)) return res.status(410).json({ error: '파일 실체가 없습니다.' });
+  if ((s.notify_inapp || s.notify_email) && s.created_by) {
+    notify.push({ userId: s.created_by, type: 'folder_share_download', title: '공유 폴더에서 다운로드됨', body: `'${s.label}' 폴더 공유에서 '${f.original_name}' 이(가) 다운로드되었습니다.`, inApp: s.notify_inapp, email: s.notify_email }).catch(() => {});
+  }
   res.download(disk, f.original_name);
 }));
 

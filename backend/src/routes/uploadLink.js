@@ -17,6 +17,7 @@ const { verifyPassword } = require('../crypto');
 const { isAllowed, allowedLabel, getAllowedExtensions } = require('../settings');
 const filetype = require('../filetype');
 const yara = require('../yara');
+const notify = require('../notify');
 
 const router = express.Router();
 const userDir = (ownerId) => path.join(config.storageRoot, String(ownerId));
@@ -120,6 +121,9 @@ router.post('/:token', uploadLimiter, attemptLimiter, wrap(gate), upload.array('
     saved++; savedBytes += f.size;
   }
   if (saved) await query('UPDATE upload_requests SET uploaded_count = uploaded_count + $2, uploaded_bytes = uploaded_bytes + $3 WHERE id=$1', [u.id, saved, savedBytes]);
+  if (saved && (u.notify_inapp || u.notify_email) && u.created_by) {
+    notify.push({ userId: u.created_by, type: 'upload_request', title: `업로드 요청에 파일 ${saved}개 도착`, body: `'${u.label}' (${u.folder}) 에 파일 ${saved}개가 업로드되었습니다.`, inApp: u.notify_inapp, email: u.notify_email }).catch(() => {});
+  }
   if (saved === 0 && rejected.length) return res.status(422).json({ error: `업로드가 차단되었습니다: ${rejected.map((r) => r.reason).join(', ')}` });
   res.status(201).json({ uploaded: saved, rejected });
 }));

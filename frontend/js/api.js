@@ -40,6 +40,8 @@ const API = (() => {
     me: () => req('GET', '/auth/me'),
     changePassword: (currentPassword, newPassword) => req('POST', '/auth/change-password', { currentPassword, newPassword }),
     updateSettings: (data) => req('PATCH', '/auth/settings', data),
+    notifications: (limit = 20) => req('GET', `/files/notifications?limit=${limit}`),
+    markNotificationsRead: (ids) => req('POST', '/files/notifications/read', ids ? { ids } : {}),
     // files & folders
     listFiles: (folder, ownerId) => req('GET', `/files?folder=${encodeURIComponent(folder)}${ownerId ? '&ownerId=' + ownerId : ''}`),
     tree: (ownerId) => req('GET', `/files/tree${ownerId ? '?ownerId=' + ownerId : ''}`),

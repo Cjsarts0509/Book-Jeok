@@ -13,6 +13,7 @@ const { audit, wrap, canAccessOwner } = require('../util');
 const { generateToken, hashPassword } = require('../crypto');
 const filetype = require('../filetype');
 const yara = require('../yara');
+const notify = require('../notify');
 const { isAllowed, allowedLabel, getAllowedExtensions } = require('../settings');
 
 const router = express.Router();
@@ -490,9 +491,9 @@ router.post('/bundle/:id(\\d+)/share', authenticate, wrap(async (req, res) => {
   const b = await loadBundleForUser(req.user, req.params.id);
   if (!b) return res.status(404).json({ error: '압축 파일을 찾을 수 없습니다.' });
   if (b === 'forbidden') return res.status(403).json({ error: '권한이 없습니다.' });
-  const { passwordHash, maxDownloads, expiresAt } = await shareOptions(req);
+  const { passwordHash, maxDownloads, expiresAt, notifyInapp, notifyEmail } = await shareOptions(req);
   const token = generateToken(24);
-  await query('INSERT INTO share_links (bundle_id, token, created_by, expires_at, password_hash, max_downloads) VALUES ($1,$2,$3,$4,$5,$6)', [b.id, token, req.user.id, expiresAt, passwordHash, maxDownloads]);
+  await query('INSERT INTO share_links (bundle_id, token, created_by, expires_at, password_hash, max_downloads, notify_inapp, notify_email) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)', [b.id, token, req.user.id, expiresAt, passwordHash, maxDownloads, notifyInapp, notifyEmail]);
   await audit(req, 'create_share', `bundle=${b.id}`);
   res.status(201).json({ token, url: `${shareWebBase(req)}/share.html?t=${token}`, fileName: b.display_name, expiresAt });
 }));
@@ -591,15 +592,15 @@ async function shareOptions(req) {
   const maxDownloads = (Number.isFinite(mx) && mx > 0) ? mx : null;
   const days = parseInt(req.body.expiresInDays || '0', 10);
   const expiresAt = days > 0 ? new Date(Date.now() + days * 86400000) : null;
-  return { passwordHash, maxDownloads, expiresAt };
+  return { passwordHash, maxDownloads, expiresAt, notifyInapp: !!req.body.notifyInapp, notifyEmail: !!req.body.notifyEmail };
 }
 router.post('/:id(\\d+)/share', authenticate, wrap(async (req, res) => {
   const r = await query('SELECT owner_id, original_name FROM files WHERE id=$1 AND deleted_at IS NULL', [req.params.id]);
   if (r.rowCount === 0) return res.status(404).json({ error: '파일을 찾을 수 없습니다.' });
   if (!(await canAccessOwner(req.user, r.rows[0].owner_id))) return res.status(403).json({ error: '권한이 없습니다.' });
-  const { passwordHash, maxDownloads, expiresAt } = await shareOptions(req);
+  const { passwordHash, maxDownloads, expiresAt, notifyInapp, notifyEmail } = await shareOptions(req);
   const token = generateToken(24);
-  await query('INSERT INTO share_links (file_id, token, created_by, expires_at, password_hash, max_downloads) VALUES ($1,$2,$3,$4,$5,$6)', [req.params.id, token, req.user.id, expiresAt, passwordHash, maxDownloads]);
+  await query('INSERT INTO share_links (file_id, token, created_by, expires_at, password_hash, max_downloads, notify_inapp, notify_email) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)', [req.params.id, token, req.user.id, expiresAt, passwordHash, maxDownloads, notifyInapp, notifyEmail]);
   await audit(req, 'create_share', `file=${req.params.id}`);
   res.status(201).json({ token, url: `${shareWebBase(req)}/share.html?t=${token}`, fileName: r.rows[0].original_name, expiresAt });
 }));
@@ -627,7 +628,7 @@ router.post('/upload-requests', authenticate, wrap(resolveOwner), wrap(async (re
   const mf = parseInt(req.body.maxFiles, 10); const maxFiles = (Number.isFinite(mf) && mf > 0) ? mf : null;
   const mgb = parseFloat(req.body.maxGb); const maxBytes = (Number.isFinite(mgb) && mgb > 0) ? Math.round(mgb * 1073741824) : null;
   const token = generateToken(24);
-  const r = await query('INSERT INTO upload_requests (owner_id, folder, token, label, password_hash, max_files, max_bytes, expires_at, created_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id', [owner, folder, token, label, passwordHash, maxFiles, maxBytes, expiresAt, req.user.id]);
+  const r = await query('INSERT INTO upload_requests (owner_id, folder, token, label, password_hash, max_files, max_bytes, expires_at, created_by, notify_inapp, notify_email) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id', [owner, folder, token, label, passwordHash, maxFiles, maxBytes, expiresAt, req.user.id, !!req.body.notifyInapp, !!req.body.notifyEmail]);
   await audit(req, 'create_upload_request', `owner=${owner} ${folder}`);
   res.status(201).json({ id: r.rows[0].id, token, url: `${shareWebBase(req)}/upload.html?t=${token}`, label });
 }));
@@ -666,7 +667,7 @@ router.post('/folder-shares', authenticate, wrap(resolveOwner), wrap(async (req,
   const password = String(req.body.password || '').trim(); const passwordHash = password ? await hashPassword(password) : null;
   const days = parseInt(req.body.expiresInDays || '0', 10); const expiresAt = days > 0 ? new Date(Date.now() + days * 86400000) : null;
   const token = generateToken(24);
-  const r = await query('INSERT INTO folder_shares (owner_id, folder, token, label, password_hash, expires_at, created_by) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id', [owner, folder, token, label, passwordHash, expiresAt, req.user.id]);
+  const r = await query('INSERT INTO folder_shares (owner_id, folder, token, label, password_hash, expires_at, created_by, notify_inapp, notify_email) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id', [owner, folder, token, label, passwordHash, expiresAt, req.user.id, !!req.body.notifyInapp, !!req.body.notifyEmail]);
   await audit(req, 'create_folder_share', `owner=${owner} ${folder}`);
   res.status(201).json({ id: r.rows[0].id, token, url: `${shareWebBase(req)}/folder.html?t=${token}`, label });
 }));
@@ -678,6 +679,25 @@ router.delete('/folder-shares/:id(\\d+)', authenticate, wrap(resolveOwner), wrap
   const r = await query('DELETE FROM folder_shares WHERE id=$1 AND owner_id=$2 RETURNING id', [req.params.id, req.targetOwnerId]);
   if (r.rowCount === 0) return res.status(404).json({ error: '공유를 찾을 수 없습니다.' });
   await audit(req, 'delete_folder_share', `id=${req.params.id}`);
+  res.json({ ok: true });
+}));
+
+// ── 인앱 알림 ──────────
+router.get('/notifications', authenticate, wrap(async (req, res) => {
+  const limit = Math.min(50, parseInt(req.query.limit || '20', 10) || 20);
+  const [list, cnt] = await Promise.all([
+    query('SELECT id, type, title, body, is_read, created_at FROM notifications WHERE user_id=$1 ORDER BY created_at DESC LIMIT $2', [req.user.id, limit]),
+    query('SELECT COUNT(*)::int AS c FROM notifications WHERE user_id=$1 AND is_read=false', [req.user.id]),
+  ]);
+  res.json({
+    unread: cnt.rows[0].c,
+    items: list.rows.map((r) => ({ id: r.id, type: r.type, title: r.title, body: r.body, isRead: r.is_read, createdAt: r.created_at })),
+  });
+}));
+router.post('/notifications/read', authenticate, wrap(async (req, res) => {
+  const ids = Array.isArray(req.body.ids) ? req.body.ids.filter((x) => Number.isInteger(x)) : null;
+  if (ids && ids.length) await query('UPDATE notifications SET is_read=true WHERE user_id=$1 AND id = ANY($2)', [req.user.id, ids]);
+  else await query('UPDATE notifications SET is_read=true WHERE user_id=$1 AND is_read=false', [req.user.id]);
   res.json({ ok: true });
 }));
 

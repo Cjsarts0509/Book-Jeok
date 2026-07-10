@@ -37,7 +37,7 @@ const App = (() => {
     root().innerHTML = `
       <div class="login-screen">
         <form class="login-card" id="login-form">
-          <img src="assets/logo.svg?v=38" class="login-logo" alt="북적북적">
+          <img src="assets/logo.svg?v=39" class="login-logo" alt="북적북적">
           <div class="login-title">북적북적</div>
           <div class="login-sub">Book-Jeok · 우리끼리 나누는 파일 창고</div>
           <div class="field"><label>아이디</label><input class="input" name="username" autocomplete="username" placeholder="아이디" required></div>
@@ -61,13 +61,14 @@ const App = (() => {
       <div class="layout">
         <header class="appbar">
           <button class="icon-btn appbar-menu" id="menu-toggle" title="폴더">☰</button>
-          <div class="brand" id="brand-home" title="홈으로"><img src="assets/logo.svg?v=38"><span class="brand-name">북적북적</span></div>
+          <div class="brand" id="brand-home" title="홈으로"><img src="assets/logo.svg?v=39"><span class="brand-name">북적북적</span></div>
           ${isPriv() ? `<select class="input account-switcher" id="account-switcher"><option value="">내 파일</option></select>` : ''}
           <div class="topbar-spacer"></div>
           <nav class="appbar-nav">
             <div class="nav-item" data-nav="files"><span class="ico">📁</span><span class="t">내 파일</span></div>
             <div class="nav-item" data-nav="shares"><span class="ico">🔗</span><span class="t">공유</span></div>
             <div class="nav-item" data-nav="trash"><span class="ico">🗑️</span><span class="t">휴지통</span></div>
+            <div class="nav-item nav-bell" data-nav="notif"><span class="ico">🔔</span><span class="t">알림</span><span class="notif-badge hidden" id="notif-badge">0</span></div>
             ${admin ? '<a class="nav-item" href="admin.html"><span class="ico">⚙️</span><span class="t">관리자</span></a>' : ''}
             <div class="nav-item" data-nav="help"><span class="ico">❓</span><span class="t">도움말</span></div>
             <div class="nav-item" data-nav="settings"><span class="ico">⚙️</span><span class="t">설정</span></div>
@@ -87,9 +88,10 @@ const App = (() => {
       <div class="drop-overlay hidden" id="drop-overlay"><div class="drop-inner"><div class="drop-ic">📥</div>여기에 놓아 업로드<div class="drop-sub">현재 폴더로 올라갑니다</div></div></div>`;
     root().querySelectorAll('.appbar-nav [data-nav]').forEach((el) => el.addEventListener('click', () => {
       const n = el.dataset.nav;
-      if (n === 'logout') doLogout(); else if (n === 'settings') settingsModal(); else if (n === 'files') resetToOwn(); else if (n === 'help') helpModal(); else if (n === 'trash') trashModal(); else if (n === 'shares') shareManageModal();
+      if (n === 'logout') doLogout(); else if (n === 'settings') settingsModal(); else if (n === 'files') resetToOwn(); else if (n === 'help') helpModal(); else if (n === 'trash') trashModal(); else if (n === 'shares') shareManageModal(); else if (n === 'notif') notifModal();
     }));
     document.getElementById('menu-toggle').addEventListener('click', toggleTree);
+    refreshNotifBadge(); startNotifPolling();
     document.getElementById('tree-backdrop').addEventListener('click', toggleTree);
     document.getElementById('brand-home').addEventListener('click', () => goTo('/'));
     document.getElementById('expand-all').addEventListener('click', expandAll);
@@ -926,6 +928,7 @@ const App = (() => {
         <div class="field" style="flex:1"><label>최대 용량(GB)</label><input class="input num" id="ur-mg" type="number" min="0.1" step="0.1" placeholder="무제한"></div>
       </div>
       <div class="field"><label>비밀번호 (선택, 권장)</label><input class="input" id="ur-pw" type="text" placeholder="비우면 없음"></div>
+      ${notifyFields('수신')}
       <div style="text-align:right"><button class="btn btn-primary btn-sm" id="ur-gen">＋ 링크 생성</button></div>
       <div id="ur-result"></div>
       <hr class="manual-hr" style="margin:16px 0 12px">
@@ -956,6 +959,7 @@ const App = (() => {
           folder, ownerId: state.ownerId, label: m.q('#ur-label').value.trim(),
           expiresInDays: parseInt(m.q('#ur-exp').value, 10) || 0, password: m.q('#ur-pw').value.trim(),
           maxFiles: parseInt(m.q('#ur-mf').value, 10) || 0, maxGb: parseFloat(m.q('#ur-mg').value) || 0,
+          ...notifyValues(m),
         });
         m.animate(() => { m.q('#ur-result').innerHTML = `<div class="field" style="margin-top:10px"><label>업로드 링크</label><input class="input" id="ur-lnk" readonly value="${UI.escapeHtml(r.url)}"></div><button class="btn btn-secondary btn-sm" id="ur-copy">📋 복사</button>`; });
         m.q('#ur-lnk').select();
@@ -976,6 +980,7 @@ const App = (() => {
         <div class="field" style="flex:1"><label>만료</label><select class="input" id="fs-exp"><option value="0">무기한</option><option value="1">1일</option><option value="7" selected>7일</option><option value="30">30일</option></select></div>
         <div class="field" style="flex:1"><label>비밀번호 (선택)</label><input class="input" id="fs-pw" type="text" placeholder="비우면 없음"></div>
       </div>
+      ${notifyFields('다운로드')}
       <div style="text-align:right"><button class="btn btn-primary btn-sm" id="fs-gen">＋ 링크 생성</button></div>
       <div id="fs-result"></div>
       <hr class="manual-hr" style="margin:16px 0 12px">
@@ -996,7 +1001,7 @@ const App = (() => {
     }
     m.q('#fs-gen').addEventListener('click', async () => {
       try {
-        const r = await API.createFolderShare({ folder, ownerId: state.ownerId, label: m.q('#fs-label').value.trim(), expiresInDays: parseInt(m.q('#fs-exp').value, 10) || 0, password: m.q('#fs-pw').value.trim() });
+        const r = await API.createFolderShare({ folder, ownerId: state.ownerId, label: m.q('#fs-label').value.trim(), expiresInDays: parseInt(m.q('#fs-exp').value, 10) || 0, password: m.q('#fs-pw').value.trim(), ...notifyValues(m) });
         m.animate(() => { m.q('#fs-result').innerHTML = `<div class="field" style="margin-top:10px"><label>공유 링크</label><input class="input" id="fs-lnk" readonly value="${UI.escapeHtml(r.url)}"></div><button class="btn btn-secondary btn-sm" id="fs-copy">📋 복사</button>`; });
         m.q('#fs-lnk').select();
         m.q('#fs-copy').addEventListener('click', () => { m.q('#fs-lnk').select(); navigator.clipboard?.writeText(r.url); UI.toast('링크 복사됨', 'success'); });
@@ -1044,12 +1049,20 @@ const App = (() => {
   }
 
   // 공유 옵션(만료·비밀번호·횟수) 공통 필드/값/결과
+  // 공유별 알림 옵트인 (인앱 / 이메일) — 활동 발생 시 만든 사람에게 알림
+  function notifyFields(kindLabel) {
+    return `<div class="field"><label>${kindLabel || '활동'} 알림 (선택)</label>
+      <label class="set-check"><input type="checkbox" id="nt-inapp"> 🔔 인앱 알림 받기</label>
+      <label class="set-check"><input type="checkbox" id="nt-email"> ✉️ 이메일 알림 받기 <span class="muted" style="font-size:12px">— ⚙️설정의 이메일로</span></label></div>`;
+  }
+  const notifyValues = (m) => ({ notifyInapp: !!(m.q('#nt-inapp') && m.q('#nt-inapp').checked), notifyEmail: !!(m.q('#nt-email') && m.q('#nt-email').checked) });
   function shareOptionFields() {
     return `<div class="field"><label>만료 기간</label><select class="input" id="exp"><option value="0">무기한</option><option value="1">1일</option><option value="7">7일</option><option value="30">30일</option></select></div>
       <div class="field"><label>비밀번호 (선택)</label><input class="input" id="spw" type="text" placeholder="비우면 없음"></div>
-      <div class="field"><label>다운로드 횟수 제한 (선택)</label><input class="input num" id="smax" type="number" min="1" placeholder="비우면 무제한"></div>`;
+      <div class="field"><label>다운로드 횟수 제한 (선택)</label><input class="input num" id="smax" type="number" min="1" placeholder="비우면 무제한"></div>
+      ${notifyFields('다운로드')}`;
   }
-  const shareOptionValues = (m) => ({ expiresInDays: parseInt(m.q('#exp').value, 10) || 0, password: m.q('#spw').value.trim(), maxDownloads: parseInt(m.q('#smax').value, 10) || 0 });
+  const shareOptionValues = (m) => ({ expiresInDays: parseInt(m.q('#exp').value, 10) || 0, password: m.q('#spw').value.trim(), maxDownloads: parseInt(m.q('#smax').value, 10) || 0, ...notifyValues(m) });
   function shareResult(m, url) {
     m.animate(() => { m.q('#result').innerHTML = `<div class="field" style="margin-top:14px"><label>공유 링크 (누구나 접근 가능)</label><input class="input" id="lnk" readonly value="${UI.escapeHtml(url)}"></div><button class="btn btn-secondary btn-sm" id="copy">📋 링크 복사</button>`; });
     m.q('#lnk').select();
@@ -1105,6 +1118,37 @@ const App = (() => {
     m.q('#mclose').addEventListener('click', m.close);
   }
 
+  // ── 인앱 알림 ──────────
+  let notifTimer = null;
+  async function refreshNotifBadge() {
+    try {
+      const d = await API.notifications(1);
+      const badge = document.getElementById('notif-badge'); if (!badge) return;
+      if (d.unread > 0) { badge.textContent = d.unread > 99 ? '99+' : d.unread; badge.classList.remove('hidden'); }
+      else badge.classList.add('hidden');
+    } catch {}
+  }
+  function startNotifPolling() { if (notifTimer) clearInterval(notifTimer); notifTimer = setInterval(refreshNotifBadge, 60000); }
+  function notifModal() {
+    const m = UI.modal(`<h3>🔔 알림</h3><div id="nf-body"><p class="muted">불러오는 중…</p></div><div class="modal-actions"><button class="btn btn-ghost" id="nf-read">모두 읽음</button><button class="btn btn-primary" id="nf-close">닫기</button></div>`);
+    m.el.querySelector('.modal').classList.add('modal-wide');
+    m.q('#nf-close').addEventListener('click', m.close);
+    const when = (iso) => { const s = Math.floor((Date.now() - new Date(iso).getTime()) / 1000); if (s < 60) return '방금'; if (s < 3600) return Math.floor(s / 60) + '분 전'; if (s < 86400) return Math.floor(s / 3600) + '시간 전'; return UI.date(iso); };
+    const ico = { upload_request: '📥', share_download: '⬇️', folder_share_download: '📁' };
+    async function load() {
+      try {
+        const d = await API.notifications(30);
+        m.q('#nf-body').innerHTML = d.items.length ? d.items.map((n) => `<div class="nf-item${n.isRead ? '' : ' unread'}">
+          <span class="nf-ic">${ico[n.type] || '🔔'}</span>
+          <div style="flex:1;min-width:0"><div class="nf-title">${UI.escapeHtml(n.title)}</div><div class="nf-body">${UI.escapeHtml(n.body)}</div><div class="nf-time muted">${when(n.createdAt)}</div></div></div>`).join('') : '<div class="empty" style="padding:24px">알림이 없습니다.</div>';
+        // 열람 시 자동으로 모두 읽음 처리
+        if (d.unread > 0) { await API.markNotificationsRead(); refreshNotifBadge(); }
+      } catch (e) { m.q('#nf-body').innerHTML = `<p class="muted" style="color:var(--danger)">${UI.escapeHtml(e.message)}</p>`; }
+    }
+    m.q('#nf-read').addEventListener('click', async () => { try { await API.markNotificationsRead(); UI.toast('모두 읽음 처리됨', 'success'); refreshNotifBadge(); load(); } catch (e) { UI.toast(e.message, 'error'); } });
+    load();
+  }
+
   async function settingsModal() {
     const m = UI.modal(`<h3>⚙️ 내 설정</h3><div id="set-body"><p class="muted">불러오는 중…</p></div><div class="modal-actions"><button class="btn btn-primary" id="set-close">닫기</button></div>`);
     m.el.querySelector('.modal').classList.add('modal-wide');
@@ -1115,7 +1159,7 @@ const App = (() => {
       <div class="set-sec">
         <div class="dash-h">🔔 알림</div>
         <div class="field"><label>알림 받을 이메일</label><input class="input" id="s-email" type="email" placeholder="예: name@example.com" value="${UI.escapeHtml(u.email || '')}"></div>
-        <label class="set-check"><input type="checkbox" id="s-notify" ${u.notifyEmail ? 'checked' : ''}> 이메일로 알림 받기</label>
+        <p class="muted" style="font-size:12px;margin-top:-2px">알림을 받을지는 <b>공유를 만들 때 각 공유마다</b> 켭니다. 이메일 알림을 켜면 위 주소로 발송됩니다.</p>
       </div>
       <div class="set-sec">
         <div class="dash-h">⬆️ 업로드</div>
@@ -1134,7 +1178,7 @@ const App = (() => {
       </div>`;
     m.q('#s-save').addEventListener('click', async () => {
       try {
-        await API.updateSettings({ email: m.q('#s-email').value.trim(), notifyEmail: m.q('#s-notify').checked, uploadConflict: m.el.querySelector('input[name=s-conf]:checked').value });
+        await API.updateSettings({ email: m.q('#s-email').value.trim(), uploadConflict: m.el.querySelector('input[name=s-conf]:checked').value });
         UI.toast('설정이 저장되었습니다 ✅', 'success');
       } catch (err) { UI.toast(err.message, 'error'); }
     });

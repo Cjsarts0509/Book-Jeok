@@ -10,6 +10,7 @@ const config = require('../config');
 const { query } = require('../db');
 const { wrap } = require('../util');
 const { verifyPassword } = require('../crypto');
+const notify = require('../notify');
 
 const router = express.Router();
 
@@ -19,6 +20,7 @@ const attemptLimiter = rateLimit({ windowMs: 10 * 60 * 1000, max: 15, skipSucces
 async function resolveShare(token) {
   const r = await query(
     `SELECT s.id AS share_id, s.expires_at, s.password_hash, s.max_downloads, s.download_count,
+            s.created_by, s.notify_inapp, s.notify_email,
             f.owner_id AS f_owner, f.original_name AS f_name, f.stored_name AS f_stored, f.size_bytes AS f_size, f.mime_type AS f_mime,
             b.owner_id AS b_owner, b.stored_name AS b_stored, b.display_name AS b_name, b.size_bytes AS b_size
      FROM share_links s
@@ -35,6 +37,9 @@ async function resolveShare(token) {
     passwordHash: row.password_hash || null,
     maxDownloads: row.max_downloads,
     downloadCount: row.download_count,
+    createdBy: row.created_by,
+    notifyInapp: row.notify_inapp,
+    notifyEmail: row.notify_email,
   };
   if (row.b_stored) return { ...common, name: row.b_name, size: Number(row.b_size), mime: 'application/zip', diskPath: path.join(config.storageRoot, '_bundles', row.b_stored) };
   if (row.f_stored) return { ...common, name: row.f_name, size: Number(row.f_size), mime: row.f_mime, diskPath: path.join(config.storageRoot, String(row.f_owner), row.f_stored) };
@@ -78,6 +83,9 @@ router.get('/:token/download', attemptLimiter, wrap(async (req, res) => {
     await query('UPDATE share_links SET download_count = download_count + 1 WHERE id=$1', [s.share_id]);
   }
   if (!fs.existsSync(s.diskPath)) return res.status(410).json({ error: '파일 실체가 존재하지 않습니다.' });
+  if ((s.notifyInapp || s.notifyEmail) && s.createdBy) {
+    notify.push({ userId: s.createdBy, type: 'share_download', title: '공유 파일이 다운로드됨', body: `'${s.name}' 공유 링크에서 다운로드가 발생했습니다.`, inApp: s.notifyInapp, email: s.notifyEmail }).catch(() => {});
+  }
   res.download(s.diskPath, s.name);
 }));
 

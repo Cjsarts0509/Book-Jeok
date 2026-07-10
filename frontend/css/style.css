@@ -269,6 +269,17 @@ textarea.input { resize: vertical; }
 .tm-bar { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 4px 0 10px; flex-wrap: wrap; }
 .tm-link { color: var(--secondary); text-decoration: none; font-weight: 600; }
 .tm-link:hover { text-decoration: underline; }
+/* 알림 벨 · 목록 */
+.nav-bell { position: relative; }
+.notif-badge { position: absolute; top: 2px; right: 4px; min-width: 16px; height: 16px; padding: 0 4px; background: var(--danger); color: #fff; font-size: 10px; font-weight: 700; line-height: 16px; text-align: center; border-radius: 8px; box-shadow: 0 0 0 2px var(--surface); }
+.notif-badge.hidden { display: none; }
+.nf-item { display: flex; gap: 10px; padding: 10px 8px; border-bottom: 1px solid var(--border); }
+.nf-item.unread { background: rgba(17,138,178,.06); }
+.nf-ic { font-size: 20px; flex: none; }
+.nf-title { font-weight: 600; font-size: 14px; }
+.nf-body { font-size: 13px; color: var(--text-muted); margin: 2px 0; word-break: break-all; }
+.nf-time { font-size: 11px; }
+
 /* 내 설정 모달 */
 .set-sec { margin-bottom: 14px; }
 .set-check, .set-radio { display: flex; align-items: center; gap: 8px; font-size: 14px; margin: 6px 0; cursor: pointer; }

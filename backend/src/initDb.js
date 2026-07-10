@@ -173,6 +173,26 @@ CREATE TABLE IF NOT EXISTS folder_shares (
   created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_folder_share_token ON folder_shares(token);
+
+-- 인앱 알림
+CREATE TABLE IF NOT EXISTS notifications (
+  id         BIGSERIAL PRIMARY KEY,
+  user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  type       VARCHAR(32) NOT NULL,
+  title      TEXT NOT NULL,
+  body       TEXT NOT NULL DEFAULT '',
+  is_read    BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_notif_user ON notifications(user_id, is_read, created_at DESC);
+
+-- 공유별 알림 옵트인 (인앱 / 이메일)
+ALTER TABLE share_links     ADD COLUMN IF NOT EXISTS notify_inapp BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE share_links     ADD COLUMN IF NOT EXISTS notify_email BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE folder_shares   ADD COLUMN IF NOT EXISTS notify_inapp BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE folder_shares   ADD COLUMN IF NOT EXISTS notify_email BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE upload_requests ADD COLUMN IF NOT EXISTS notify_inapp BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE upload_requests ADD COLUMN IF NOT EXISTS notify_email BOOLEAN NOT NULL DEFAULT FALSE;
 `;
 
 const DEFAULT_EXT = 'csv,xls,xlsx,xlsm,xlsb,jpg,jpeg,png,gif,ppt,pptx,doc,docx,txt';
