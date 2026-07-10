@@ -13,6 +13,7 @@ const { audit, wrap, canAccessOwner } = require('../util');
 const { generateToken, hashPassword } = require('../crypto');
 const filetype = require('../filetype');
 const yara = require('../yara');
+const ocr = require('../ocr');
 const notify = require('../notify');
 const { isAllowed, allowedLabel, getAllowedExtensions, trashRetentionDays, shareQrEnabled } = require('../settings');
 const QRCode = require('qrcode');
@@ -278,11 +279,22 @@ router.post('/upload', authenticate, wrap(resolveOwner), upload.array('file', 30
     }
   }
   await ensureFolder(req.targetOwnerId, folder);
+  // 업로드 시 파일별 제목/비고(선택) — 카메라 업로드 등에서 index로 정렬해 전달
+  const titles = req.body.titles !== undefined ? [].concat(req.body.titles) : [];
+  const notes = req.body.notes !== undefined ? [].concat(req.body.notes) : [];
   const saved = []; const rejected = [];
-  for (const f of req.files) {
+  for (let i = 0; i < req.files.length; i++) {
+    const f = req.files[i];
     // 경로 구분자·제어문자 제거 (zip-slip/헤더 주입 방어)
-    const originalName = Buffer.from(f.originalname, 'latin1').toString('utf8')
+    let originalName = Buffer.from(f.originalname, 'latin1').toString('utf8')
       .replace(/[/\\]/g, '_').replace(/[\x00-\x1f]/g, '').trim() || 'file';
+    // 사용자가 제목을 직접 입력했으면 확장자는 유지한 채 파일명 교체
+    const title = String(titles[i] || '').replace(/[/\\]/g, '_').replace(/[\x00-\x1f]/g, '').trim();
+    if (title) {
+      const ext = originalName.includes('.') ? originalName.slice(originalName.lastIndexOf('.')) : '';
+      originalName = title.toLowerCase().endsWith(ext.toLowerCase()) ? title : title + ext;
+    }
+    const note = String(notes[i] || '').slice(0, 2000).trim();
     // 매직바이트 검증: 실행파일 위장·확장자-내용 불일치 차단 (데몬 불필요)
     const ft = await filetype.verify(f.path, originalName);
     if (!ft.ok) { await fsp.unlink(f.path).catch(() => {}); rejected.push({ name: originalName, reason: ft.reason }); await audit(req, 'file_blocked', `${originalName} (${ft.reason})`); continue; }
@@ -297,11 +309,14 @@ router.post('/upload', authenticate, wrap(resolveOwner), upload.array('file', 30
     } else {
       name = await uniqueFileName(req.targetOwnerId, folder, originalName);
     }
+    // 이미지면 OCR 대기 상태로 표시(백그라운드 처리)
+    const ocrStatus = (ocr.enabled() && ocr.canOcr(name)) ? 'pending' : '';
     const row = await query(
-      `INSERT INTO files (owner_id, folder, original_name, stored_name, size_bytes, mime_type)
-       VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
-      [req.targetOwnerId, folder, name, path.basename(f.path), f.size, f.mimetype]
+      `INSERT INTO files (owner_id, folder, original_name, stored_name, size_bytes, mime_type, note, note_updated_at, ocr_status)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,${note ? 'now()' : 'NULL'},$8) RETURNING id`,
+      [req.targetOwnerId, folder, name, path.basename(f.path), f.size, f.mimetype, note, ocrStatus]
     );
+    if (ocrStatus === 'pending') ocr.enqueue(row.rows[0].id, f.path);
     saved.push({ id: row.rows[0].id, name, size: f.size, folder });
   }
   await audit(req, 'upload', `owner=${req.targetOwnerId} count=${saved.length}`);
@@ -544,7 +559,8 @@ router.get('/search', authenticate, wrap(resolveOwner), wrap(async (req, res) =>
 
   // 파일 조건 동적 구성
   const cond = ['f.owner_id=$1', 'f.deleted_at IS NULL']; const vals = [owner]; let i = 2;
-  if (q) { cond.push(`f.original_name ILIKE $${i} ESCAPE '\\'`); vals.push('%' + q.replace(/[%_\\]/g, (c) => '\\' + c) + '%'); i++; }
+  // 이름 또는 OCR 추출 내용(이미지 문서 속 글자)에서 매칭
+  if (q) { cond.push(`(f.original_name ILIKE $${i} ESCAPE '\\' OR f.ocr_text ILIKE $${i} ESCAPE '\\')`); vals.push('%' + q.replace(/[%_\\]/g, (c) => '\\' + c) + '%'); i++; }
   if (exts.length) { cond.push(`lower(substring(f.original_name from '\\.([^.]+)$')) = ANY($${i}::text[])`); vals.push(exts); i++; }
   if (dateFrom) { cond.push(`f.created_at >= $${i}`); vals.push(dateFrom); i++; }
   if (dateTo) { cond.push(`f.created_at < ($${i}::date + 1)`); vals.push(dateTo); i++; }
@@ -566,6 +582,18 @@ router.get('/search', authenticate, wrap(resolveOwner), wrap(async (req, res) =>
       .map((r) => ({ id: r.id, path: r.path, name: r.path.split('/').filter(Boolean).pop() || r.path, note: r.note || '', noteUpdatedAt: r.note_updated_at, createdAt: r.created_at, icon: r.icon || '', color: r.color || '', size: 0, fav: false }));
   }
   const fileList = files.rows.map(fileRow);
+  // 이름이 아니라 내용(OCR)으로 매칭된 경우, 매칭 부분 스니펫을 함께 내려 UI에 표시
+  if (q) {
+    const ql = q.toLowerCase();
+    files.rows.forEach((raw, idx) => {
+      const txt = raw.ocr_text || '';
+      const pos = txt.toLowerCase().indexOf(ql);
+      if (pos >= 0 && !raw.original_name.toLowerCase().includes(ql)) {
+        const start = Math.max(0, pos - 30);
+        fileList[idx].ocrSnippet = (start > 0 ? '…' : '') + txt.slice(start, pos + ql.length + 40).trim() + '…';
+      }
+    });
+  }
   await attachMeta(req.user.id, owner, fileList, folders);
   res.json({ query: q, folders, files: fileList });
 }));

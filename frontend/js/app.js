@@ -46,7 +46,7 @@ const App = (() => {
   // 관리자 2FA 필수: 설정 완료 전까지 앱 진입 차단
   function force2faSetup() {
     root().innerHTML = `<div class="login-screen"><div class="login-card" style="max-width:460px">
-      <img src="assets/logo.svg?v=59" class="login-logo" alt="북적북적">
+      <img src="assets/logo.svg?v=60" class="login-logo" alt="북적북적">
       <div class="login-title">2단계 인증 설정</div>
       <p class="muted" style="text-align:center;font-size:13px;margin:6px 0 12px">관리자 계정은 보안을 위해 <b>2단계 인증이 필수</b>입니다.<br>설정을 완료해야 계속할 수 있습니다.</p>
       <div id="tf-host"></div>
@@ -60,7 +60,7 @@ const App = (() => {
     root().innerHTML = `
       <div class="login-screen">
         <form class="login-card" id="login-form">
-          <img src="assets/logo.svg?v=59" class="login-logo" alt="북적북적">
+          <img src="assets/logo.svg?v=60" class="login-logo" alt="북적북적">
           <div class="login-title">북적북적</div>
           <div class="login-sub">Book-Jeok · 우리끼리 나누는 파일 창고</div>
           <div class="field"><label>아이디</label><input class="input" name="username" autocomplete="username" placeholder="아이디" required></div>
@@ -93,7 +93,7 @@ const App = (() => {
       <div class="layout">
         <header class="appbar">
           <button class="icon-btn appbar-menu" id="menu-toggle" title="폴더">☰</button>
-          <div class="brand" id="brand-home" title="홈으로"><img src="assets/logo.svg?v=59"><span class="brand-name">북적북적</span></div>
+          <div class="brand" id="brand-home" title="홈으로"><img src="assets/logo.svg?v=60"><span class="brand-name">북적북적</span></div>
           ${isPriv() ? `<select class="input account-switcher" id="account-switcher"><option value="">내 파일</option></select>` : ''}
           <div class="topbar-spacer"></div>
           <button class="icon-btn appbar-navmenu" id="nav-menu-toggle" title="메뉴" aria-label="메뉴">☰<span class="notif-badge hidden" id="notif-badge-menu">0</span></button>
@@ -268,8 +268,10 @@ const App = (() => {
             <button class="vt ${state.view === 'list' ? 'on' : ''}" data-view="list" title="리스트">☰</button>
           </div>
           <button class="btn btn-primary btn-sm" id="upload-btn" title="허용: ${state.allowedExt.join(' · ')}">⬆️ <span class="label">업로드</span></button>
+          <button class="btn btn-accent btn-sm" id="camera-btn" title="사진 촬영해서 업로드">📷 <span class="label">촬영</span></button>
           <button class="btn btn-secondary btn-sm" id="new-folder">📂 <span class="label">새 폴더</span></button>
           <input type="file" id="file-input" multiple hidden accept="${state.allowedExt.map((e) => '.' + e).join(',')}">
+          <input type="file" id="cam-input" accept="image/*" capture="environment" multiple hidden>
           <div class="tools-break"></div>
           <form class="searchbox" id="searchform">
             <input class="input" id="search-input" type="search" placeholder="이름 검색…" autocomplete="off">
@@ -363,6 +365,8 @@ const App = (() => {
   const favBtn = (isFolder, ref, on) => `<button class="fav-btn${on ? ' on' : ''}" data-fav-${isFolder ? 'folder' : 'file'}="${UI.escapeHtml(String(ref))}" title="${on ? '즐겨찾기 해제' : '즐겨찾기'}" aria-label="즐겨찾기">${on ? '⭐' : '☆'}</button>`;
   const tagChips = (tags) => (tags && tags.length)
     ? `<span class="tag-chips">${tags.map((t) => `<span class="tag-chip" style="--tc:${UI.escapeHtml(t.color || '#118AB2')}">${UI.escapeHtml(t.name)}</span>`).join('')}</span>` : '';
+  // 검색 시 이름이 아닌 '문서 내용(OCR)'으로 매칭된 경우 스니펫 표시
+  const ocrSnip = (f) => f.ocrSnippet ? `<div class="ocr-snip" title="문서 내용에서 검색어 발견">📄 ${UI.escapeHtml(f.ocrSnippet)}</div>` : '';
 
   function renderListing() {
     const box = document.getElementById('listing');
@@ -412,6 +416,7 @@ const App = (() => {
             <div class="mcard-name"><span class="ic">${UI.fileIcon(f.name)}</span> ${esc(f.name)}${updateBadge(f, false)}</div>
             <div class="mcard-sub">${UI.bytes(f.size)} · ${UI.date(f.createdAt)}</div>
             ${tagChips(f.tags)}
+            ${ocrSnip(f)}
           </div>
           ${favBtn(false, f.id, f.fav)}
           <span class="mcard-caret">▾</span>
@@ -466,6 +471,7 @@ const App = (() => {
         <div class="file-name">${UI.escapeHtml(f.name)}${updateBadge(f, false)}</div>
         <div class="file-meta num">${UI.bytes(f.size)} · ${UI.date(f.createdAt)}</div>
         ${tagChips(f.tags)}
+        ${ocrSnip(f)}
         ${f.note ? `<div class="file-note" title="${UI.escapeHtml(f.note)}">📝 ${UI.escapeHtml(f.note)}</div>` : ''}
       </div>`).join('');
     return `<div class="file-grid">${folders}${files}</div>`;
@@ -489,7 +495,7 @@ const App = (() => {
       const key = `file:${f.id}`;
       return `<tr data-file="${f.id}" data-row-key="${UI.escapeHtml(key)}" draggable="true" class="${isSel(key) ? 'sel' : ''}">
         <td><input type="checkbox" class="rowcheck" data-sel-file="${f.id}" data-name="${UI.escapeHtml(f.name)}" ${isSel(key) ? 'checked' : ''}></td>
-        <td class="name-cell">${favBtn(false, f.id, f.fav)}<span class="ic">${UI.fileIcon(f.name)}</span> ${UI.escapeHtml(f.name)}${updateBadge(f, false)}${tagChips(f.tags)}</td>
+        <td class="name-cell">${favBtn(false, f.id, f.fav)}<span class="ic">${UI.fileIcon(f.name)}</span> ${UI.escapeHtml(f.name)}${updateBadge(f, false)}${tagChips(f.tags)}${ocrSnip(f)}</td>
         <td class="num muted" data-label="크기">${UI.bytes(f.size)}</td>
         <td class="num muted" data-label="등록">${UI.date(f.createdAt)}</td>
         <td class="num muted" data-label="수정">${UI.date(f.updatedAt || f.createdAt)}</td>
@@ -512,6 +518,9 @@ const App = (() => {
     const input = document.getElementById('file-input');
     document.getElementById('upload-btn').addEventListener('click', () => input.click());
     input.addEventListener('change', () => { if (input.files.length) uploadFiles(input.files); input.value = ''; });
+    const cam = document.getElementById('cam-input');
+    document.getElementById('camera-btn').addEventListener('click', () => cam.click());
+    cam.addEventListener('change', () => { if (cam.files.length) cameraReviewModal([...cam.files]); cam.value = ''; });
     document.getElementById('new-folder').addEventListener('click', newFolderModal);
     document.getElementById('nav-back').addEventListener('click', navBack);
     document.getElementById('nav-fwd').addEventListener('click', navForward);
@@ -910,6 +919,51 @@ const App = (() => {
       if (!r || !r.rejected || r.rejected.length < fileList.length) UI.toast('업로드 완료 ✅', 'success');
       loadAll();
     } catch (err) { UI.toast(err.message, 'error'); }
+  }
+
+  // ── 카메라(사진) 업로드: 촬영 → 각 사진 제목·비고 입력 → 업로드 ──────────
+  function cameraReviewModal(files) {
+    const urls = files.map((f) => URL.createObjectURL(f));
+    const stamp = () => { const d = new Date(); const p = (n) => String(n).padStart(2, '0'); return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`; };
+    const rows = files.map((f, i) => `
+      <div class="cam-item" data-i="${i}">
+        <img class="cam-thumb" src="${urls[i]}" alt="">
+        <div class="cam-fields">
+          <input class="input cam-title" placeholder="제목(선택)" value="사진_${stamp()}_${i + 1}">
+          <input class="input cam-note" placeholder="비고(선택)">
+        </div>
+        <button class="icon-btn cam-rm" data-rm="${i}" title="제거">✕</button>
+      </div>`).join('');
+    const loc = state.folder === '/' ? '홈' : state.folder;
+    const m = UI.modal(`<h3>📷 촬영 업로드 <span class="muted" style="font-size:13px;font-weight:400">· ${files.length}장 → ${UI.escapeHtml(loc)}</span></h3>
+      <p class="muted" style="font-size:12px;margin-bottom:10px">각 사진의 제목·비고를 입력하고 업로드하세요. (제목 비우면 자동 이름)</p>
+      <div id="cam-list">${rows}</div>
+      <div class="modal-actions"><button class="btn btn-ghost" id="cam-cancel">취소</button><button class="btn btn-primary" id="cam-go">⬆️ ${files.length}장 업로드</button></div>`);
+    m.el.querySelector('.modal').classList.add('modal-wide');
+    const cleanup = () => urls.forEach((u) => URL.revokeObjectURL(u));
+    const kept = new Set(files.map((_, i) => i));
+    m.q('#cam-cancel').addEventListener('click', () => { cleanup(); m.close(); });
+    m.el.querySelectorAll('[data-rm]').forEach((b) => b.addEventListener('click', () => {
+      kept.delete(Number(b.dataset.rm)); b.closest('.cam-item').remove();
+      if (!kept.size) { cleanup(); m.close(); }
+      else m.q('#cam-go').textContent = `⬆️ ${kept.size}장 업로드`;
+    }));
+    m.q('#cam-go').addEventListener('click', async () => {
+      const fd = new FormData(); fd.append('folder', state.folder);
+      [...kept].forEach((i) => {
+        const item = m.el.querySelector(`.cam-item[data-i="${i}"]`);
+        fd.append('file', files[i]);
+        fd.append('titles', item.querySelector('.cam-title').value.trim());
+        fd.append('notes', item.querySelector('.cam-note').value.trim());
+      });
+      m.q('#cam-go').disabled = true; m.q('#cam-go').textContent = '업로드 중…';
+      try {
+        const r = await API.upload(fd, state.ownerId);
+        if (r && r.rejected && r.rejected.length) UI.toast(`⚠️ ${r.rejected.length}장 차단됨`, 'error');
+        UI.toast('촬영 업로드 완료 ✅ (OCR 인식은 잠시 후 검색 가능)', 'success');
+        cleanup(); m.close(); loadAll();
+      } catch (err) { UI.toast(err.message, 'error'); m.q('#cam-go').disabled = false; m.q('#cam-go').textContent = `⬆️ ${kept.size}장 업로드`; }
+    });
   }
 
   // Content-Disposition에서 파일명 추출 (filename*=UTF-8'' 우선, 없으면 filename=)

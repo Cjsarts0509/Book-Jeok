@@ -2,8 +2,8 @@ FROM node:20-alpine
 
 WORKDIR /app
 
-# YARA(로컬 악성 패턴 검사) — Alpine community 저장소, 외부 통신 없음
-RUN apk add --no-cache yara
+# YARA(로컬 악성 패턴 검사) + tesseract OCR(이미지 문서 글자 인식, 한국어/영어) — Alpine community, 외부 통신 없음
+RUN apk add --no-cache yara tesseract-ocr tesseract-ocr-data-eng tesseract-ocr-data-kor
 
 # 의존성 먼저 설치 (레이어 캐시)
 COPY package.json ./
