@@ -22,7 +22,7 @@ const Admin = (() => {
     root().innerHTML = `
       <div class="layout">
         <header class="appbar">
-          <a class="brand" href="index.html" title="홈으로"><img src="assets/logo.svg?v=42"><span class="brand-name">북적북적</span></a>
+          <a class="brand" href="index.html" title="홈으로"><img src="assets/logo.svg?v=43"><span class="brand-name">북적북적</span></a>
           <nav class="appbar-nav">
             ${item('dashboard', '🏠', '대시보드')}
             ${item('users', '👥', '계정')}
@@ -331,10 +331,12 @@ const Admin = (() => {
     const all = view.querySelector('#tck-all');
     const bar = view.querySelector('#trash-bulk');
     const count = view.querySelector('#tb-count');
+    const rBtn = view.querySelector('#tb-restore');
+    const pBtn = view.querySelector('#tb-purge');
     const sync = () => {
       const sel = boxes.filter((b) => b.checked);
-      count.textContent = `${sel.length}개 선택`;
-      bar.classList.toggle('active', sel.length > 0);
+      count.textContent = sel.length ? `${sel.length}개 선택` : '선택된 항목 없음';
+      rBtn.disabled = pBtn.disabled = sel.length === 0;
       all.checked = sel.length > 0 && sel.length === boxes.length;
       all.indeterminate = sel.length > 0 && sel.length < boxes.length;
     };
@@ -384,24 +386,38 @@ const Admin = (() => {
     view.innerHTML = '<div class="empty"><div class="big">⏳</div>불러오는 중…</div>';
     try {
       const { branches } = await API.adminBranches();
-      const cards = branches.map((b) => `
+      const card = (b) => `
         <div class="branch-card fade-in">
-          <div class="bc-name" title="${UI.escapeHtml(b.name)}">${UI.escapeHtml(b.name)}</div>
+          <div class="bc-name" title="${UI.escapeHtml(b.name)}">🏢 ${UI.escapeHtml(b.name)}</div>
           <div class="bc-actions">
             <button class="icon-btn" data-eb="${b.id}" data-name="${UI.escapeHtml(b.name)}" title="수정">✏️</button>
             <button class="icon-btn" data-db="${b.id}" data-name="${UI.escapeHtml(b.name)}" title="삭제">🗑️</button>
           </div>
-        </div>`).join('');
+        </div>`;
       view.innerHTML = `
-        <div class="toolbar"><span class="muted">사용자가 '새 폴더 → 영업점 폴더'에서 선택하는 목록입니다. 총 ${branches.length}개</span><div style="flex:1"></div><button class="btn btn-primary" id="add-branch">＋ 영업점 추가</button></div>
-        ${branches.length ? `<div class="branch-grid fade-in">${cards}</div>` : '<div class="empty"><div class="big">🏢</div>등록된 영업점이 없습니다.</div>'}`;
+        <div class="toolbar">
+          <input class="input" id="branch-search" placeholder="🔎 영업점 이름 검색" style="max-width:280px">
+          <span class="muted" id="branch-count">총 ${branches.length}개</span>
+          <div style="flex:1"></div><button class="btn btn-primary" id="add-branch">＋ 영업점 추가</button>
+        </div>
+        <div class="branch-grid fade-in" id="branch-grid"></div>`;
+      const grid = document.getElementById('branch-grid');
+      const cnt = document.getElementById('branch-count');
+      const renderGrid = (q) => {
+        const kw = (q || '').trim().toLowerCase();
+        const list = kw ? branches.filter((b) => b.name.toLowerCase().includes(kw)) : branches;
+        grid.innerHTML = list.length ? list.map(card).join('') : `<div class="empty" style="grid-column:1/-1"><div class="big">🏢</div>${branches.length ? '검색 결과가 없습니다.' : '등록된 영업점이 없습니다.'}</div>`;
+        cnt.textContent = kw ? `${list.length} / ${branches.length}개` : `총 ${branches.length}개`;
+        grid.querySelectorAll('[data-eb]').forEach((el) => el.addEventListener('click', () => branchModal(el.dataset.eb, el.dataset.name)));
+        grid.querySelectorAll('[data-db]').forEach((el) => el.addEventListener('click', async () => {
+          const ok = await UI.confirm({ title: '영업점 삭제', danger: true, confirmText: '삭제', message: `'${el.dataset.name}' 영업점을 목록에서 삭제할까요?\n(이미 만들어진 폴더는 영향받지 않습니다)` });
+          if (!ok) return;
+          try { await API.deleteBranch(el.dataset.db); UI.toast('삭제됨', 'success'); loadBranches(); } catch (err) { UI.toast(err.message, 'error'); }
+        }));
+      };
+      renderGrid('');
       document.getElementById('add-branch').addEventListener('click', () => branchModal());
-      view.querySelectorAll('[data-eb]').forEach((el) => el.addEventListener('click', () => branchModal(el.dataset.eb, el.dataset.name)));
-      view.querySelectorAll('[data-db]').forEach((el) => el.addEventListener('click', async () => {
-        const ok = await UI.confirm({ title: '영업점 삭제', danger: true, confirmText: '삭제', message: `'${el.dataset.name}' 영업점을 목록에서 삭제할까요?\n(이미 만들어진 폴더는 영향받지 않습니다)` });
-        if (!ok) return;
-        try { await API.deleteBranch(el.dataset.db); UI.toast('삭제됨', 'success'); loadBranches(); } catch (err) { UI.toast(err.message, 'error'); }
-      }));
+      document.getElementById('branch-search').addEventListener('input', (e) => renderGrid(e.target.value));
     } catch (err) { view.innerHTML = `<div class="empty">⚠️ ${UI.escapeHtml(err.message)}</div>`; }
   }
   function branchModal(id, name) {
@@ -578,20 +594,43 @@ const Admin = (() => {
   }
 
   // ── 감사 로그 ──────────────────────────
+  const ACTION_KO = {
+    login: '로그인', login_failed: '로그인 실패', logout: '로그아웃',
+    change_password_self: '비밀번호 변경(본인)', update_settings: '설정 변경',
+    '2fa_enabled': '2단계 인증 켬', '2fa_disabled': '2단계 인증 끔',
+    create_user: '계정 생성', update_user: '계정 수정', delete_user: '계정 삭제',
+    reset_password: '비밀번호 재설정', view_password: '비밀번호 열람',
+    create_folder: '폴더 생성', rename_folder: '폴더 이름변경', folder_note: '폴더 비고', folder_style: '폴더 색상/아이콘',
+    upload: '업로드', download: '다운로드', rename: '이름 변경', update_note: '비고 수정',
+    trash_file: '파일 삭제', trash_folder: '폴더 삭제', restore_file: '파일 복원', restore_folder: '폴더 복원',
+    self_restore_file: '본인 파일 복원', self_restore_folder: '본인 폴더 복원',
+    purge_file: '파일 영구삭제', purge_folder: '폴더 영구삭제',
+    bulk_move: '일괄 이동', bulk_trash: '일괄 삭제', bulk_zip: '일괄 압축',
+    create_share: '공유 생성', delete_share: '공유 삭제', admin_delete_share: '공유 폐기(관리자)',
+    create_folder_share: '폴더 공유 생성', delete_folder_share: '폴더 공유 삭제',
+    create_upload_request: '업로드 요청 생성', delete_upload_request: '업로드 요청 삭제',
+    add_branch: '영업점 추가', edit_branch: '영업점 수정', delete_branch: '영업점 삭제',
+    add_notice: '공지 추가', edit_notice: '공지 수정', delete_notice: '공지 삭제',
+    set_extensions: '허용 확장자 설정', send_report: '주간 리포트 발송',
+    file_blocked: '업로드 차단(형식위장)', malware_blocked: '업로드 차단(악성패턴)',
+  };
+  const actionKo = (a) => ACTION_KO[a] || '기타';
   async function loadAudit() {
     const view = document.getElementById('view');
     view.innerHTML = '<div class="empty"><div class="big">⏳</div>불러오는 중…</div>';
     try {
       const { logs } = await API.audit(100);
+      const danger = new Set(['login_failed', 'delete_user', 'purge_file', 'purge_folder', 'file_blocked', 'malware_blocked', 'admin_delete_share', '2fa_disabled']);
       const rows = logs.map((l) => `
         <tr>
           <td class="num" style="color:var(--text-muted)">${new Date(l.created_at).toLocaleString('ko-KR')}</td>
           <td>${UI.escapeHtml(l.username || '—')}</td>
-          <td><span class="badge user">${UI.escapeHtml(l.action)}</span></td>
+          <td><code class="act-code">${UI.escapeHtml(l.action)}</code></td>
+          <td><span class="badge ${danger.has(l.action) ? 'off' : 'user'}">${UI.escapeHtml(actionKo(l.action))}</span></td>
           <td style="color:var(--text-muted)">${UI.escapeHtml(l.detail)}</td>
           <td class="num" style="color:var(--text-muted)">${UI.escapeHtml(l.ip)}</td>
         </tr>`).join('');
-      view.innerHTML = `<div class="table-wrap"><table><thead><tr><th>시각</th><th>사용자</th><th>동작</th><th>상세</th><th>IP</th></tr></thead><tbody>${rows || '<tr><td colspan=5>기록 없음</td></tr>'}</tbody></table></div>`;
+      view.innerHTML = `<div class="table-wrap"><table><thead><tr><th>시각</th><th>사용자</th><th>동작코드</th><th>동작명</th><th>상세</th><th>IP</th></tr></thead><tbody>${rows || '<tr><td colspan=6>기록 없음</td></tr>'}</tbody></table></div>`;
     } catch (err) { view.innerHTML = `<div class="empty">⚠️ ${UI.escapeHtml(err.message)}</div>`; }
   }
 

@@ -271,17 +271,21 @@ textarea.input { resize: vertical; }
 .tm-link:hover { text-decoration: underline; }
 /* 영업점 그리드 (5열) */
 .branch-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; }
-.branch-card { display: flex; align-items: center; gap: 6px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; }
+.branch-card { display: flex; align-items: center; gap: 6px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 16px 14px; min-height: 58px; }
+.branch-card:hover { border-color: var(--primary); }
 .branch-card .bc-name { flex: 1; min-width: 0; font-weight: 600; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .branch-card .bc-actions { display: flex; gap: 2px; flex: none; }
 @media (max-width: 1100px) { .branch-grid { grid-template-columns: repeat(4, 1fr); } }
 @media (max-width: 860px) { .branch-grid { grid-template-columns: repeat(3, 1fr); } }
 @media (max-width: 600px) { .branch-grid { grid-template-columns: repeat(2, 1fr); } }
 
-/* 휴지통 일괄 작업 바 */
-.trash-bulk { display: none; align-items: center; gap: 8px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 8px 12px; margin-bottom: 10px; }
-.trash-bulk.active { display: flex; }
+/* 휴지통 일괄 작업 바 (항상 표시, 선택 없으면 버튼 비활성) */
+.trash-bulk { display: flex; align-items: center; gap: 8px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 8px 12px; margin-bottom: 10px; }
 .trash-bulk #tb-count { font-weight: 600; font-size: 13px; }
+.branch-card .bc-name { font-size: 14.5px; }
+
+/* 감사 로그 동작코드 */
+.act-code { font-family: ui-monospace, Menlo, monospace; font-size: 12px; color: var(--text-muted); background: var(--bg); padding: 2px 6px; border-radius: 5px; }
 
 /* 알림 벨 · 목록 */
 .nav-bell { position: relative; }
