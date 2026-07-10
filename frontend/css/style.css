@@ -209,7 +209,7 @@ textarea.input { resize: vertical; }
 /* 확장자 필터 드롭다운 */
 .extfilter { position: relative; }
 #extfilter-btn.on { border-color: var(--primary); background: var(--hover); }
-.extfilter-panel { position: absolute; top: calc(100% + 6px); left: 0; z-index: 30; width: 300px; max-width: 82vw; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-lg); padding: 12px; }
+.extfilter-panel { position: absolute; top: calc(100% + 6px); right: 0; left: auto; z-index: 30; width: 300px; max-width: 82vw; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-lg); padding: 12px; }
 .ext-panel-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; font-size: 13px; }
 .ext-chip-grid { display: flex; flex-wrap: wrap; gap: 6px; max-height: 260px; overflow-y: auto; }
 .ext-chip { display: inline-flex; align-items: center; gap: 4px; padding: 5px 10px; border: 1.5px solid var(--border); border-radius: 999px; font-size: 12.5px; cursor: pointer; user-select: none; }
@@ -362,6 +362,9 @@ textarea.input { resize: vertical; }
 
 /* ── 선택 일괄작업 바 ── */
 .selbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 14px; margin-bottom: 12px; background: #FFF3CF; border: 1px solid var(--primary); border-radius: var(--radius-sm); position: sticky; top: 0; z-index: 5; animation: slideDown .2s ease; }
+/* 이름변경·선택해제도 다운로드/폴더이동/삭제처럼 테두리를 줘 통일감 (PC·모바일 공통) */
+.selbar .btn-ghost { border: 1px solid var(--border); background: var(--surface); color: var(--text-muted); }
+.selbar .btn-ghost:hover:not(:disabled) { background: var(--hover); color: var(--text); }
 
 /* ── 그리드 뷰 ── */
 .file-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 14px; }
@@ -523,6 +526,9 @@ th { background: var(--bg); font-weight: 700; color: var(--text-muted); font-siz
   .content { padding: 14px 12px 40px; }
   .content-head { gap: 8px; }
   .content-head .btn .label { display: none; }
+  /* 새 폴더·필터를 우측 끝으로(검색줄 뒤). 필터 패널은 좌측으로 펼쳐져 화면 안에 유지 */
+  #new-folder { order: 8; }
+  .extfilter { order: 9; }
   .autosort { font-size: 12px; }
   .file-grid { grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 10px; }
   .file-ico { font-size: 32px; }
