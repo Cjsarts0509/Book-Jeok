@@ -22,7 +22,7 @@ const Admin = (() => {
     root().innerHTML = `
       <div class="layout">
         <header class="appbar">
-          <a class="brand" href="index.html" title="홈으로"><img src="assets/logo.svg?v=43"><span class="brand-name">북적북적</span></a>
+          <a class="brand" href="index.html" title="홈으로"><img src="assets/logo.svg?v=44"><span class="brand-name">북적북적</span></a>
           <nav class="appbar-nav">
             ${item('dashboard', '🏠', '대시보드')}
             ${item('users', '👥', '계정')}
@@ -623,14 +623,14 @@ const Admin = (() => {
       const danger = new Set(['login_failed', 'delete_user', 'purge_file', 'purge_folder', 'file_blocked', 'malware_blocked', 'admin_delete_share', '2fa_disabled']);
       const rows = logs.map((l) => `
         <tr>
-          <td class="num" style="color:var(--text-muted)">${new Date(l.created_at).toLocaleString('ko-KR')}</td>
-          <td>${UI.escapeHtml(l.username || '—')}</td>
-          <td><code class="act-code">${UI.escapeHtml(l.action)}</code></td>
-          <td><span class="badge ${danger.has(l.action) ? 'off' : 'user'}">${UI.escapeHtml(actionKo(l.action))}</span></td>
-          <td style="color:var(--text-muted)">${UI.escapeHtml(l.detail)}</td>
-          <td class="num" style="color:var(--text-muted)">${UI.escapeHtml(l.ip)}</td>
+          <td class="num" style="color:var(--text-muted);white-space:nowrap">${new Date(l.created_at).toLocaleString('ko-KR')}</td>
+          <td style="white-space:nowrap">${UI.escapeHtml(l.username || '—')}</td>
+          <td style="white-space:nowrap"><code class="act-code">${UI.escapeHtml(l.action)}</code></td>
+          <td style="white-space:nowrap"><span class="badge ${danger.has(l.action) ? 'off' : 'user'}">${UI.escapeHtml(actionKo(l.action))}</span></td>
+          <td class="audit-detail">${UI.escapeHtml(l.detail)}</td>
+          <td class="num" style="color:var(--text-muted);white-space:nowrap">${UI.escapeHtml(l.ip)}</td>
         </tr>`).join('');
-      view.innerHTML = `<div class="table-wrap"><table><thead><tr><th>시각</th><th>사용자</th><th>동작코드</th><th>동작명</th><th>상세</th><th>IP</th></tr></thead><tbody>${rows || '<tr><td colspan=6>기록 없음</td></tr>'}</tbody></table></div>`;
+      view.innerHTML = `<div class="table-wrap"><table class="audit-table"><thead><tr><th>시각</th><th>사용자</th><th>동작코드</th><th>동작명</th><th style="width:99%">상세</th><th>IP</th></tr></thead><tbody>${rows || '<tr><td colspan=6>기록 없음</td></tr>'}</tbody></table></div>`;
     } catch (err) { view.innerHTML = `<div class="empty">⚠️ ${UI.escapeHtml(err.message)}</div>`; }
   }
 
