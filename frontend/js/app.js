@@ -15,6 +15,8 @@ const App = (() => {
     anchor: null, drag: null, // 선택 앵커 / 드래그 중 항목
     extFilter: new Set(), // 확장자 필터(비어있으면 전체)
     foldersOnly: false,   // 폴더만 보기
+    seenAt: 0,            // 현재 폴더를 '직전에' 열람한 시각(이 이후 생긴 항목만 NEW/수정)
+    seenFolder: null,     // seenAt이 캡처된 폴더 키(리프레시 시 재캡처 방지)
   };
   const root = () => document.getElementById('app');
   const isPriv = () => state.user && (state.user.role === 'admin' || state.user.role === 'manager');
@@ -35,7 +37,7 @@ const App = (() => {
     root().innerHTML = `
       <div class="login-screen">
         <form class="login-card" id="login-form">
-          <img src="assets/logo.svg?v=30" class="login-logo" alt="북적북적">
+          <img src="assets/logo.svg?v=31" class="login-logo" alt="북적북적">
           <div class="login-title">북적북적</div>
           <div class="login-sub">Book-Jeok · 우리끼리 나누는 파일 창고</div>
           <div class="field"><label>아이디</label><input class="input" name="username" autocomplete="username" placeholder="아이디" required></div>
@@ -59,7 +61,7 @@ const App = (() => {
       <div class="layout">
         <header class="appbar">
           <button class="icon-btn appbar-menu" id="menu-toggle" title="폴더">☰</button>
-          <div class="brand" id="brand-home" title="홈으로"><img src="assets/logo.svg?v=30"><span class="brand-name">북적북적</span></div>
+          <div class="brand" id="brand-home" title="홈으로"><img src="assets/logo.svg?v=31"><span class="brand-name">북적북적</span></div>
           ${isPriv() ? `<select class="input account-switcher" id="account-switcher"><option value="">내 파일</option></select>` : ''}
           <div class="topbar-spacer"></div>
           <nav class="appbar-nav">
@@ -166,7 +168,7 @@ const App = (() => {
         .map((f) => (typeof f === 'string' ? { path: f } : f))
         .filter((f) => f && f.path)
         .map((f) => ({ ...f, name: f.name || f.path.split('/').filter(Boolean).pop() || '(이름없음)' }));
-      state.files = list.files || []; state.usage = usage; state.selected.clear(); renderContent();
+      state.files = list.files || []; state.usage = usage; state.selected.clear(); captureSeen(); renderContent();
     } catch (err) { view.innerHTML = `<div class="empty"><div class="big">⚠️</div>${UI.escapeHtml(err.message)}</div>`; }
   }
 
@@ -279,12 +281,31 @@ const App = (() => {
   }
   const sortArrow = (key) => state.sort.key === key ? (state.sort.dir === 'asc' ? ' ▲' : ' ▼') : '';
 
+  // ── 폴더 열람('봤음') 상태 ──────
+  // NEW/수정 태그는 해당 폴더를 한 번 열람하면(다운로드 여부와 무관) 사라진다.
+  // 뷰어(로그인 사용자)·대상 계정별로 폴더의 마지막 열람 시각을 브라우저에 저장한다.
+  const SEEN_KEY = 'bj_seen';
+  function seenMap() { try { return JSON.parse(localStorage.getItem(SEEN_KEY) || '{}'); } catch { return {}; } }
+  const seenId = (folder) => `${state.ownerId || 'me'}|${folder}`;
+  const getSeen = (folder) => seenMap()[seenId(folder)] || 0;
+  function markSeen(folder) { const m = seenMap(); m[seenId(folder)] = Date.now(); try { localStorage.setItem(SEEN_KEY, JSON.stringify(m)); } catch {} }
+  // 폴더 진입 시 1회: 직전 열람 시각을 seenAt에 담고(태그 판정용), 지금을 '봤음'으로 기록.
+  function captureSeen() {
+    const key = seenId(state.folder);
+    if (state.seenFolder === key) return; // 같은 폴더 리프레시면 유지(방문 중 태그 안정)
+    state.seenAt = getSeen(state.folder);
+    markSeen(state.folder);
+    state.seenFolder = key;
+  }
+
   // ── 업데이트 태그 (최근 추가/수정) ──────
+  // 최근(7일 이내)이면서, 이 폴더를 마지막으로 열람한 시각 이후에 생긴 항목만 표시.
   function updateBadge(f, isFolder) {
     const created = f.createdAt ? new Date(f.createdAt).getTime() : 0;
     const upd = new Date((isFolder ? f.noteUpdatedAt : f.updatedAt) || 0).getTime();
-    if (upd && upd - created > 60000 && UI.isRecent(upd)) return '<span class="badge-upd" title="최근 수정됨">수정</span>';
-    if (created && UI.isRecent(created)) return '<span class="badge-new" title="최근 추가됨">NEW</span>';
+    const seen = state.seenAt || 0;
+    if (upd && upd - created > 60000 && UI.isRecent(upd) && upd > seen) return '<span class="badge-upd" title="최근 수정됨">수정</span>';
+    if (created && UI.isRecent(created) && created > seen) return '<span class="badge-new" title="최근 추가됨">NEW</span>';
     return '';
   }
 

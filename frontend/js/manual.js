@@ -48,7 +48,7 @@ const Manual = (() => {
         <li><b>이름 검색</b> — 툴바의 검색창에 입력하고 <b>엔터</b> 또는 <span class="kbd">🔎 조회</span>. 내 계정의 폴더·파일 이름을 찾습니다. <b>✕ 검색 나가기</b>로 복귀.</li>
         <li><b>확장자 필터</b> — <span class="kbd">🧩 확장자</span>에서 보고 싶은 확장자만 켜면 해당 파일만 표시됩니다.</li>
         <li><b>정렬</b> — 리스트 뷰의 <b>이름·크기·등록일·수정일·비고</b> 머리글 클릭(다시 누르면 오름/내림).</li>
-        <li><b>업데이트 태그</b> — 최근 7일 내 추가는 <span class="tagx new">NEW</span>, 수정은 <span class="tagx upd">수정</span>.</li>
+        <li><b>업데이트 태그</b> — 최근 7일 내 추가는 <span class="tagx new">NEW</span>, 수정은 <span class="tagx upd">수정</span>. 해당 폴더를 한 번 열람하면(다운로드 여부와 무관) 그 안 항목의 태그는 사라집니다(브라우저별로 기억).</li>
         <li><b>보기 전환</b> — 오른쪽 위 <span class="kbd">▦</span>(미리보기) / <span class="kbd">☰</span>(리스트).</li>
       </ul>
     </section>
