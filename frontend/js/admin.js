@@ -22,7 +22,7 @@ const Admin = (() => {
     root().innerHTML = `
       <div class="layout">
         <header class="appbar">
-          <a class="brand" href="index.html" title="홈으로"><img src="assets/logo.svg?v=44"><span class="brand-name">북적북적</span></a>
+          <a class="brand" href="index.html" title="홈으로"><img src="assets/logo.svg?v=45"><span class="brand-name">북적북적</span></a>
           <nav class="appbar-nav">
             ${item('dashboard', '🏠', '대시보드')}
             ${item('users', '👥', '계정')}
@@ -400,7 +400,7 @@ const Admin = (() => {
           <span class="muted" id="branch-count">총 ${branches.length}개</span>
           <div style="flex:1"></div><button class="btn btn-primary" id="add-branch">＋ 영업점 추가</button>
         </div>
-        <div class="branch-grid fade-in" id="branch-grid"></div>`;
+        <div class="branch-mgmt fade-in" id="branch-grid"></div>`;
       const grid = document.getElementById('branch-grid');
       const cnt = document.getElementById('branch-count');
       const renderGrid = (q) => {
