@@ -526,9 +526,6 @@ th { background: var(--bg); font-weight: 700; color: var(--text-muted); font-siz
   .content { padding: 14px 12px 40px; }
   .content-head { gap: 8px; }
   .content-head .btn .label { display: none; }
-  /* 새 폴더·필터를 우측 끝으로(검색줄 뒤). 필터 패널은 좌측으로 펼쳐져 화면 안에 유지 */
-  #new-folder { order: 8; }
-  .extfilter { order: 9; }
   .autosort { font-size: 12px; }
   .file-grid { grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 10px; }
   .file-ico { font-size: 32px; }
