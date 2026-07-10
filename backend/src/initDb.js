@@ -114,6 +114,11 @@ ALTER TABLE folders ADD COLUMN IF NOT EXISTS color TEXT NOT NULL DEFAULT '';
 ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check;
 ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN ('user','manager','admin'));
 
+-- 사용자 설정: 알림 이메일 / 이메일 수신 여부 / 동일 이름 업로드 처리
+ALTER TABLE users ADD COLUMN IF NOT EXISTS email TEXT NOT NULL DEFAULT '';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS notify_email BOOLEAN NOT NULL DEFAULT TRUE;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS upload_conflict VARCHAR(16) NOT NULL DEFAULT 'rename'; -- rename | overwrite
+
 -- notices: 노출 대상 권한 (기본: 전체)
 ALTER TABLE notices ADD COLUMN IF NOT EXISTS target_roles TEXT[] NOT NULL DEFAULT ARRAY['admin','manager','user'];
 

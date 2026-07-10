@@ -39,6 +39,7 @@ const API = (() => {
     logout: () => req('POST', '/auth/logout'),
     me: () => req('GET', '/auth/me'),
     changePassword: (currentPassword, newPassword) => req('POST', '/auth/change-password', { currentPassword, newPassword }),
+    updateSettings: (data) => req('PATCH', '/auth/settings', data),
     // files & folders
     listFiles: (folder, ownerId) => req('GET', `/files?folder=${encodeURIComponent(folder)}${ownerId ? '&ownerId=' + ownerId : ''}`),
     tree: (ownerId) => req('GET', `/files/tree${ownerId ? '?ownerId=' + ownerId : ''}`),

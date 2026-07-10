@@ -238,7 +238,8 @@ router.get('/', authenticate, wrap(resolveOwner), wrap(async (req, res) => {
 router.post('/upload', authenticate, wrap(resolveOwner), upload.array('file', 30), wrap(async (req, res) => {
   const folder = normalizeFolder(req.body.folder);
   if (!req.files || req.files.length === 0) return res.status(400).json({ error: '업로드할 파일이 없습니다.' });
-  const owner = await query('SELECT quota_bytes, role FROM users WHERE id=$1', [req.targetOwnerId]);
+  const owner = await query('SELECT quota_bytes, role, upload_conflict FROM users WHERE id=$1', [req.targetOwnerId]);
+  const overwrite = owner.rows[0].upload_conflict === 'overwrite'; // 동일 이름: 덮어쓰기(이전 파일은 휴지통) vs 번호 붙이기
   // 관리자는 무제한, 그 외는 할당량 적용(0=미할당이므로 업로드 불가)
   if (owner.rows[0].role !== 'admin') {
     const quota = Number(owner.rows[0].quota_bytes);
@@ -262,7 +263,14 @@ router.post('/upload', authenticate, wrap(resolveOwner), upload.array('file', 30
     // YARA 악성 패턴 검사(로컬, 오프라인). 매칭되면 저장하지 않고 삭제.
     const mal = await yara.scanFile(f.path);
     if (!mal.ok) { await fsp.unlink(f.path).catch(() => {}); rejected.push({ name: originalName, reason: `악성 패턴 감지(${mal.rule})` }); await audit(req, 'malware_blocked', `${originalName} (${mal.rule})`); continue; }
-    const name = await uniqueFileName(req.targetOwnerId, folder, originalName);
+    let name;
+    if (overwrite) {
+      // 덮어쓰기: 같은 이름 기존 파일을 휴지통으로 보내고(30일 복원 가능) 원래 이름 유지
+      await query('UPDATE files SET deleted_at=now() WHERE owner_id=$1 AND folder=$2 AND original_name=$3 AND deleted_at IS NULL', [req.targetOwnerId, folder, originalName]);
+      name = originalName;
+    } else {
+      name = await uniqueFileName(req.targetOwnerId, folder, originalName);
+    }
     const row = await query(
       `INSERT INTO files (owner_id, folder, original_name, stored_name, size_bytes, mime_type)
        VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,

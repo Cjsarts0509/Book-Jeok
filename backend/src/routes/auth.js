@@ -80,14 +80,30 @@ router.post('/logout', authenticate, wrap(async (req, res) => {
 
 // GET /api/auth/me
 router.get('/me', authenticate, wrap(async (req, res) => {
+  const s = await query('SELECT email, notify_email, upload_conflict FROM users WHERE id=$1', [req.user.id]);
+  const row = s.rows[0] || {};
   res.json({
     user: {
       id: req.user.id,
       username: req.user.username,
       displayName: req.user.display_name,
       role: req.user.role,
+      email: row.email || '',
+      notifyEmail: row.notify_email !== false,
+      uploadConflict: row.upload_conflict || 'rename',
     },
   });
+}));
+
+// PATCH /api/auth/settings  (본인 설정: 알림 이메일·수신여부·동일이름 처리)
+router.patch('/settings', authenticate, wrap(async (req, res) => {
+  const email = String(req.body.email || '').trim();
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ error: '이메일 형식이 올바르지 않습니다.' });
+  const notifyEmail = req.body.notifyEmail !== false;
+  const conflict = req.body.uploadConflict === 'overwrite' ? 'overwrite' : 'rename';
+  await query('UPDATE users SET email=$1, notify_email=$2, upload_conflict=$3, updated_at=now() WHERE id=$4', [email, notifyEmail, conflict, req.user.id]);
+  await audit(req, 'update_settings', `email=${email ? '설정' : '없음'} notify=${notifyEmail} conflict=${conflict}`);
+  res.json({ ok: true, email, notifyEmail, uploadConflict: conflict });
 }));
 
 // POST /api/auth/change-password  (본인 비밀번호 변경)

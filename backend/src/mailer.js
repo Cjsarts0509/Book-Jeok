@@ -10,7 +10,9 @@ const PORT = parseInt(process.env.SMTP_PORT || '587', 10);
 const SECURE = process.env.SMTP_SECURE === 'true' || PORT === 465;
 const USER = process.env.SMTP_USER || '';
 const PASS = process.env.SMTP_PASS || '';
-const FROM = process.env.MAIL_FROM || USER;
+// 표시 이름을 붙이면 받는 사람에게 "북적북적 알림"으로 보임(주소는 Gmail이 강제하므로 그대로).
+const FROM = process.env.MAIL_FROM || (USER ? `북적북적 알림 <${USER}>` : '');
+const REPLY_TO = process.env.MAIL_REPLY_TO || '';
 
 const enabled = () => !!HOST && !!USER;
 
@@ -32,7 +34,9 @@ async function send({ to, subject, html, text }) {
   if (!t) throw new Error('SMTP가 설정되지 않았습니다. SMTP_HOST/SMTP_USER/SMTP_PASS 환경변수를 설정하세요.');
   const rcpt = recipients(to);
   if (!rcpt.length) throw new Error('수신자가 없습니다. REPORT_TO 환경변수를 설정하거나 수신자를 지정하세요.');
-  return t.sendMail({ from: FROM, to: rcpt.join(', '), subject, html, text });
+  const msg = { from: FROM, to: rcpt.join(', '), subject, html, text };
+  if (REPLY_TO) msg.replyTo = REPLY_TO;
+  return t.sendMail(msg);
 }
 
 // 설정 점검(연결 확인). 실패해도 throw하지 않고 결과 반환.

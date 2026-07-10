@@ -37,7 +37,7 @@ const App = (() => {
     root().innerHTML = `
       <div class="login-screen">
         <form class="login-card" id="login-form">
-          <img src="assets/logo.svg?v=37" class="login-logo" alt="북적북적">
+          <img src="assets/logo.svg?v=38" class="login-logo" alt="북적북적">
           <div class="login-title">북적북적</div>
           <div class="login-sub">Book-Jeok · 우리끼리 나누는 파일 창고</div>
           <div class="field"><label>아이디</label><input class="input" name="username" autocomplete="username" placeholder="아이디" required></div>
@@ -61,7 +61,7 @@ const App = (() => {
       <div class="layout">
         <header class="appbar">
           <button class="icon-btn appbar-menu" id="menu-toggle" title="폴더">☰</button>
-          <div class="brand" id="brand-home" title="홈으로"><img src="assets/logo.svg?v=37"><span class="brand-name">북적북적</span></div>
+          <div class="brand" id="brand-home" title="홈으로"><img src="assets/logo.svg?v=38"><span class="brand-name">북적북적</span></div>
           ${isPriv() ? `<select class="input account-switcher" id="account-switcher"><option value="">내 파일</option></select>` : ''}
           <div class="topbar-spacer"></div>
           <nav class="appbar-nav">
@@ -70,7 +70,7 @@ const App = (() => {
             <div class="nav-item" data-nav="trash"><span class="ico">🗑️</span><span class="t">휴지통</span></div>
             ${admin ? '<a class="nav-item" href="admin.html"><span class="ico">⚙️</span><span class="t">관리자</span></a>' : ''}
             <div class="nav-item" data-nav="help"><span class="ico">❓</span><span class="t">도움말</span></div>
-            <div class="nav-item" data-nav="password"><span class="ico">🔑</span><span class="t">비밀번호</span></div>
+            <div class="nav-item" data-nav="settings"><span class="ico">⚙️</span><span class="t">설정</span></div>
             <div class="nav-item" data-nav="logout"><span class="ico">🚪</span><span class="t">로그아웃</span></div>
           </nav>
           <div class="user-chip-sm">${UI.escapeHtml(state.user.displayName)} · ${roleLabel(state.user.role)}</div>
@@ -87,7 +87,7 @@ const App = (() => {
       <div class="drop-overlay hidden" id="drop-overlay"><div class="drop-inner"><div class="drop-ic">📥</div>여기에 놓아 업로드<div class="drop-sub">현재 폴더로 올라갑니다</div></div></div>`;
     root().querySelectorAll('.appbar-nav [data-nav]').forEach((el) => el.addEventListener('click', () => {
       const n = el.dataset.nav;
-      if (n === 'logout') doLogout(); else if (n === 'password') changePasswordModal(); else if (n === 'files') resetToOwn(); else if (n === 'help') helpModal(); else if (n === 'trash') trashModal(); else if (n === 'shares') shareManageModal();
+      if (n === 'logout') doLogout(); else if (n === 'settings') settingsModal(); else if (n === 'files') resetToOwn(); else if (n === 'help') helpModal(); else if (n === 'trash') trashModal(); else if (n === 'shares') shareManageModal();
     }));
     document.getElementById('menu-toggle').addEventListener('click', toggleTree);
     document.getElementById('tree-backdrop').addEventListener('click', toggleTree);
@@ -1105,18 +1105,44 @@ const App = (() => {
     m.q('#mclose').addEventListener('click', m.close);
   }
 
-  function changePasswordModal() {
-    const m = UI.modal(`<h3>비밀번호 변경</h3>
-      <div class="field"><label>현재 비밀번호</label><input class="input" type="password" id="cur"></div>
-      <div class="field"><label>새 비밀번호 (8자 이상)</label><input class="input" type="password" id="nw"></div>
-      <div class="field"><label>새 비밀번호 확인</label><input class="input" type="password" id="nw2"><span class="pw-match muted" id="match"></span></div>
-      <div class="modal-actions"><button class="btn btn-ghost" id="c">취소</button><button class="btn btn-primary" id="ok">변경</button></div>`);
+  async function settingsModal() {
+    const m = UI.modal(`<h3>⚙️ 내 설정</h3><div id="set-body"><p class="muted">불러오는 중…</p></div><div class="modal-actions"><button class="btn btn-primary" id="set-close">닫기</button></div>`);
+    m.el.querySelector('.modal').classList.add('modal-wide');
+    m.q('#set-close').addEventListener('click', m.close);
+    let u;
+    try { u = (await API.me()).user; } catch (e) { m.q('#set-body').innerHTML = `<p class="muted" style="color:var(--danger)">${UI.escapeHtml(e.message)}</p>`; return; }
+    m.q('#set-body').innerHTML = `
+      <div class="set-sec">
+        <div class="dash-h">🔔 알림</div>
+        <div class="field"><label>알림 받을 이메일</label><input class="input" id="s-email" type="email" placeholder="예: name@example.com" value="${UI.escapeHtml(u.email || '')}"></div>
+        <label class="set-check"><input type="checkbox" id="s-notify" ${u.notifyEmail ? 'checked' : ''}> 이메일로 알림 받기</label>
+      </div>
+      <div class="set-sec">
+        <div class="dash-h">⬆️ 업로드</div>
+        <label class="muted" style="font-size:13px">같은 이름 파일을 올릴 때</label>
+        <label class="set-radio"><input type="radio" name="s-conf" value="rename" ${u.uploadConflict !== 'overwrite' ? 'checked' : ''}> 번호 붙여 보관 <span class="muted">— 기존 파일 그대로 두고 (2), (3)…</span></label>
+        <label class="set-radio"><input type="radio" name="s-conf" value="overwrite" ${u.uploadConflict === 'overwrite' ? 'checked' : ''}> 덮어쓰기 <span class="muted">— 이전 파일은 휴지통으로(30일 복원 가능)</span></label>
+        <div style="text-align:right;margin-top:8px"><button class="btn btn-primary btn-sm" id="s-save">저장</button></div>
+      </div>
+      <hr class="manual-hr" style="margin:16px 0">
+      <div class="set-sec">
+        <div class="dash-h">🔑 비밀번호 변경</div>
+        <div class="field"><label>현재 비밀번호</label><input class="input" type="password" id="cur"></div>
+        <div class="field"><label>새 비밀번호 (8자 이상)</label><input class="input" type="password" id="nw"></div>
+        <div class="field"><label>새 비밀번호 확인</label><input class="input" type="password" id="nw2"><span class="pw-match muted" id="match"></span></div>
+        <div style="text-align:right"><button class="btn btn-secondary btn-sm" id="pw-save">비밀번호 변경</button></div>
+      </div>`;
+    m.q('#s-save').addEventListener('click', async () => {
+      try {
+        await API.updateSettings({ email: m.q('#s-email').value.trim(), notifyEmail: m.q('#s-notify').checked, uploadConflict: m.el.querySelector('input[name=s-conf]:checked').value });
+        UI.toast('설정이 저장되었습니다 ✅', 'success');
+      } catch (err) { UI.toast(err.message, 'error'); }
+    });
     const check = () => { const a = m.q('#nw').value, b = m.q('#nw2').value; const el = m.q('#match'); if (!b) { el.textContent = ''; return; } if (a === b) { el.textContent = '✓ 일치'; el.className = 'pw-match ok'; } else { el.textContent = '✗ 불일치'; el.className = 'pw-match bad'; } };
     m.q('#nw').addEventListener('input', check); m.q('#nw2').addEventListener('input', check);
-    m.q('#c').addEventListener('click', m.close);
-    m.q('#ok').addEventListener('click', async () => {
+    m.q('#pw-save').addEventListener('click', async () => {
       if (m.q('#nw').value !== m.q('#nw2').value) return UI.toast('새 비밀번호가 일치하지 않습니다', 'error');
-      try { await API.changePassword(m.q('#cur').value, m.q('#nw').value); UI.toast('변경됨 🔐', 'success'); m.close(); } catch (err) { UI.toast(err.message, 'error'); }
+      try { await API.changePassword(m.q('#cur').value, m.q('#nw').value); UI.toast('비밀번호가 변경되었습니다 🔐', 'success'); m.q('#cur').value = m.q('#nw').value = m.q('#nw2').value = ''; } catch (err) { UI.toast(err.message, 'error'); }
     });
   }
 
