@@ -346,8 +346,11 @@ textarea.input { resize: vertical; }
 @media (max-width: 640px) {
   .head-right { align-items: flex-start; margin-left: 0; width: 100%; }
   .head-right .breadcrumb, .head-right .usage-line { justify-content: flex-start; }
-  .searchbox { flex: 1 1 100%; }
-  .searchbox .input { flex: 1; width: auto; }
+  .head-right .usage-line { flex-wrap: nowrap; }
+  .head-right .usage-line .usage-bar { display: none; }  /* 좁은 화면: 게이지 숨기고 📊는 한 줄 유지 */
+  .searchbox { flex: 1 1 150px; min-width: 0; }
+  .searchbox .input { flex: 1; width: auto; min-width: 0; }
+  .extfilter { flex: 0 0 auto; }
   .rep-row { grid-template-columns: 1fr auto; }
   .rep-row .rep-bar { grid-column: 1 / -1; order: 3; }
 }
@@ -549,6 +552,24 @@ th { background: var(--bg); font-weight: 700; color: var(--text-muted); font-siz
   .selbar > div:empty { display: none; }          /* 가운데 스페이서 제거 */
   .selbar b { flex: 1 0 100%; font-size: 13px; }  /* 개수는 첫 줄 */
   .selbar .btn { flex: 1 1 auto; justify-content: center; }
+  /* 선택 없을 땐 얇은 한 줄로(버튼 숨김) → 화면 공간 절약 */
+  .selbar.empty { padding: 7px 12px; }
+  .selbar.empty b { flex: 1 1 auto; font-size: 12.5px; }
+  .selbar.empty .btn { display: none; }
+
+  /* 그리드 카드: 2열 + 액션 버튼을 카드 하단에 담아 넘침 방지 */
+  .file-grid { grid-template-columns: repeat(2, 1fr); gap: 10px; }
+  .file-card { display: flex; flex-direction: column; overflow: hidden; padding: 14px 10px 10px; }
+  .file-card .file-name, .file-card .file-meta, .file-card .file-note { width: 100%; }
+  .file-actions { position: static; order: 9; opacity: 1; display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--border); }
+  .file-actions .icon-btn { width: 34px; height: 34px; font-size: 16px; }
+
+  /* 리스트 행 살짝 컴팩트 */
+  .filetable tr { padding-top: 9px; padding-bottom: 9px; }
+
+  /* 토스트: 상단 네비 가리지 않게 하단 중앙 */
+  #toast-wrap { top: auto; bottom: 16px; left: 12px; right: 12px; align-items: stretch; }
+  .toast { text-align: center; }
 
   /* 브레드크럼: 길면 가로 스크롤(줄바꿈 대신 한 줄 유지) */
   .breadcrumb { flex-wrap: nowrap; overflow-x: auto; max-width: 100%; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
