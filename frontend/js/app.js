@@ -1153,8 +1153,8 @@ const App = (() => {
     files.sort((a, b) => a.name.localeCompare(b.name, 'ko'));
     const splitExt = (nm) => { const i = nm.lastIndexOf('.'); return i > 0 ? [nm.slice(0, i), nm.slice(i)] : [nm, '']; };
     const now = new Date(); const p2 = (x) => String(x).padStart(2, '0');
-    const y = now.getFullYear(), mo = p2(now.getMonth() + 1), d = p2(now.getDate());
-    const dateFmt = { 'YYYY-MM-DD': `${y}-${mo}-${d}`, 'YYYYMMDD': `${y}${mo}${d}`, 'YYMMDD': `${String(y).slice(2)}${mo}${d}` };
+    const todayIso = `${now.getFullYear()}-${p2(now.getMonth() + 1)}-${p2(now.getDate())}`;
+    const fmtDate = (iso, fmt) => { if (!iso) return ''; const [Y, M, D] = iso.split('-'); if (fmt === 'YYYYMMDD') return `${Y}${M}${D}`; if (fmt === 'YYMMDD') return `${Y.slice(2)}${M}${D}`; return `${Y}-${M}-${D}`; };
     const m = UI.modal(`<h3>🔢 일괄 이름변경 <span class="muted" style="font-size:13px;font-weight:400">· ${files.length}개</span></h3>
       <p class="muted" style="font-size:12px;margin-bottom:10px">넣을 항목을 켜서 순서대로 조합됩니다. (확장자는 유지)</p>
       <div class="br-build">
@@ -1167,8 +1167,8 @@ const App = (() => {
           <p class="br-desc">기존 파일 이름을 그대로 사용</p>
         </div>
         <div class="br-item">
-          <label class="br-opt"><input type="checkbox" id="br-useDate"><span class="br-name">날짜</span><select class="input br-inline" id="br-date" disabled><option>YYYY-MM-DD</option><option>YYYYMMDD</option><option>YYMMDD</option></select></label>
-          <p class="br-desc">오늘 날짜를 넣습니다 (${dateFmt['YYYY-MM-DD']})</p>
+          <label class="br-opt"><input type="checkbox" id="br-useDate"><span class="br-name">날짜</span><input class="input br-inline" id="br-datepick" type="date" value="${todayIso}" disabled><select class="input br-inline" id="br-date" disabled><option>YYYY-MM-DD</option><option>YYYYMMDD</option><option>YYMMDD</option></select></label>
+          <p class="br-desc">기본은 오늘 · 원하면 특정 날짜 선택</p>
         </div>
         <div class="br-item">
           <label class="br-opt"><input type="checkbox" id="br-useSeq"><span class="br-name">연번</span><span class="br-inline2">시작 <input class="input" id="br-start" type="number" value="1" min="0" style="width:64px" disabled> 자릿수 <select class="input" id="br-pad" disabled><option value="1">1</option><option value="2">2</option><option value="3" selected>3</option><option value="4">4</option></select></span></label>
@@ -1185,13 +1185,13 @@ const App = (() => {
     m.el.querySelector('.modal').classList.add('modal-wide');
     // 체크박스로 개별 입력 활성/비활성
     const bind = (cb, ...ctrls) => { const on = m.q(cb).checked; ctrls.forEach((c) => { const el = m.q(c); if (el) el.disabled = !on; }); };
-    const syncEnabled = () => { bind('#br-usePrefix', '#br-prefix'); bind('#br-useDate', '#br-date'); bind('#br-useSeq', '#br-start', '#br-pad'); };
+    const syncEnabled = () => { bind('#br-usePrefix', '#br-prefix'); bind('#br-useDate', '#br-datepick', '#br-date'); bind('#br-useSeq', '#br-start', '#br-pad'); };
     const buildName = (base, idx) => {
       const sep = m.q('#br-sep').value;
       const parts = [];
       if (m.q('#br-usePrefix').checked && m.q('#br-prefix').value.trim()) parts.push(m.q('#br-prefix').value.trim());
       if (m.q('#br-useName').checked) parts.push(base);
-      if (m.q('#br-useDate').checked) parts.push(dateFmt[m.q('#br-date').value]);
+      if (m.q('#br-useDate').checked) parts.push(fmtDate(m.q('#br-datepick').value || todayIso, m.q('#br-date').value));
       if (m.q('#br-useSeq').checked) { const start = parseInt(m.q('#br-start').value, 10) || 0; const pad = parseInt(m.q('#br-pad').value, 10) || 1; parts.push(String(start + idx).padStart(pad, '0')); }
       return parts.join(sep).replace(/[/\\]/g, '_').replace(/[\x00-\x1f]/g, '').trim();
     };
