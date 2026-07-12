@@ -640,6 +640,11 @@ const App = (() => {
     if (backHooked) return; backHooked = true;
     const rearm = () => history.pushState({ bjGuard: 1 }, '');
     rearm(); // 상단에 가드 상태 하나를 항상 유지
+    // 네이티브 카메라/파일 선택으로 페이지가 백그라운드 갔다 오면 가드 상태가 사라질 수 있음 →
+    // 돌아왔을 때 가드가 없으면 다시 세워, 첫 뒤로가기에 바로 이탈하지 않게 한다(모달 열림 중엔 제외).
+    const ensureGuard = () => { if (state.user && !document.querySelector('.modal-backdrop') && !(history.state && history.state.bjGuard)) rearm(); };
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') ensureGuard(); });
+    window.addEventListener('pageshow', ensureGuard);
     let exitArmed = false, exitTimer = null;
     window.addEventListener('popstate', () => {
       if (window.__bjModalHandledPop) return; // 모달은 common.js 가 처리(자체 히스토리 항목)

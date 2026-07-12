@@ -74,7 +74,7 @@ window.ISBN = (() => {
     });
     return loaded[src];
   }
-  const ensureZXing = () => loadScript('vendor/zxing.min.js?v=89', 'ZXing');
+  const ensureZXing = () => loadScript('vendor/zxing.min.js?v=90', 'ZXing');
   const TESS_CDN = 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js';
   const ensureTesseract = () => loadScript(TESS_CDN, 'Tesseract');
 
@@ -233,88 +233,87 @@ window.ISBN = (() => {
     return c;
   }
 
-  // 캔버스를 90° 시계방향 회전한 새 캔버스 (세로 바코드를 가로로 눕혀 정확히 디코드하기 위함)
-  function rotate90(canvas) {
-    const w = canvas.width, h = canvas.height;
-    const c = document.createElement('canvas'); c.width = h; c.height = w; // 가로/세로 뒤바뀜
-    const ctx = c.getContext('2d');
-    ctx.translate(h, 0); ctx.rotate(Math.PI / 2);           // 90° CW
-    ctx.drawImage(canvas, 0, 0);
-    return c;
-  }
-  // 한 캔버스에서 바코드를 "찾고 → 그 자리를 흰색으로 지우고 → 다시 찾기" 반복해 여러 개를 모두 수집.
-  // ZXing 은 이미지당 1개만 반환하므로, 겹쳐 있어도 마스킹으로 두 번째·세 번째를 잡아낸다.
-  // toSource(cbox): 캔버스 좌표 박스 → 원본 좌표 박스 매퍼(회전 보정 포함). reliable: 판독축이 가로였는지.
-  async function zxDecodeAllOnCanvas(canvas, toSource, maxCodes) {
+  // 한 캔버스에서 바코드를 마스킹 반복으로 모두 디코드 → [{code, cx, cy, along, clean}] (캔버스 좌표).
+  // clean: resultPoints 가 '가로로 또렷하게'(dx≫dy) 벌어짐 = ZXing 내부 회전 없이 바로 읽음 → 위치 신뢰.
+  // 세로/기울임 바코드는 내부 회전으로 읽혀 위치가 부정확(clean=false) → 셀 경계로 위치 대체.
+  async function decodeCellCodes(canvas, maxCodes) {
     const ctx = canvas.getContext('2d');
     const out = [];
-    for (let i = 0; i < (maxCodes || 5); i++) {
+    for (let i = 0; i < (maxCodes || 4); i++) {
       let r;
       try { r = await (await ensureReader()).decodeFromImageUrl(canvas.toDataURL('image/png')); }
       catch (_) { break; }                                   // NotFound → 더 없음
       if (!r || !isValidProduct(r.getText())) break;
       const code = clean(r.getText());
+      if (out.some((o) => o.code === code)) break;           // 같은 것만 반복(마스킹 실패) → 더 없음
       let pts = null; try { pts = r.getResultPoints && r.getResultPoints(); } catch (_) {}
-      let cbox = null, mask = null, reliable = false;
+      let cx = null, cy = null, along = 0, cln = false, half = 0;
       if (pts && pts.length) {
-        // resultPoints 는 바코드 '판독 방향'의 양 끝점. 이 캔버스에서 가로로 벌어졌으면(=ZXing 이 내부 회전
-        // 없이 바로 읽음) 위치가 신뢰됨. 세로로 벌어졌으면 내부 회전으로 읽은 것 → 위치 부정확(reliable=false).
         let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
         for (const p of pts) { const px = p.getX(), py = p.getY(); if (px < minX) minX = px; if (px > maxX) maxX = px; if (py < minY) minY = py; if (py > maxY) maxY = py; }
-        const midX = (minX + maxX) / 2, midY = (minY + maxY) / 2;
         const dx = maxX - minX, dy = maxY - minY;
-        const horiz = dx >= dy; reliable = horiz && dx > 20;
-        const along = Math.max(dx, dy, 8);                   // 판독축 길이(바코드 폭)
-        const cross = Math.max(Math.min(dx, dy), along * 0.5); // 수직축(바 높이) 추정
-        const bwc = horiz ? along : cross, bhc = horiz ? cross : along;
-        cbox = { x: midX - bwc / 2, y: midY - bhc / 2, w: bwc, h: bhc };
-        const pad = along * 0.12;                            // 마스킹은 넉넉히 덮어 재검출 방지
-        mask = { x: cbox.x - pad, y: cbox.y - pad, w: cbox.w + 2 * pad, h: cbox.h + 2 * pad };
+        along = Math.max(dx, dy, 8); cx = (minX + maxX) / 2; cy = (minY + maxY) / 2;
+        cln = dx > 1.6 * dy && dx > 25;                      // 가로로 또렷 = 위치 신뢰
+        half = along * 0.8;
       }
-      if (!out.some((o) => o.code === code)) out.push({ code, box: cbox ? toSource(cbox) : null, reliable });
-      if (!mask) break;                                      // 위치를 몰라 못 지우면 무한루프 방지 위해 종료
-      ctx.fillStyle = '#fff';
-      ctx.fillRect(mask.x, mask.y, mask.w, mask.h);
+      out.push({ code, cx, cy, along, clean: cln });
+      if (cx == null) break;
+      ctx.fillStyle = '#fff'; ctx.fillRect(cx - half, cy - half, half * 2, half * 2); // 넉넉한 정사각 마스크
     }
     return out;
   }
-  // 한 영역(x,y,w,h)을 배율 tl 로 잘라 0°(+선택적 90°, 샤픈)로 마스킹 디코드. 회전은 직접 걸어 좌표를 정확히 역매핑.
-  async function collectFromRegion(source, x, y, w, h, tl, opts, record) {
-    const k = tl / Math.max(w, h);
-    const ch = cropCanvas(source, x, y, w, h, tl).height;    // 회전 역매핑용 캔버스 높이(배율 고정이라 일정)
-    const src0 = (b) => ({ x: x + b.x / k, y: y + b.y / k, w: b.w / k, h: b.h / k });
-    // 90° CW 로 눕혀 읽은 좌표를 원래 방향으로 되돌림: crop(cx,cy)=(rotY, ch-rotX)
-    const src90 = (b) => ({ x: x + b.y / k, y: y + (ch - (b.x + b.w)) / k, w: b.h / k, h: b.w / k });
-    const mk = () => cropCanvas(source, x, y, w, h, tl);     // 매 패스마다 새 캔버스(마스킹으로 변형되므로)
-    const max = opts.max || 5;
-    (await zxDecodeAllOnCanvas(mk(), src0, max)).forEach(record);
-    if (opts.enhance) (await zxDecodeAllOnCanvas(enhance(mk()), src0, max)).forEach(record);
-    if (opts.rot90) (await zxDecodeAllOnCanvas(rotate90(mk()), src90, max)).forEach(record); // 세로 바코드용
+  // 캔버스를 90° 시계방향 회전한 새 캔버스 (세로 바코드를 가로로 눕혀 또렷이 읽고 위치를 정확히 얻기 위함)
+  function rotate90(canvas) {
+    const c = document.createElement('canvas'); c.width = canvas.height; c.height = canvas.width;
+    const ctx = c.getContext('2d'); ctx.translate(canvas.height, 0); ctx.rotate(Math.PI / 2); ctx.drawImage(canvas, 0, 0);
+    return c;
   }
-  // ZXing 은 이미지당 1개만 디코드 → 통짜(0°/90°/샤픈) + 겹치는 타일을 마스킹 반복으로 모두 수집
+  // ZXing 위치가 회전 사진에서 부정확 → 격자 셀로 디코드. 가로로 또렷하게 읽힌 것(clean)은 정확한 중심·크기로
+  // 타이트 박스. 세로 바코드는 셀을 90° 눕혀 또렷이 읽고 좌표를 되돌려 타이트 박스. 그래도 안되면 셀 경계로 위치.
   async function zxingMultiTiles(source) {
     try { await ensureZXing(); } catch (_) { return []; }
     const nw = source.naturalWidth || source.videoWidth || source.width;
     const nh = source.naturalHeight || source.videoHeight || source.height;
-    const found = new Map();
-    // 위치는 '신뢰(가로로 바로 읽힘)' 박스를 우선 채택 — 회전 사진의 부정확 박스에 덮이지 않게
-    const record = (r) => {
-      const cur = found.get(r.code);
-      if (!cur) { found.set(r.code, { code: r.code, box: r.box || null, reliable: !!r.reliable }); return; }
-      if (r.box && (!cur.box || (r.reliable && !cur.reliable))) { cur.box = r.box; cur.reliable = !!r.reliable; }
+    const best = new Map(); // code -> {box, tight, area}  (타이트 > 셀, 같은 등급이면 작은 것 우선)
+    const record = (code, box, tight) => {
+      const area = box.w * box.h, cur = best.get(code);
+      if (!cur || (tight && !cur.tight) || (tight === cur.tight && area < cur.area)) best.set(code, { box, tight, area });
     };
-    // 1) 통짜: 최고배율은 0°+샤픈+90°, 보조배율은 0°+샤픈(흐림 보강)
-    const hi = Math.min(2200, Math.max(nw, nh));
-    await collectFromRegion(source, 0, 0, nw, nh, hi, { enhance: true, rot90: true, max: 6 }, record);
-    await collectFromRegion(source, 0, 0, nw, nh, 1600, { enhance: true, rot90: false, max: 6 }, record);
-    // 2) 겹치는 3x3 타일 — 프레임 대비 작은 바코드까지 확대해 0°로 재시도
-    const nx = 3, ny = 3, ov = 0.45, tw = nw / nx, th = nh / ny;
-    for (let iy = 0; iy < ny; iy++) for (let ix = 0; ix < nx; ix++) {
-      const x = Math.max(0, tw * ix - tw * ov), y = Math.max(0, th * iy - th * ov);
-      const w = Math.min(nw - x, tw * (1 + 2 * ov)), h = Math.min(nh - y, th * (1 + 2 * ov));
-      await collectFromRegion(source, x, y, w, h, 1400, { enhance: false, rot90: false, max: 4 }, record);
-    }
-    return [...found.values()].map((r) => ({ code: r.code, box: r.box }));
+    const scanGrid = async (cols, rows, ov, useEnhance, useRot) => {
+      const tw = nw / cols, th = nh / rows;
+      for (let iy = 0; iy < rows; iy++) for (let ix = 0; ix < cols; ix++) {
+        const x = Math.max(0, tw * ix - tw * ov), y = Math.max(0, th * iy - th * ov);
+        const w = Math.min(nw - x, tw * (1 + 2 * ov)), h = Math.min(nh - y, th * (1 + 2 * ov));
+        const tl = Math.min(1600, Math.max(900, Math.round(Math.max(w, h) * 1.4)));
+        const k = tl / Math.max(w, h), ch = cropCanvas(source, x, y, w, h, tl).height;
+        const inCell = (sx, sy) => sx >= x - 2 && sx <= x + w + 2 && sy >= y - 2 && sy <= y + h + 2;
+        // 0° 판독: clean 이면 중심/크기 그대로 타이트 박스(가로 바코드)
+        const handle0 = (dets) => { for (const d of dets) {
+          let box = null, tight = false;
+          if (d.clean && d.cx != null) {
+            const scx = x + d.cx / k, scy = y + d.cy / k, sw = Math.max(d.along / k, 24);
+            if (inCell(scx, scy)) { box = { x: scx - sw * 0.6, y: scy - sw * 0.34, w: sw * 1.2, h: sw * 0.68 }; tight = true; }
+          }
+          record(d.code, box || { x, y, w, h }, tight);
+        } };
+        // 90° 판독: 눕힌 프레임에서 clean 이면 좌표를 원래로 되돌려 세로 바코드용 타이트 박스
+        const handle90 = (dets) => { for (const d of dets) {
+          if (!d.clean || d.cx == null) continue;            // 눕혀도 안 또렷하면 0°/셀 결과에 맡김
+          const cellX = d.cy, cellY = ch - d.cx;             // 90° 역매핑: crop(cx,cy)=(rotY, ch-rotX)
+          const scx = x + cellX / k, scy = y + cellY / k, sw = Math.max(d.along / k, 24);
+          if (inCell(scx, scy)) record(d.code, { x: scx - sw * 0.34, y: scy - sw * 0.6, w: sw * 0.68, h: sw * 1.2 }, true);
+        } };
+        handle0(await decodeCellCodes(cropCanvas(source, x, y, w, h, tl), 4));
+        if (useEnhance) handle0(await decodeCellCodes(enhance(cropCanvas(source, x, y, w, h, tl)), 4));
+        if (useRot) handle90(await decodeCellCodes(rotate90(cropCanvas(source, x, y, w, h, tl)), 4));
+      }
+    };
+    const someCoarse = () => [...best.values()].some((v) => !v.tight); // 위치를 정밀히 못 잡은 코드가 있나
+    await scanGrid(1, 1, 0, true, true);                    // 통짜: 가로/세로 모두 여기서 타이트 박스 시도(+샤픈)
+    if (best.size < 2 || someCoarse()) await scanGrid(2, 2, 0.2, true, true); // 놓친 것/흐린 것/회전 보강
+    // 박스는 2개 이상일 때(선택 UI)만 의미 있음 → 아직 위치가 거친 코드가 있을 때만 미세 격자로 정밀화
+    if (best.size >= 2 && someCoarse()) await scanGrid(3, 4, 0.12, false, true);
+    return [...best.entries()].map(([code, r]) => ({ code, box: r.box }));
   }
   // 네이티브 BarcodeDetector 를 통짜 + 확대 타일에 적용해 흐린/작은 바코드까지 위치와 함께 수집
   async function detectAllNativeTiled(source) {
