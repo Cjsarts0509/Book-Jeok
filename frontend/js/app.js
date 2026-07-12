@@ -1009,23 +1009,34 @@ const App = (() => {
     }
     const video = m.q('#scan-video');
     video.__push = onScan; // 테스트/디버그 훅
-    (async () => {
+    function camErrMsg(err) {
+      const n = err && err.name;
+      if (n === 'NotAllowedError' || n === 'SecurityError') return '카메라 권한이 거부되었습니다.<br><span style="font-size:12px">주소창의 자물쇠(🔒) → 사이트 권한 → 카메라를 <b>허용</b>으로 바꾼 뒤 다시 시도하세요.</span>';
+      if (n === 'NotFoundError' || n === 'OverconstrainedError') return '사용 가능한 카메라를 찾지 못했습니다.';
+      if (n === 'NotReadableError') return '다른 앱이 카메라를 쓰고 있습니다.<br><span style="font-size:12px">그 앱을 닫고 다시 시도하세요.</span>';
+      if (n === 'INSECURE') return '카메라는 보안 연결(HTTPS)에서만 사용할 수 있습니다.';
+      return '카메라를 열 수 없습니다.<br><span style="font-size:12px">권한을 허용했는지 확인하세요.</span>';
+    }
+    async function startCam() {
+      const hint = m.q('#scan-hint'); hint.style.display = ''; hint.innerHTML = '카메라 준비 중…';
       try {
         scanner = await window.ISBN.startLiveScan(video, onScan);
-        m.q('#scan-hint').style.display = 'none';
-        // 손전등 지원 시 버튼 노출
-        setTimeout(() => {
-          const tr = scanner.track && scanner.track();
+        hint.style.display = 'none';
+        setTimeout(() => { // 손전등 지원 시 버튼 노출
+          const tr = scanner && scanner.track && scanner.track();
           const caps = tr && tr.getCapabilities ? tr.getCapabilities() : null;
           if (caps && caps.torch) {
             const tb = m.q('#scan-torch'); tb.hidden = false;
-            tb.addEventListener('click', async () => { torchOn = !torchOn; try { await tr.applyConstraints({ advanced: [{ torch: torchOn }] }); tb.classList.toggle('on', torchOn); } catch (_) {} });
+            tb.onclick = async () => { torchOn = !torchOn; try { await tr.applyConstraints({ advanced: [{ torch: torchOn }] }); tb.classList.toggle('on', torchOn); } catch (_) {} };
           }
         }, 600);
       } catch (err) {
-        m.q('#scan-hint').innerHTML = '카메라를 열 수 없습니다.<br><span style="font-size:12px">권한을 허용했는지 확인하세요.</span>';
+        scanner = null;
+        hint.innerHTML = `${camErrMsg(err)}<br><button type="button" class="btn btn-secondary btn-sm" id="scan-retry" style="margin-top:10px">다시 시도</button>`;
+        m.q('#scan-retry')?.addEventListener('click', startCam);
       }
-    })();
+    }
+    startCam();
     m.q('#scan-clear').addEventListener('click', () => { items.clear(); renderList(); });
     m.q('#scan-close').addEventListener('click', m.close);
     m.q('#scan-save').addEventListener('click', async () => {
