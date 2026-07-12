@@ -1052,7 +1052,9 @@ const App = (() => {
       });
     }
 
-    m.q('#cam-go').addEventListener('click', async () => {
+    m.q('#cam-go').addEventListener('click', () => {
+      const count = kept.size;
+      const targetOwner = state.ownerId;
       const fd = new FormData(); fd.append('folder', state.folder);
       [...kept].forEach((i) => {
         const item = itemEl(i);
@@ -1067,13 +1069,16 @@ const App = (() => {
         fd.append('titles', title);
         fd.append('notes', item.querySelector('.cam-note').value.trim());
       });
-      m.q('#cam-go').disabled = true; m.q('#cam-go').textContent = '업로드 중…';
-      try {
-        const r = await API.upload(fd, state.ownerId);
-        if (r && r.rejected && r.rejected.length) UI.toast(`⚠️ ${r.rejected.length}장 차단됨`, 'error');
-        UI.toast('촬영 업로드 완료 ✅', 'success');
-        cleanup(); m.close(); loadAll();
-      } catch (err) { UI.toast(err.message, 'error'); m.q('#cam-go').disabled = false; m.q('#cam-go').textContent = `⬆️ ${kept.size}장 업로드`; }
+      // 업로드는 백엔드에서 처리 → 창은 바로 닫고 백그라운드로 전송(다른 작업 가능)
+      cleanup(); m.close();
+      UI.toast(`${count}장 업로드 중… (백그라운드)`, 'info');
+      API.upload(fd, targetOwner)
+        .then((r) => {
+          if (r && r.rejected && r.rejected.length) UI.toast(`⚠️ ${r.rejected.length}장 차단됨`, 'error');
+          UI.toast('촬영 업로드 완료 ✅', 'success');
+          loadAll();
+        })
+        .catch((err) => UI.toast('업로드 실패: ' + err.message, 'error'));
     });
   }
 
