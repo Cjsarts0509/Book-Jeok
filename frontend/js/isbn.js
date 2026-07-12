@@ -74,7 +74,7 @@ window.ISBN = (() => {
     });
     return loaded[src];
   }
-  const ensureZXing = () => loadScript('vendor/zxing.min.js?v=82', 'ZXing');
+  const ensureZXing = () => loadScript('vendor/zxing.min.js?v=83', 'ZXing');
   const TESS_CDN = 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js';
   const ensureTesseract = () => loadScript(TESS_CDN, 'Tesseract');
 
@@ -204,39 +204,6 @@ window.ISBN = (() => {
     return { success: false, isbn: null, candidates: [], method: 'NONE', message: '유효한 ISBN을 찾지 못했습니다.' };
   }
 
-  // ── 라이브 카메라 연속 스캔 ──────────
-  // videoEl 에 후면 카메라를 붙여 계속 디코드, 유효 바코드마다 onCode(code) 호출.
-  // 반환: { stop(), track() } — track 은 손전등 제어용 MediaStreamTrack
-  async function startLiveScan(videoEl, onCode) {
-    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      const e = new Error('INSECURE'); e.name = 'INSECURE'; throw e; // HTTPS/지원 안 됨
-    }
-    // 권한 프롬프트를 사용자 클릭 직후(활성화 유효)에 먼저 띄우고, 라이브러리는 그 다음 로드
-    let stream;
-    try {
-      stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false });
-    } catch (e) {
-      if (e && (e.name === 'OverconstrainedError' || e.name === 'NotFoundError')) {
-        stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false }); // 후면 없으면 아무 카메라
-      } else { throw e; }
-    }
-    let Z;
-    try { Z = await ensureZXing(); } catch (e) { try { stream.getTracks().forEach((t) => t.stop()); } catch (_) {} throw e; }
-    const hints = new Map();
-    hints.set(Z.DecodeHintType.POSSIBLE_FORMATS, [Z.BarcodeFormat.EAN_13, Z.BarcodeFormat.EAN_8, Z.BarcodeFormat.UPC_A]);
-    hints.set(Z.DecodeHintType.TRY_HARDER, true);
-    const reader = new Z.BrowserMultiFormatReader(hints, 250); // 스캔 간격(ms)
-    try {
-      await reader.decodeFromStream(stream, videoEl, (result) => {
-        if (result && isValidProduct(result.getText())) onCode(clean(result.getText()));
-      });
-    } catch (e) { try { stream.getTracks().forEach((t) => t.stop()); } catch (_) {} throw e; }
-    return {
-      stop() { try { reader.reset(); } catch (_) {} try { stream.getTracks().forEach((t) => t.stop()); } catch (_) {} },
-      track() { try { return stream.getVideoTracks()[0] || null; } catch (_) { return null; } },
-    };
-  }
-
   // ISBN 을 파일명에 안전하게 넣기용 하이픈 표기(978-89-...)는 생략, 숫자 그대로 사용
-  return { scan, startLiveScan, isValidBarcode, isBookIsbn, isValidProduct, extractCandidates, clean };
+  return { scan, isValidBarcode, isBookIsbn, isValidProduct, extractCandidates, clean };
 })();

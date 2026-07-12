@@ -285,22 +285,6 @@ textarea.input { resize: vertical; }
 .upload-sheet { display: flex; flex-direction: column; gap: 10px; margin-top: 8px; }
 .upload-sheet .btn { width: 100%; padding: 15px; font-size: 15px; }
 
-/* 바코드 연속 스캔 */
-.scan-wrap { position: relative; width: 100%; aspect-ratio: 4/3; background: #000; border-radius: var(--radius-sm); overflow: hidden; margin-bottom: 10px; }
-.scan-wrap video { width: 100%; height: 100%; object-fit: cover; display: block; }
-.scan-frame { position: absolute; left: 12%; right: 12%; top: 34%; bottom: 34%; border: 2px solid rgba(6,214,160,.9); border-radius: 8px; box-shadow: 0 0 0 100vmax rgba(0,0,0,.28); pointer-events: none; }
-.scan-hint { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center; color: #fff; font-size: 14px; padding: 16px; }
-.scan-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
-.scan-toggle { display: flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 600; cursor: pointer; }
-.scan-toggle input { width: 16px; height: 16px; }
-.scan-count { margin-left: auto; font-size: 13px; font-weight: 700; color: var(--ocean, #118AB2); }
-#scan-torch.on { background: var(--primary); }
-.scan-list { max-height: 32vh; overflow-y: auto; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg); }
-.scan-row { display: flex; align-items: center; gap: 8px; padding: 8px 11px; border-bottom: 1px solid var(--border); }
-.scan-row:last-child { border-bottom: none; }
-.scan-code { font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: .3px; }
-.scan-qty { font-size: 12px; font-weight: 700; color: #0a8f6c; background: rgba(6,214,160,.14); border-radius: 10px; padding: 1px 8px; }
-.scan-del { margin-left: auto; border: none; background: transparent; color: var(--danger); cursor: pointer; font-size: 14px; }
 
 /* 관리자 확장자 선택 그리드 */
 .ext-group { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px; margin-bottom: 12px; }
