@@ -74,7 +74,7 @@ window.ISBN = (() => {
     });
     return loaded[src];
   }
-  const ensureZXing = () => loadScript('vendor/zxing.min.js?v=90', 'ZXing');
+  const ensureZXing = () => loadScript('vendor/zxing.min.js?v=91', 'ZXing');
   const TESS_CDN = 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js';
   const ensureTesseract = () => loadScript(TESS_CDN, 'Tesseract');
 
@@ -131,6 +131,12 @@ window.ISBN = (() => {
     try { const r = await (await ensureReader()).decodeFromImageUrl(canvas.toDataURL('image/png')); if (r && isValidProduct(r.getText())) return clean(r.getText()); }
     catch (_) { /* NotFound → null */ }
     return null;
+  }
+  // 캔버스를 90° 시계방향 회전한 새 캔버스 (세로 바코드를 눕혀 ZXing 이 또렷이 읽게)
+  function rotate90(canvas) {
+    const c = document.createElement('canvas'); c.width = canvas.height; c.height = canvas.width;
+    const ctx = c.getContext('2d'); ctx.translate(canvas.height, 0); ctx.rotate(Math.PI / 2); ctx.drawImage(canvas, 0, 0);
+    return c;
   }
   // 원본 이미지에서 (x,y,w,h) 잘라 긴 변이 targetLong 이 되도록 확대/축소한 캔버스
   function cropCanvas(source, x, y, w, h, targetLong) {
@@ -233,87 +239,146 @@ window.ISBN = (() => {
     return c;
   }
 
-  // 한 캔버스에서 바코드를 마스킹 반복으로 모두 디코드 → [{code, cx, cy, along, clean}] (캔버스 좌표).
-  // clean: resultPoints 가 '가로로 또렷하게'(dx≫dy) 벌어짐 = ZXing 내부 회전 없이 바로 읽음 → 위치 신뢰.
-  // 세로/기울임 바코드는 내부 회전으로 읽혀 위치가 부정확(clean=false) → 셀 경계로 위치 대체.
-  async function decodeCellCodes(canvas, maxCodes) {
+  // 한 캔버스에서 바코드를 마스킹 반복으로 모두 디코드 → 코드 배열(위치 없음). 검출 완전성(놓친 코드) 보강용.
+  async function decodeCodesMasked(canvas, maxCodes) {
     const ctx = canvas.getContext('2d');
     const out = [];
     for (let i = 0; i < (maxCodes || 4); i++) {
       let r;
       try { r = await (await ensureReader()).decodeFromImageUrl(canvas.toDataURL('image/png')); }
-      catch (_) { break; }                                   // NotFound → 더 없음
+      catch (_) { break; }
       if (!r || !isValidProduct(r.getText())) break;
       const code = clean(r.getText());
-      if (out.some((o) => o.code === code)) break;           // 같은 것만 반복(마스킹 실패) → 더 없음
+      if (out.includes(code)) break;
+      out.push(code);
       let pts = null; try { pts = r.getResultPoints && r.getResultPoints(); } catch (_) {}
-      let cx = null, cy = null, along = 0, cln = false, half = 0;
-      if (pts && pts.length) {
-        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-        for (const p of pts) { const px = p.getX(), py = p.getY(); if (px < minX) minX = px; if (px > maxX) maxX = px; if (py < minY) minY = py; if (py > maxY) maxY = py; }
-        const dx = maxX - minX, dy = maxY - minY;
-        along = Math.max(dx, dy, 8); cx = (minX + maxX) / 2; cy = (minY + maxY) / 2;
-        cln = dx > 1.6 * dy && dx > 25;                      // 가로로 또렷 = 위치 신뢰
-        half = along * 0.8;
-      }
-      out.push({ code, cx, cy, along, clean: cln });
-      if (cx == null) break;
-      ctx.fillStyle = '#fff'; ctx.fillRect(cx - half, cy - half, half * 2, half * 2); // 넉넉한 정사각 마스크
+      if (!pts || !pts.length) break;
+      let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+      for (const p of pts) { const px = p.getX(), py = p.getY(); if (px < minX) minX = px; if (px > maxX) maxX = px; if (py < minY) minY = py; if (py > maxY) maxY = py; }
+      const along = Math.max(maxX - minX, maxY - minY, 8), cx = (minX + maxX) / 2, cy = (minY + maxY) / 2, half = along * 0.8;
+      ctx.fillStyle = '#fff'; ctx.fillRect(cx - half, cy - half, half * 2, half * 2);
     }
     return out;
   }
-  // 캔버스를 90° 시계방향 회전한 새 캔버스 (세로 바코드를 가로로 눕혀 또렷이 읽고 위치를 정확히 얻기 위함)
-  function rotate90(canvas) {
-    const c = document.createElement('canvas'); c.width = canvas.height; c.height = canvas.width;
-    const ctx = c.getContext('2d'); ctx.translate(canvas.height, 0); ctx.rotate(Math.PI / 2); ctx.drawImage(canvas, 0, 0);
-    return c;
+
+  // ── 바코드 '영역' 검출: 구조텐서로 줄무늬 영역을 직접 찾음(디코드와 무관 → 방향·회전에 강함) ──────────
+  // 바코드는 한 방향으로 강한 그라디언트(이방성 큰) 영역 → 블록 단위 점수 → 형태학적 닫힘 → 연결요소.
+  // 반환: [{x,y,w,h}] (원본 좌표, 바 영역을 타이트하게 감쌈).
+  function findBarcodeRegions(source) {
+    const NW = source.naturalWidth || source.videoWidth || source.width;
+    const NH = source.naturalHeight || source.videoHeight || source.height;
+    const scale = Math.min(1, 720 / Math.max(NW, NH));
+    const w = Math.max(1, Math.round(NW * scale)), h = Math.max(1, Math.round(NH * scale));
+    const cv = document.createElement('canvas'); cv.width = w; cv.height = h;
+    let ctx; try { ctx = cv.getContext('2d', { willReadFrequently: true }); } catch (_) { ctx = cv.getContext('2d'); }
+    ctx.drawImage(source, 0, 0, w, h);
+    let data; try { data = ctx.getImageData(0, 0, w, h).data; } catch (_) { return []; }
+    const g = new Float32Array(w * h);
+    for (let i = 0; i < w * h; i++) g[i] = 0.299 * data[i * 4] + 0.587 * data[i * 4 + 1] + 0.114 * data[i * 4 + 2];
+    const gx = new Float32Array(w * h), gy = new Float32Array(w * h);
+    for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) {
+      const i = y * w + x;
+      gx[i] = (g[i - w + 1] + 2 * g[i + 1] + g[i + w + 1]) - (g[i - w - 1] + 2 * g[i - 1] + g[i + w - 1]);
+      gy[i] = (g[i + w - 1] + 2 * g[i + w] + g[i + w + 1]) - (g[i - w - 1] + 2 * g[i - w] + g[i - w + 1]);
+    }
+    const B = 10, bw = Math.ceil(w / B), bh = Math.ceil(h / B);
+    const sxx = new Float32Array(bw * bh), syy = new Float32Array(bw * bh), sxy = new Float32Array(bw * bh);
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      const i = y * w + x, bi = ((y / B) | 0) * bw + ((x / B) | 0);
+      sxx[bi] += gx[i] * gx[i]; syy[bi] += gy[i] * gy[i]; sxy[bi] += gx[i] * gy[i];
+    }
+    const score = new Float32Array(bw * bh); let maxS = 0;
+    for (let i = 0; i < bw * bh; i++) {
+      const tr = sxx[i] + syy[i];
+      const coh = Math.sqrt((sxx[i] - syy[i]) * (sxx[i] - syy[i]) + 4 * sxy[i] * sxy[i]);
+      const aniso = tr > 1 ? coh / tr : 0, s = tr * aniso * aniso;
+      score[i] = s; if (s > maxS) maxS = s;
+    }
+    if (maxS <= 0) return [];
+    const thr = maxS * 0.10; let mask = new Uint8Array(bw * bh);
+    for (let i = 0; i < bw * bh; i++) mask[i] = score[i] > thr ? 1 : 0;
+    const morph = (m, r, dil) => {
+      const o = new Uint8Array(bw * bh);
+      for (let by = 0; by < bh; by++) for (let bx = 0; bx < bw; bx++) {
+        let v = dil ? 0 : 1;
+        for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
+          const nx = bx + dx, ny = by + dy, s = (nx < 0 || ny < 0 || nx >= bw || ny >= bh) ? 0 : m[ny * bw + nx];
+          if (dil) { if (s) v = 1; } else { if (!s) v = 0; }
+        }
+        o[by * bw + bx] = v;
+      }
+      return o;
+    };
+    mask = morph(morph(mask, 2, true), 2, false);             // 닫힘: 바 사이 틈을 메워 하나의 덩어리로
+    const lab = new Int32Array(bw * bh), comps = [], st = [];
+    for (let i = 0; i < bw * bh; i++) {
+      if (!mask[i] || lab[i]) continue;
+      const id = comps.length + 1; lab[i] = id;
+      let x0 = i % bw, x1 = x0, y0 = (i / bw) | 0, y1 = y0, cnt = 0; st.length = 0; st.push(i);
+      while (st.length) {
+        const p = st.pop(); cnt++; const px = p % bw, py = (p / bw) | 0;
+        if (px < x0) x0 = px; if (px > x1) x1 = px; if (py < y0) y0 = py; if (py > y1) y1 = py;
+        for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+          const nx = px + dx, ny = py + dy;
+          if (nx < 0 || ny < 0 || nx >= bw || ny >= bh) continue;
+          const np = ny * bw + nx;
+          if (mask[np] && !lab[np]) { lab[np] = id; st.push(np); }
+        }
+      }
+      comps.push({ x0, y0, x1, y1, cnt });
+    }
+    const out = [];
+    for (const c of comps) {
+      const rbw = c.x1 - c.x0 + 1, rbh = c.y1 - c.y0 + 1, area = rbw * rbh;
+      if (c.cnt < 4 || c.cnt / area < 0.45) continue;         // 너무 작거나 성긴 덩어리 제외
+      out.push({ x: (c.x0 * B) / scale, y: (c.y0 * B) / scale, w: (rbw * B) / scale, h: (rbh * B) / scale, cnt: c.cnt });
+    }
+    out.sort((a, b) => b.cnt - a.cnt);
+    return out.slice(0, 8);
   }
-  // ZXing 위치가 회전 사진에서 부정확 → 격자 셀로 디코드. 가로로 또렷하게 읽힌 것(clean)은 정확한 중심·크기로
-  // 타이트 박스. 세로 바코드는 셀을 90° 눕혀 또렷이 읽고 좌표를 되돌려 타이트 박스. 그래도 안되면 셀 경계로 위치.
-  async function zxingMultiTiles(source) {
+  // 검출된 영역을 잘라 여러 배율로 디코드 → { code: 2표↑ 일치(확실), weak: 최다표 코드(1표 가능) }.
+  // 회전은 ZXing 내부 처리. code 는 흐림 오독을 막고, weak 는 나중에 독립 확인된 코드와 교차검증해 박스를 준다.
+  async function decodeRegionVotes(source, reg) {
+    const NW = source.naturalWidth || source.videoWidth || source.width;
+    const NH = source.naturalHeight || source.videoHeight || source.height;
+    const ex = reg.w * 0.25, ey = reg.h * 0.25;               // 여백(quiet zone) 포함해 넉넉히
+    const x = Math.max(0, reg.x - ex), y = Math.max(0, reg.y - ey);
+    const w = Math.min(NW - x, reg.w + 2 * ex), h = Math.min(NH - y, reg.h + 2 * ey);
+    // 배율은 영역 크기에 비례 — 작은 영역을 과도하게 확대하면 흐림이 증폭돼 오독됨. 원본~2.6배로 제한.
+    const base = Math.max(w, h);
+    const cap = (t) => Math.min(1600, Math.max(600, Math.round(t)));
+    const scales = [...new Set([cap(base), cap(base * 1.6), cap(base * 2.4)])];
+    const votes = {};
+    const tally = (c) => { if (c) votes[c] = (votes[c] || 0) + 1; };
+    const pick = () => { let b = null, n = 0; for (const c in votes) if (votes[c] > n) { b = c; n = votes[c]; } return { best: b, n }; };
+    // 1) 0°(가로 바코드는 대부분 여기서 2표 확정 → 빠름)
+    for (const tl of scales) tally(await zxDecode(cropCanvas(source, x, y, w, h, tl)));
+    let p = pick();
+    if (p.n >= 2) return { code: p.best, weak: p.best };
+    // 2) 확실하지 않으면 세로용 90° + 흐림 보정 투표를 더한다
+    for (const tl of scales) tally(await zxDecode(rotate90(cropCanvas(source, x, y, w, h, tl))));
+    tally(await zxDecode(enhance(cropCanvas(source, x, y, w, h, cap(base * 1.6)))));
+    p = pick();
+    return { code: p.n >= 2 ? p.best : null, weak: p.n >= 1 ? p.best : null };
+  }
+  // 검출 완전성 보강: 통짜+2x2 를 마스킹 디코드해 코드만 수집(영역 검출/디코드가 놓친 것 대비). 폴백 전용.
+  async function zxingAllCodes(source) {
     try { await ensureZXing(); } catch (_) { return []; }
     const nw = source.naturalWidth || source.videoWidth || source.width;
     const nh = source.naturalHeight || source.videoHeight || source.height;
-    const best = new Map(); // code -> {box, tight, area}  (타이트 > 셀, 같은 등급이면 작은 것 우선)
-    const record = (code, box, tight) => {
-      const area = box.w * box.h, cur = best.get(code);
-      if (!cur || (tight && !cur.tight) || (tight === cur.tight && area < cur.area)) best.set(code, { box, tight, area });
-    };
-    const scanGrid = async (cols, rows, ov, useEnhance, useRot) => {
+    const codes = new Set();
+    for (const [cols, rows, ov] of [[1, 1, 0], [2, 2, 0.2]]) {
       const tw = nw / cols, th = nh / rows;
       for (let iy = 0; iy < rows; iy++) for (let ix = 0; ix < cols; ix++) {
         const x = Math.max(0, tw * ix - tw * ov), y = Math.max(0, th * iy - th * ov);
         const w = Math.min(nw - x, tw * (1 + 2 * ov)), h = Math.min(nh - y, th * (1 + 2 * ov));
         const tl = Math.min(1600, Math.max(900, Math.round(Math.max(w, h) * 1.4)));
-        const k = tl / Math.max(w, h), ch = cropCanvas(source, x, y, w, h, tl).height;
-        const inCell = (sx, sy) => sx >= x - 2 && sx <= x + w + 2 && sy >= y - 2 && sy <= y + h + 2;
-        // 0° 판독: clean 이면 중심/크기 그대로 타이트 박스(가로 바코드)
-        const handle0 = (dets) => { for (const d of dets) {
-          let box = null, tight = false;
-          if (d.clean && d.cx != null) {
-            const scx = x + d.cx / k, scy = y + d.cy / k, sw = Math.max(d.along / k, 24);
-            if (inCell(scx, scy)) { box = { x: scx - sw * 0.6, y: scy - sw * 0.34, w: sw * 1.2, h: sw * 0.68 }; tight = true; }
-          }
-          record(d.code, box || { x, y, w, h }, tight);
-        } };
-        // 90° 판독: 눕힌 프레임에서 clean 이면 좌표를 원래로 되돌려 세로 바코드용 타이트 박스
-        const handle90 = (dets) => { for (const d of dets) {
-          if (!d.clean || d.cx == null) continue;            // 눕혀도 안 또렷하면 0°/셀 결과에 맡김
-          const cellX = d.cy, cellY = ch - d.cx;             // 90° 역매핑: crop(cx,cy)=(rotY, ch-rotX)
-          const scx = x + cellX / k, scy = y + cellY / k, sw = Math.max(d.along / k, 24);
-          if (inCell(scx, scy)) record(d.code, { x: scx - sw * 0.34, y: scy - sw * 0.6, w: sw * 0.68, h: sw * 1.2 }, true);
-        } };
-        handle0(await decodeCellCodes(cropCanvas(source, x, y, w, h, tl), 4));
-        if (useEnhance) handle0(await decodeCellCodes(enhance(cropCanvas(source, x, y, w, h, tl)), 4));
-        if (useRot) handle90(await decodeCellCodes(rotate90(cropCanvas(source, x, y, w, h, tl)), 4));
+        (await decodeCodesMasked(cropCanvas(source, x, y, w, h, tl), 4)).forEach((c) => codes.add(c));
+        (await decodeCodesMasked(enhance(cropCanvas(source, x, y, w, h, tl)), 4)).forEach((c) => codes.add(c));
+        // 회전은 영역 디코드(decodeRegionVotes)의 90° 단계가 처리 → 여기서 통짜 90° 는 흐림 오독 위험만 커 제외
       }
-    };
-    const someCoarse = () => [...best.values()].some((v) => !v.tight); // 위치를 정밀히 못 잡은 코드가 있나
-    await scanGrid(1, 1, 0, true, true);                    // 통짜: 가로/세로 모두 여기서 타이트 박스 시도(+샤픈)
-    if (best.size < 2 || someCoarse()) await scanGrid(2, 2, 0.2, true, true); // 놓친 것/흐린 것/회전 보강
-    // 박스는 2개 이상일 때(선택 UI)만 의미 있음 → 아직 위치가 거친 코드가 있을 때만 미세 격자로 정밀화
-    if (best.size >= 2 && someCoarse()) await scanGrid(3, 4, 0.12, false, true);
-    return [...best.entries()].map(([code, r]) => ({ code, box: r.box }));
+    }
+    return [...codes];
   }
   // 네이티브 BarcodeDetector 를 통짜 + 확대 타일에 적용해 흐린/작은 바코드까지 위치와 함께 수집
   async function detectAllNativeTiled(source) {
@@ -349,24 +414,42 @@ window.ISBN = (() => {
   async function scanMulti(source) {
     const nw = source.naturalWidth || source.videoWidth || source.width;
     const nh = source.naturalHeight || source.videoHeight || source.height;
-    // 박스가 이미지 밖으로 크게 벗어나면(회전 추정 오차) 위치를 못 믿는 것 → 박스 제거(칩으로 폴백).
-    // 조금 걸친 정도면 화면 안으로 다듬어 탭 가능하게.
-    const clamp = (b) => {
+    const clamp = (b) => {                                    // 박스를 이미지 안으로 다듬고, 거의 밖이면 제거(칩 폴백)
       if (!b || !b.box) return b;
       const o = b.box;
       const x = Math.max(0, Math.min(nw - 1, o.x)), y = Math.max(0, Math.min(nh - 1, o.y));
       const w = Math.min(nw - x, o.x + o.w - x), h = Math.min(nh - y, o.y + o.h - y);
-      const origArea = Math.max(1, o.w) * Math.max(1, o.h);
-      if (w <= 8 || h <= 8 || (w * h) / origArea < 0.5) return { code: b.code, box: null };
+      if (w <= 8 || h <= 8 || (w * h) / (Math.max(1, o.w) * Math.max(1, o.h)) < 0.5) return { code: b.code, box: null };
       return { code: b.code, box: { x, y, w, h } };
     };
-    const native = await detectAllNativeTiled(source);
-    if (native.length >= 2) return native.map(clamp).sort(byPos);
-    const zx = await zxingMultiTiles(source);
-    const map = new Map();
-    for (const b of zx) map.set(b.code, b);
-    for (const b of native) { const cur = map.get(b.code); if (!cur || !cur.box) map.set(b.code, b); } // 네이티브 위치가 더 정확
-    return [...map.values()].map(clamp).sort(byPos);
+    const result = new Map(); // code -> {code, box|null}
+    const setBox = (code, box) => { const cur = result.get(code); if (!cur || (!cur.box && box)) result.set(code, { code, box: box || null }); };
+    const hasBox = (code) => { const c = result.get(code); return c && c.box; };
+    // 1) 네이티브 BarcodeDetector(있으면): 정확한 위치 + 코드
+    for (const b of await detectAllNativeTiled(source)) setBox(b.code, b.box);
+    // 2) 구조텐서로 바코드 '영역'을 직접 찾고(방향 무관) → 각 영역을 디코드해 그 코드의 정밀 박스로 사용
+    const weakRegions = []; // {reg, weak}  (2표는 못 얻었지만 바코드처럼 보이는 영역 → 나중에 교차검증)
+    let regionCount = 0;
+    if (result.size < 2 || [...result.values()].some((v) => !v.box)) {
+      const regions = findBarcodeRegions(source);
+      regionCount = regions.length;
+      for (const reg of regions) {
+        const v = await decodeRegionVotes(source, reg);
+        if (v.code) setBox(v.code, { x: reg.x, y: reg.y, w: reg.w, h: reg.h });
+        else if (v.weak) weakRegions.push({ reg, weak: v.weak });
+      }
+    }
+    // 3) 코드가 2개 미만이면(놓친/디코드 실패) 통짜·격자 폴백으로 '진짜 코드 집합'을 확인.
+    //    단건 사진(영역 1개 이하)에는 폴백 생략 → 빠름.
+    if (result.size < 2 && regionCount >= 2) {
+      const trueCodes = new Set(await zxingAllCodes(source));
+      // 약한 영역 디코드가 독립 확인된 코드와 일치하면(오독 아님) 그 영역을 박스로 채택
+      for (const wr of weakRegions) {
+        if (trueCodes.has(wr.weak) && !hasBox(wr.weak)) setBox(wr.weak, { x: wr.reg.x, y: wr.reg.y, w: wr.reg.w, h: wr.reg.h });
+      }
+      for (const c of trueCodes) if (!result.has(c)) result.set(c, { code: c, box: null }); // 위치 못 찾은 것만 칩
+    }
+    return [...result.values()].map(clamp).sort(byPos);
   }
 
   // ISBN 을 파일명에 안전하게 넣기용 하이픈 표기(978-89-...)는 생략, 숫자 그대로 사용
