@@ -127,13 +127,15 @@ const App = (() => {
         <button class="mtab" data-mtab="menu"><span class="mt-ic">☰</span><span class="mt-l">메뉴</span></button>
       </nav>
       <div class="drop-overlay hidden" id="drop-overlay"><div class="drop-inner"><div class="drop-ic">📥</div>여기에 놓아 업로드<div class="drop-sub">현재 폴더로 올라갑니다</div></div></div>`;
-    root().querySelectorAll('#mobile-tabbar [data-mtab]').forEach((el) => el.addEventListener('click', () => {
+    root().querySelectorAll('#mobile-tabbar [data-mtab]').forEach((el) => el.addEventListener('click', (e) => {
+      e.stopPropagation(); // 상단 nav 드롭다운을 닫는 document 클릭 핸들러와 충돌 방지(메뉴 즉시 닫힘 버그)
       const t = el.dataset.mtab;
+      if (t === 'menu') { document.getElementById('appbar-nav')?.classList.toggle('open'); return; }
+      closeNavMenu(); // 다른 탭 이동 시 열려있던 메뉴는 닫기
       if (t === 'files') goTo('/');
       else if (t === 'search') { const si = document.getElementById('search-input'); if (si) { window.scrollTo({ top: 0, behavior: 'smooth' }); si.focus(); } }
       else if (t === 'upload') document.getElementById('file-input')?.click();
       else if (t === 'notif') notifModal();
-      else if (t === 'menu') document.getElementById('appbar-nav')?.classList.toggle('open');
     }));
     root().querySelectorAll('.appbar-nav [data-nav]').forEach((el) => el.addEventListener('click', () => {
       const n = el.dataset.nav;

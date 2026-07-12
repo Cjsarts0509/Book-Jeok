@@ -539,11 +539,12 @@ th { background: var(--bg); font-weight: 700; color: var(--text-muted); font-siz
   .user-chip-sm { display: none; }
   .account-switcher { max-width: 150px; }
   .brand-name { display: none; }
-  /* 상단바: 아이콘 나열 대신 햄버거(☰) 하나 → 텍스트 리스트 드롭다운 */
-  .appbar-navmenu { display: grid; place-items: center; }
+  /* 상단 우측 메뉴(☰)는 하단 탭바의 '메뉴'와 중복 → 모바일에서 숨김 */
+  .appbar-navmenu { display: none; }
+  /* nav 메뉴는 하단 탭바에서 열리므로 탭바 위(우하단)에 시트처럼 표시 */
   .appbar-nav {
-    display: none; position: absolute; top: calc(var(--appbar-h) - 8px); right: 10px;
-    flex-direction: column; align-items: stretch; gap: 2px; min-width: 200px;
+    display: none; position: fixed; bottom: calc(64px + env(safe-area-inset-bottom, 0px)); right: 10px; top: auto;
+    flex-direction: column; align-items: stretch; gap: 2px; min-width: 210px; max-height: 60vh; overflow-y: auto;
     padding: 6px; background: var(--surface); border: 1px solid var(--border);
     border-radius: var(--radius); box-shadow: var(--shadow-lg); z-index: 60;
   }
