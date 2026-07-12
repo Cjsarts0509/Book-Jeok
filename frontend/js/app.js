@@ -961,38 +961,110 @@ const App = (() => {
     m.q('#us-cancel').addEventListener('click', m.close);
   }
 
-  // ── 카메라(사진) 업로드: 촬영 → 각 사진 제목·비고 입력 → 업로드 ──────────
+  // ── 카메라(사진) 업로드: 촬영 → 각 사진 제목·비고 입력(+ISBN 인식) → 업로드 ──────────
   function cameraReviewModal(files) {
     const urls = files.map((f) => URL.createObjectURL(f));
+    const meta = files.map(() => ({ region: null, isbn: null, method: null, scanning: false, tried: false }));
+    const hasIsbn = !!window.ISBN;
     const rows = files.map((f, i) => `
       <div class="cam-item" data-i="${i}">
-        <img class="cam-thumb" src="${urls[i]}" alt="">
+        <img class="cam-thumb" src="${urls[i]}" alt="" data-img="${i}">
         <div class="cam-fields">
           <input class="input cam-title" placeholder="제목(선택)">
           <input class="input cam-note" placeholder="비고(선택)">
+          <div class="cam-isbn" data-isbn-row="${i}" hidden>
+            <span class="cam-isbn-status muted">⏳ 대기</span>
+            <input class="input cam-isbn-input" placeholder="ISBN" inputmode="numeric" maxlength="17">
+            <button type="button" class="btn btn-ghost btn-sm cam-region" data-region="${i}" title="스캔 구역 지정">🎯 구역</button>
+            <button type="button" class="btn btn-ghost btn-sm cam-rescan" data-rescan="${i}" title="다시 인식">🔍</button>
+          </div>
         </div>
         <button class="icon-btn cam-rm" data-rm="${i}" title="제거">✕</button>
       </div>`).join('');
     const loc = state.folder === '/' ? '홈' : state.folder;
     const m = UI.modal(`<h3>📷 촬영 업로드 <span class="muted" style="font-size:13px;font-weight:400">· ${files.length}장 → ${UI.escapeHtml(loc)}</span></h3>
+      ${hasIsbn ? `<label class="cam-isbn-toggle"><input type="checkbox" id="isbn-on" checked><span class="ci-main">📕 ISBN 자동 인식</span><span class="ci-hint muted">바코드·OCR로 읽어 파일명에 넣기</span></label>` : ''}
       <p class="muted" style="font-size:12px;margin-bottom:10px">각 사진의 제목·비고를 입력하고 업로드하세요. (제목 비우면 자동 이름)</p>
       <div id="cam-list">${rows}</div>
       <div class="modal-actions"><button class="btn btn-ghost" id="cam-cancel">취소</button><button class="btn btn-primary" id="cam-go">⬆️ ${files.length}장 업로드</button></div>`);
     m.el.querySelector('.modal').classList.add('modal-wide');
     const cleanup = () => urls.forEach((u) => URL.revokeObjectURL(u));
     const kept = new Set(files.map((_, i) => i));
+    const itemEl = (i) => m.el.querySelector(`.cam-item[data-i="${i}"]`);
+    const imgEl = (i) => m.el.querySelector(`[data-img="${i}"]`);
+    const isbnOn = () => hasIsbn && !!m.q('#isbn-on')?.checked;
+
+    function renderIsbn(i) {
+      const row = m.el.querySelector(`[data-isbn-row="${i}"]`); if (!row) return;
+      row.hidden = !isbnOn();
+      const st = row.querySelector('.cam-isbn-status'); const inp = row.querySelector('.cam-isbn-input');
+      if (meta[i].scanning) { st.textContent = '⏳ 인식 중…'; st.className = 'cam-isbn-status muted'; }
+      else if (meta[i].isbn) { st.textContent = meta[i].method === 'OCR' ? '📕 OCR' : '📕 바코드'; st.className = 'cam-isbn-status ok'; if (document.activeElement !== inp) inp.value = meta[i].isbn; }
+      else if (meta[i].tried) { st.textContent = '❌ 못 찾음'; st.className = 'cam-isbn-status bad'; }
+      else { st.textContent = '⏳ 대기'; st.className = 'cam-isbn-status muted'; }
+    }
+    async function scanOne(i) {
+      if (!isbnOn() || !kept.has(i)) return;
+      const img = imgEl(i); if (!img || !img.complete || !img.naturalWidth) return;
+      meta[i].scanning = true; renderIsbn(i);
+      let res;
+      try { res = await window.ISBN.scan(img, { region: meta[i].region, useOcr: true }); }
+      catch (_) { res = { success: false, isbn: null, method: 'NONE' }; }
+      meta[i].scanning = false; meta[i].tried = true; meta[i].isbn = res.isbn; meta[i].method = res.method;
+      renderIsbn(i);
+    }
+    function scanAll() { [...kept].forEach((i) => { meta[i].isbn = null; meta[i].tried = false; renderIsbn(i); scanOne(i); }); }
+
     m.q('#cam-cancel').addEventListener('click', () => { cleanup(); m.close(); });
     m.el.querySelectorAll('[data-rm]').forEach((b) => b.addEventListener('click', () => {
       kept.delete(Number(b.dataset.rm)); b.closest('.cam-item').remove();
       if (!kept.size) { cleanup(); m.close(); }
       else m.q('#cam-go').textContent = `⬆️ ${kept.size}장 업로드`;
     }));
+    // ISBN: 토글 · 재인식 · 구역지정 · 이미지 로드 시 자동 스캔
+    m.q('#isbn-on')?.addEventListener('change', () => { m.el.querySelectorAll('.cam-isbn').forEach((r) => { r.hidden = !isbnOn(); }); if (isbnOn()) scanAll(); });
+    m.el.querySelectorAll('[data-rescan]').forEach((b) => b.addEventListener('click', () => { const i = +b.dataset.rescan; meta[i].isbn = null; meta[i].tried = false; scanOne(i); }));
+    m.el.querySelectorAll('[data-region]').forEach((b) => b.addEventListener('click', () => regionModal(+b.dataset.region)));
+    m.el.querySelectorAll('[data-img]').forEach((img) => { const i = +img.dataset.img; if (img.complete && img.naturalWidth) scanOne(i); else img.addEventListener('load', () => scanOne(i)); });
+    m.el.querySelectorAll('.cam-isbn').forEach((r) => { r.hidden = !isbnOn(); });
+
+    // 구역 지정 모달 (드래그로 사각형 선택, 기본 전체)
+    function regionModal(i) {
+      const rm = UI.modal(`<h3>🎯 스캔 구역 지정 <span class="muted" style="font-size:12px;font-weight:400">· 바코드 부분을 드래그</span></h3>
+        <div class="region-wrap" id="rgnw"><img class="region-img" id="rgnimg" src="${urls[i]}" alt=""><div class="region-box" id="rgnbox" hidden></div></div>
+        <div class="modal-actions"><button class="btn btn-ghost" id="rgn-all">전체 사용</button><span style="flex:1"></span><button class="btn btn-ghost" id="rgn-cancel">취소</button><button class="btn btn-primary" id="rgn-ok">적용</button></div>`);
+      rm.el.querySelector('.modal').classList.add('modal-wide');
+      const img = rm.q('#rgnimg'), box = rm.q('#rgnbox');
+      let sx = 0, sy = 0, drawing = false, rect = null;
+      const pos = (e) => { const r = img.getBoundingClientRect(); return { x: Math.max(0, Math.min(r.width, e.clientX - r.left)), y: Math.max(0, Math.min(r.height, e.clientY - r.top)) }; };
+      const draw = () => { if (!rect) { box.hidden = true; return; } box.hidden = false; box.style.cssText = `left:${rect.x}px;top:${rect.y}px;width:${rect.w}px;height:${rect.h}px`; };
+      img.addEventListener('pointerdown', (e) => { e.preventDefault(); drawing = true; const p = pos(e); sx = p.x; sy = p.y; rect = { x: sx, y: sy, w: 0, h: 0 }; try { img.setPointerCapture(e.pointerId); } catch (_) {} draw(); });
+      img.addEventListener('pointermove', (e) => { if (!drawing) return; const p = pos(e); rect = { x: Math.min(sx, p.x), y: Math.min(sy, p.y), w: Math.abs(p.x - sx), h: Math.abs(p.y - sy) }; draw(); });
+      img.addEventListener('pointerup', () => { drawing = false; });
+      rm.q('#rgn-all').addEventListener('click', () => { meta[i].region = null; rm.close(); scanOne(i); });
+      rm.q('#rgn-cancel').addEventListener('click', rm.close);
+      rm.q('#rgn-ok').addEventListener('click', () => {
+        if (rect && rect.w > 6 && rect.h > 6 && img.clientWidth) {
+          const scale = img.naturalWidth / img.clientWidth;
+          meta[i].region = { x: Math.round(rect.x * scale), y: Math.round(rect.y * scale), w: Math.round(rect.w * scale), h: Math.round(rect.h * scale) };
+        } else meta[i].region = null;
+        rm.close(); scanOne(i);
+      });
+    }
+
     m.q('#cam-go').addEventListener('click', async () => {
       const fd = new FormData(); fd.append('folder', state.folder);
       [...kept].forEach((i) => {
-        const item = m.el.querySelector(`.cam-item[data-i="${i}"]`);
+        const item = itemEl(i);
+        let title = item.querySelector('.cam-title').value.trim();
+        if (isbnOn()) {
+          const raw = item.querySelector('.cam-isbn-input')?.value || meta[i].isbn || '';
+          const code = window.ISBN.clean(raw);
+          const good = window.ISBN.isBookIsbn(code) ? code : '';
+          if (good) title = title ? `${good}_${title}` : good;
+        }
         fd.append('file', files[i]);
-        fd.append('titles', item.querySelector('.cam-title').value.trim());
+        fd.append('titles', title);
         fd.append('notes', item.querySelector('.cam-note').value.trim());
       });
       m.q('#cam-go').disabled = true; m.q('#cam-go').textContent = '업로드 중…';

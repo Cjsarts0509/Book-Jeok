@@ -1,0 +1,150 @@
+/* 북적북적 — 도서 ISBN 인식 (바코드 → OCR 폴백)
+   - 바코드: 네이티브 BarcodeDetector(있으면) → 실패 시 ZXing(vendor, 지연 로드)
+   - OCR 폴백: Tesseract.js(CDN, 숫자 전용, ISBN 켤 때만 로드)
+   - 모두 정지 이미지/캔버스 대상. 실패해도 조용히 폴백.                          */
+window.ISBN = (() => {
+  'use strict';
+
+  // ── 체크섬 검증 (EAN-13 / ISBN-10) ──────────
+  function isValidEAN13(code) {
+    if (!/^\d{13}$/.test(code)) return false;
+    let sum = 0;
+    for (let i = 0; i < 12; i++) sum += parseInt(code[i], 10) * (i % 2 === 0 ? 1 : 3);
+    return parseInt(code[12], 10) === (10 - (sum % 10)) % 10;
+  }
+  function isValidISBN10(code) {
+    if (!/^\d{9}[\dX]$/.test(code)) return false;
+    let sum = 0;
+    for (let i = 0; i < 9; i++) sum += parseInt(code[i], 10) * (10 - i);
+    sum += code[9] === 'X' ? 10 : parseInt(code[9], 10);
+    return sum % 11 === 0;
+  }
+  function isValidBarcode(raw) {
+    const c = String(raw || '').replace(/[^0-9X]/gi, '').toUpperCase();
+    if (c.length === 13) return isValidEAN13(c);
+    if (c.length === 10) return isValidISBN10(c);
+    return false;
+  }
+  // 도서 ISBN 만 인정 (EAN-13 은 978/979 접두, 또는 ISBN-10)
+  function isBookIsbn(raw) {
+    const c = String(raw || '').replace(/[^0-9X]/gi, '').toUpperCase();
+    if (c.length === 13) return (c.startsWith('978') || c.startsWith('979')) && isValidEAN13(c);
+    if (c.length === 10) return isValidISBN10(c);
+    return false;
+  }
+  const clean = (raw) => String(raw || '').replace(/[^0-9X]/gi, '').toUpperCase();
+
+  // OCR 텍스트에서 ISBN 후보 추출
+  function extractCandidates(text) {
+    const regex = /(?:97[89][- ]?)?(?:\d[- ]?){9}[\dxX]\b/gi;
+    const matches = String(text || '').match(regex);
+    if (!matches) return [];
+    return matches.map((m) => clean(m)).filter((c) => c.length === 10 || c.length === 13);
+  }
+
+  // ── 지연 로더 ──────────
+  const loaded = {};
+  function loadScript(src, globalName) {
+    if (globalName && window[globalName]) return Promise.resolve(window[globalName]);
+    if (loaded[src]) return loaded[src];
+    loaded[src] = new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = src; s.async = true;
+      s.onload = () => resolve(globalName ? window[globalName] : true);
+      s.onerror = () => { loaded[src] = null; reject(new Error('스크립트 로드 실패: ' + src)); };
+      document.head.appendChild(s);
+    });
+    return loaded[src];
+  }
+  const ensureZXing = () => loadScript('vendor/zxing.min.js?v=69', 'ZXing');
+  const TESS_CDN = 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js';
+  const ensureTesseract = () => loadScript(TESS_CDN, 'Tesseract');
+
+  // ── 이미지 → 캔버스 (구역 크롭 + 과대 축소) ──────────
+  // region: {x,y,w,h} (원본 픽셀 기준) | null(전체). maxSide 로 긴 변 제한.
+  function toCanvas(source, region, maxSide) {
+    const nw = source.naturalWidth || source.videoWidth || source.width;
+    const nh = source.naturalHeight || source.videoHeight || source.height;
+    let sx = 0, sy = 0, sw = nw, sh = nh;
+    if (region && region.w > 4 && region.h > 4) {
+      sx = Math.max(0, Math.min(nw - 1, region.x));
+      sy = Math.max(0, Math.min(nh - 1, region.y));
+      sw = Math.max(1, Math.min(nw - sx, region.w));
+      sh = Math.max(1, Math.min(nh - sy, region.h));
+    }
+    let dw = sw, dh = sh;
+    const longest = Math.max(dw, dh);
+    if (maxSide && longest > maxSide) { const k = maxSide / longest; dw = Math.round(dw * k); dh = Math.round(dh * k); }
+    const canvas = document.createElement('canvas');
+    canvas.width = dw; canvas.height = dh;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(source, sx, sy, sw, sh, 0, 0, dw, dh);
+    return canvas;
+  }
+
+  // ── 바코드: 네이티브 BarcodeDetector ──────────
+  async function scanNative(canvas) {
+    if (!('BarcodeDetector' in window)) return null;
+    try {
+      const det = new window.BarcodeDetector({ formats: ['ean_13', 'ean_8', 'upc_a'] });
+      const found = await det.detect(canvas);
+      for (const b of found) { if (isBookIsbn(b.rawValue)) return clean(b.rawValue); }
+    } catch (_) { /* 미지원 포맷/오류 → 폴백 */ }
+    return null;
+  }
+
+  // ── 바코드: ZXing (다방향, tryHarder) ──────────
+  let zxReader = null;
+  async function scanZXing(canvas) {
+    let Z;
+    try { Z = await ensureZXing(); } catch (_) { return null; }
+    try {
+      if (!zxReader) {
+        const hints = new Map();
+        hints.set(Z.DecodeHintType.POSSIBLE_FORMATS, [Z.BarcodeFormat.EAN_13, Z.BarcodeFormat.EAN_8, Z.BarcodeFormat.UPC_A]);
+        hints.set(Z.DecodeHintType.TRY_HARDER, true);
+        zxReader = new Z.BrowserMultiFormatReader(hints);
+      }
+      const res = await zxReader.decodeFromImageUrl(canvas.toDataURL('image/png'));
+      if (res && isBookIsbn(res.getText())) return clean(res.getText());
+    } catch (_) { /* NotFound 등 → 폴백 */ }
+    return null;
+  }
+
+  // ── OCR: Tesseract.js (숫자 전용, 단일 라인) ──────────
+  let tessWorker = null;
+  async function scanOcr(canvas) {
+    let T;
+    try { T = await ensureTesseract(); } catch (_) { return null; }
+    try {
+      if (!tessWorker) {
+        tessWorker = await T.createWorker('eng');
+        await tessWorker.setParameters({ tessedit_char_whitelist: '0123456789Xx- ', tessedit_pageseg_mode: '6' });
+      }
+      const { data } = await tessWorker.recognize(canvas);
+      for (const c of extractCandidates(data.text)) { if (isBookIsbn(c)) return c; }
+    } catch (_) { /* OCR 실패 → 폴백 */ }
+    return null;
+  }
+
+  // ── 메인: 이미지에서 ISBN 찾기 ──────────
+  // opts: { region, useOcr }  → { success, isbn, method, message }
+  async function scan(source, opts) {
+    opts = opts || {};
+    // 바코드는 해상도가 필요 → 크게(축소 상한 2600), OCR 은 라인 인식이라 상한 1800
+    const bcCanvas = toCanvas(source, opts.region, 2600);
+    let isbn = await scanNative(bcCanvas);
+    if (isbn) return { success: true, isbn, method: 'BARCODE', message: '바코드 인식 성공' };
+    isbn = await scanZXing(bcCanvas);
+    if (isbn) return { success: true, isbn, method: 'BARCODE', message: '바코드 인식 성공(ZXing)' };
+    if (opts.useOcr !== false) {
+      const ocrCanvas = toCanvas(source, opts.region, 1800);
+      isbn = await scanOcr(ocrCanvas);
+      if (isbn) return { success: true, isbn, method: 'OCR', message: 'OCR 인식 성공' };
+    }
+    return { success: false, isbn: null, method: 'NONE', message: '유효한 ISBN을 찾지 못했습니다.' };
+  }
+
+  // ISBN 을 파일명에 안전하게 넣기용 하이픈 표기(978-89-...)는 생략, 숫자 그대로 사용
+  return { scan, isValidBarcode, isBookIsbn, extractCandidates, clean };
+})();
