@@ -74,7 +74,7 @@ window.ISBN = (() => {
     });
     return loaded[src];
   }
-  const ensureZXing = () => loadScript('vendor/zxing.min.js?v=85', 'ZXing');
+  const ensureZXing = () => loadScript('vendor/zxing.min.js?v=86', 'ZXing');
   const TESS_CDN = 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js';
   const ensureTesseract = () => loadScript(TESS_CDN, 'Tesseract');
 
@@ -220,19 +220,44 @@ window.ISBN = (() => {
       return out;
     } catch (_) { return []; }
   }
-  // ZXing 은 이미지당 1개만 디코드 → 통짜 + 겹치는 타일을 돌며 서로 다른 바코드를 모두 수집(근사 위치)
+  // ZXing 디코드 + 실제 바코드 좌표(resultPoints)로 원본 기준 정밀 박스 계산 → {code, box}|null
+  async function zxDecodeAt(source, x, y, w, h, targetLong) {
+    const long = Math.max(w, h); const k = targetLong ? targetLong / long : 1;
+    const canvas = cropCanvas(source, x, y, w, h, targetLong);
+    try {
+      const r = await (await ensureReader()).decodeFromImageUrl(canvas.toDataURL('image/png'));
+      if (!r || !isValidProduct(r.getText())) return null;
+      const code = clean(r.getText());
+      let box = null;
+      try {
+        const pts = r.getResultPoints && r.getResultPoints();
+        if (pts && pts.length) {
+          let minX = Infinity, maxX = -Infinity, sumY = 0, n = 0;
+          for (const p of pts) { const px = p.getX(), py = p.getY(); if (px < minX) minX = px; if (px > maxX) maxX = px; sumY += py; n++; }
+          const bw = Math.max(1, maxX - minX), bh = bw * 0.85, yl = sumY / n;
+          box = { x: x + minX / k, y: y + (yl - bh / 2) / k, w: bw / k, h: bh / k };
+        }
+      } catch (_) {}
+      return { code, box };
+    } catch (_) { return null; }
+  }
+  async function zxDecodeMultiAt(source, x, y, w, h, scales) {
+    for (const tl of scales) { const hit = await zxDecodeAt(source, x, y, w, h, tl); if (hit) return hit; }
+    return null;
+  }
+  // ZXing 은 이미지당 1개만 디코드 → 통짜 + 겹치는 타일을 돌며 서로 다른 바코드를 모두 수집(정밀 위치)
   async function zxingMultiTiles(source) {
     try { await ensureZXing(); } catch (_) { return []; }
     const nw = source.naturalWidth || source.videoWidth || source.width;
     const nh = source.naturalHeight || source.videoHeight || source.height;
     const found = new Map();
     const record = (code, box) => { const cur = found.get(code); if (!cur) found.set(code, { code, box: box || null }); else if (!cur.box && box) cur.box = box; };
-    { const c = await zxDecodeMulti(source, 0, 0, nw, nh, [Math.min(2200, Math.max(nw, nh)), 1600]); if (c) record(c, null); } // 통짜(위치 모름)
-    const nx = 3, ny = 3, ov = 0.35, tw = nw / nx, th = nh / ny;
+    { const hit = await zxDecodeMultiAt(source, 0, 0, nw, nh, [Math.min(2200, Math.max(nw, nh)), 1600]); if (hit) record(hit.code, hit.box); }
+    const nx = 3, ny = 3, ov = 0.45, tw = nw / nx, th = nh / ny; // 겹침을 키워 경계의 바코드도 온전히 포함
     for (let iy = 0; iy < ny; iy++) for (let ix = 0; ix < nx; ix++) {
       const x = Math.max(0, tw * ix - tw * ov), y = Math.max(0, th * iy - th * ov);
       const w = Math.min(nw - x, tw * (1 + 2 * ov)), h = Math.min(nh - y, th * (1 + 2 * ov));
-      const c = await zxDecodeMulti(source, x, y, w, h, [1200]); if (c) record(c, { x, y, w, h });
+      const hit = await zxDecodeMultiAt(source, x, y, w, h, [1400, 1000]); if (hit) record(hit.code, hit.box);
     }
     return [...found.values()];
   }
