@@ -257,6 +257,29 @@ textarea.input { resize: vertical; }
 .cam-isbn-altlabel { font-size: 11px; color: var(--text-muted); }
 .isbn-chip { padding: 4px 9px; border: 1px solid var(--border); border-radius: 13px; background: var(--surface); font-size: 12px; font-weight: 600; letter-spacing: .2px; cursor: pointer; }
 .isbn-chip.on { background: #06D6A0; color: #04372b; border-color: #06D6A0; }
+/* 바코드 연속 촬영 */
+.cap-shoot { width: 100%; padding: 16px; font-size: 16px; margin-bottom: 12px; }
+.scan-list { max-height: 40vh; overflow-y: auto; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg); }
+.scan-list:empty { display: none; }
+.cap-row { display: flex; align-items: center; gap: 10px; padding: 8px 11px; border-bottom: 1px solid var(--border); }
+.cap-row:last-child { border-bottom: none; }
+.cap-thumb { width: 40px; height: 40px; object-fit: cover; border-radius: 6px; border: 1px solid var(--border); flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; background: var(--surface); }
+.cap-thumb-ph { font-size: 20px; }
+.cap-code { font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: .3px; word-break: break-all; }
+.cap-status { margin-left: auto; font-size: 12px; font-weight: 700; white-space: nowrap; }
+.cap-status.cap-processing, .cap-status.cap-saving { color: var(--text-muted); }
+.cap-status.cap-choosing { color: #9a7400; }
+.cap-status.cap-done { color: #0a8f6c; }
+.cap-status.cap-nobar { color: #9a7400; }
+.cap-status.cap-error { color: var(--danger); }
+/* 다중 바코드 선택 */
+.cap-pick { border: 1px solid var(--border); border-radius: var(--radius-sm); background: rgba(255,209,102,.10); padding: 10px; margin-bottom: 12px; }
+.cap-pick-title { font-size: 13px; font-weight: 700; margin-bottom: 8px; }
+.cap-pick-img { position: relative; display: inline-block; max-width: 100%; line-height: 0; }
+.cap-pick-img img { max-width: 100%; max-height: 46vh; border-radius: var(--radius-sm); display: block; }
+.cap-bbox { position: absolute; border: 2.5px solid #EF476F; border-radius: 4px; background: rgba(239,71,111,.18); padding: 0; cursor: pointer; }
+.cap-bbox span { position: absolute; top: -11px; left: -11px; width: 22px; height: 22px; border-radius: 50%; background: #EF476F; color: #fff; font-size: 12px; font-weight: 800; display: flex; align-items: center; justify-content: center; }
+.cap-pick-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
 /* 스캔 구역 지정 */
 .region-wrap { position: relative; display: inline-block; max-width: 100%; line-height: 0; }
 .region-img { max-width: 100%; max-height: 60vh; touch-action: none; user-select: none; -webkit-user-drag: none; border-radius: var(--radius-sm); }

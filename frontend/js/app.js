@@ -973,44 +973,76 @@ const App = (() => {
     m.q('#us-cancel').addEventListener('click', m.close);
   }
 
-  // ── 바코드 연속 촬영: 네이티브 카메라로 계속 촬영 → 찍는 즉시 바코드 인식→ISBN 이름으로 자동 저장 ──────────
-  // 리뷰/저장 버튼 없이, 한 장 찍으면 바로 다음 촬영으로 넘어가고 저장은 백그라운드 처리.
-  let contCount = 0;
+  // ── 바코드 연속 촬영: '촬영' 버튼으로 한 장씩 찍으면 자동으로 바코드 인식→ISBN 이름 저장 ──────────
+  //  · 저장 버튼 없음(백그라운드 자동 저장), 촬영 버튼을 다시 눌러 다음 장
+  //  · 한 사진에 바코드가 여러 개면 이미지 위에 위치를 표시하고 선택 → 그 코드로 저장
   function continuousBarcodeCapture() {
     if (!window.ISBN) return UI.toast('바코드 모듈을 사용할 수 없습니다', 'error');
-    let cam = document.getElementById('cam-cont-input');
-    if (!cam) {
-      cam = document.createElement('input');
-      cam.type = 'file'; cam.accept = 'image/*'; cam.capture = 'environment';
-      cam.id = 'cam-cont-input'; cam.style.display = 'none';
-      document.body.appendChild(cam);
+    const shots = []; let seq = 0;
+    const cam = document.createElement('input');
+    cam.type = 'file'; cam.accept = 'image/*'; cam.capture = 'environment'; cam.style.display = 'none';
+    document.body.appendChild(cam);
+    const m = UI.modal(`<h3>📚 바코드 연속 촬영 <span class="muted" style="font-size:13px;font-weight:400">· 찍으면 자동 저장</span></h3>
+      <div id="cap-pick" class="cap-pick" hidden></div>
+      <button type="button" class="btn btn-primary cap-shoot" id="cap-shoot">📷 촬영</button>
+      <div class="scan-list" id="cap-list"></div>
+      <div class="modal-actions"><span style="flex:1"></span><button class="btn btn-primary" id="cap-done">완료</button></div>`,
+      { onClose: () => { try { cam.remove(); } catch (_) {} loadAll(); } });
+    m.el.querySelector('.modal').classList.add('modal-wide');
+    const beep = () => { try { const A = window.AudioContext || window.webkitAudioContext; if (!A) return; const ac = new A(); const o = ac.createOscillator(); const g = ac.createGain(); o.connect(g); g.connect(ac.destination); o.frequency.value = 880; g.gain.value = 0.07; o.start(); setTimeout(() => { o.stop(); ac.close(); }, 90); } catch (_) {} };
+    const feedback = () => { beep(); if (navigator.vibrate) try { navigator.vibrate(45); } catch (_) {} };
+    const stLabel = (s) => ({ processing: '⏳ 인식중', choosing: '👆 선택필요', saving: '⏳ 저장중', done: '✓ 저장됨', nobar: '⚠️ 바코드없음', error: '✗ 실패' }[s] || s);
+    function renderList() {
+      m.q('#cap-list').innerHTML = shots.length
+        ? shots.slice().reverse().map((x) => `<div class="cap-row">${x.thumb ? `<img class="cap-thumb" src="${x.thumb}" alt="">` : '<span class="cap-thumb cap-thumb-ph">🖼️</span>'}<span class="cap-code">${UI.escapeHtml(x.name || '…')}</span><span class="cap-status cap-${x.status}">${stLabel(x.status)}</span></div>`).join('')
+        : '<p class="muted" style="text-align:center;padding:14px">📷 촬영 버튼을 눌러 책을 찍으세요</p>';
     }
-    contCount = 0; let active = true;
-    const finish = () => { if (!active) return; active = false; cam.removeEventListener('change', onChange); if (contCount) { UI.toast(`📚 연속 촬영 종료 · ${contCount}장 저장`, 'success'); loadAll(); } };
-    const onChange = () => {
-      const files = [...cam.files]; cam.value = '';
-      if (!files.length) return finish(); // 카메라에서 취소 → 종료
-      files.forEach((f) => { contCount++; processShot(f); });
-      if (active) { try { cam.click(); } catch (_) {} } // 곧바로 다음 장 촬영
-    };
-    cam.addEventListener('change', onChange);
-    UI.toast('📚 연속 촬영 시작 — 계속 찍으세요. 끝내려면 카메라에서 취소하세요.', 'info', { duration: 4500 });
-    cam.click();
-  }
-  // 촬영본 한 장: 바코드 인식 → ISBN(.확장자) 이름으로 백그라운드 저장(못 찾으면 시각 기반 이름)
-  async function processShot(file) {
-    let isbn = null;
-    try { const url = URL.createObjectURL(file); const img = await loadImgEl(url); const res = await window.ISBN.scan(img, { useOcr: true }); URL.revokeObjectURL(url); if (res && res.isbn) isbn = res.isbn; } catch (_) {}
-    const ext = ((file.name.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '')) || 'jpg';
-    const p2 = (x) => String(x).padStart(2, '0'); const d = new Date();
-    const base = isbn || `촬영_${d.getFullYear()}${p2(d.getMonth() + 1)}${p2(d.getDate())}_${p2(d.getHours())}${p2(d.getMinutes())}${p2(d.getSeconds())}`;
-    const fd = new FormData(); fd.append('folder', state.folder);
-    fd.append('file', new File([file], `${base}.${ext}`, { type: file.type || 'image/jpeg' }));
-    try {
-      const r = await API.upload(fd, state.ownerId);
-      if (r && r.rejected && r.rejected.length) UI.toast(`⚠️ 저장 거부됨 (${r.rejected[0].reason || '보안 정책'})`, 'error');
-      else UI.toast(isbn ? `✅ ${isbn} 저장` : `⚠️ 바코드 못 찾음 · ${base} 저장`, isbn ? 'success' : 'info');
-    } catch (e) { UI.toast('저장 실패: ' + (e.message || ''), 'error'); }
+    const setShoot = (on) => { const b = m.q('#cap-shoot'); if (b) b.disabled = !on; };
+    function thumbData(img) { const s = Math.min(1, 120 / Math.max(img.naturalWidth, img.naturalHeight)); const c = document.createElement('canvas'); c.width = Math.max(1, Math.round(img.naturalWidth * s)); c.height = Math.max(1, Math.round(img.naturalHeight * s)); c.getContext('2d').drawImage(img, 0, 0, c.width, c.height); return c.toDataURL('image/jpeg', 0.6); }
+
+    async function saveShot(file, code, shot) {
+      const ext = ((file.name.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '')) || 'jpg';
+      const p2 = (x) => String(x).padStart(2, '0'); const d = new Date();
+      const base = code || `촬영_${d.getFullYear()}${p2(d.getMonth() + 1)}${p2(d.getDate())}_${p2(d.getHours())}${p2(d.getMinutes())}${p2(d.getSeconds())}`;
+      shot.name = base; shot.status = 'saving'; renderList();
+      const fd = new FormData(); fd.append('folder', state.folder); fd.append('file', new File([file], `${base}.${ext}`, { type: file.type || 'image/jpeg' }));
+      try { const r = await API.upload(fd, state.ownerId); shot.status = (r && r.rejected && r.rejected.length) ? 'error' : (code ? 'done' : 'nobar'); }
+      catch (_) { shot.status = 'error'; }
+      renderList();
+    }
+
+    function showPicker(url, nw, nh, boxes, cands, onPick) {
+      const box = m.q('#cap-pick'); box.hidden = false;
+      const list = (boxes && boxes.length >= 2) ? boxes.map((b) => b.code) : cands;
+      const bhtml = (boxes || []).map((b, i) => `<button type="button" class="cap-bbox" data-code="${b.code}" style="left:${(b.x / nw * 100).toFixed(2)}%;top:${(b.y / nh * 100).toFixed(2)}%;width:${(b.w / nw * 100).toFixed(2)}%;height:${(b.h / nh * 100).toFixed(2)}%"><span>${i + 1}</span></button>`).join('');
+      box.innerHTML = `<p class="cap-pick-title">바코드가 여러 개예요 — 저장할 것을 선택하세요</p>
+        <div class="cap-pick-img"><img src="${url}" alt="">${bhtml}</div>
+        <div class="cap-pick-chips">${list.map((c, i) => `<button type="button" class="isbn-chip" data-code="${c}">${(boxes && boxes.length >= 2) ? (i + 1) + '. ' : ''}${c}</button>`).join('')}</div>`;
+      box.querySelectorAll('[data-code]').forEach((el) => el.addEventListener('click', () => { box.hidden = true; box.innerHTML = ''; onPick(el.dataset.code); }));
+    }
+
+    async function handleFile(file) {
+      const shot = { id: ++seq, name: null, status: 'processing', thumb: null };
+      shots.push(shot); renderList(); feedback();
+      let img, url;
+      try { url = URL.createObjectURL(file); img = await loadImgEl(url); shot.thumb = thumbData(img); renderList(); }
+      catch (_) { shot.status = 'error'; renderList(); return; }
+      let res; try { res = await window.ISBN.scan(img, { useOcr: true }); } catch (_) { res = { candidates: [] }; }
+      const cands = res.candidates || [];
+      if (cands.length >= 2) { // 여러 개 → 이미지에서 선택
+        shot.status = 'choosing'; renderList(); setShoot(false);
+        let boxes = []; try { boxes = await window.ISBN.detectAll(img); } catch (_) {}
+        showPicker(url, img.naturalWidth, img.naturalHeight, boxes, cands, (code) => { URL.revokeObjectURL(url); setShoot(true); saveShot(file, code, shot); });
+        return;
+      }
+      URL.revokeObjectURL(url);
+      saveShot(file, cands[0] || null, shot);
+    }
+
+    cam.addEventListener('change', async () => { const files = [...cam.files]; cam.value = ''; for (const f of files) await handleFile(f); });
+    m.q('#cap-shoot').addEventListener('click', () => { try { cam.click(); } catch (_) {} });
+    m.q('#cap-done').addEventListener('click', m.close);
+    renderList();
   }
 
   // ── 카메라(사진) 업로드: 촬영 → 각 사진 제목·비고 입력(+ISBN 인식) → 업로드 ──────────

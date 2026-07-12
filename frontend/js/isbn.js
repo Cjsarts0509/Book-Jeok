@@ -74,7 +74,7 @@ window.ISBN = (() => {
     });
     return loaded[src];
   }
-  const ensureZXing = () => loadScript('vendor/zxing.min.js?v=83', 'ZXing');
+  const ensureZXing = () => loadScript('vendor/zxing.min.js?v=84', 'ZXing');
   const TESS_CDN = 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js';
   const ensureTesseract = () => loadScript(TESS_CDN, 'Tesseract');
 
@@ -204,6 +204,25 @@ window.ISBN = (() => {
     return { success: false, isbn: null, candidates: [], method: 'NONE', message: '유효한 ISBN을 찾지 못했습니다.' };
   }
 
+  // 이미지에서 유효 바코드를 위치(원본 픽셀 박스)와 함께 모두 반환 — 다중 바코드 선택 UI 용.
+  // 네이티브 BarcodeDetector 가 있어야 위치가 나옴(없으면 빈 배열).
+  async function detectAll(source) {
+    if (!('BarcodeDetector' in window)) return [];
+    try {
+      const det = new window.BarcodeDetector({ formats: ['ean_13', 'ean_8', 'upc_a'] });
+      const found = await det.detect(source);
+      const seen = new Set(); const out = [];
+      for (const b of found) {
+        if (!isValidProduct(b.rawValue)) continue;
+        const code = clean(b.rawValue); if (seen.has(code)) continue; seen.add(code);
+        const bb = b.boundingBox || {};
+        out.push({ code, x: bb.x || 0, y: bb.y || 0, w: bb.width || 0, h: bb.height || 0 });
+      }
+      out.sort((a, b) => (a.y - b.y) || (a.x - b.x));
+      return out;
+    } catch (_) { return []; }
+  }
+
   // ISBN 을 파일명에 안전하게 넣기용 하이픈 표기(978-89-...)는 생략, 숫자 그대로 사용
-  return { scan, isValidBarcode, isBookIsbn, isValidProduct, extractCandidates, clean };
+  return { scan, detectAll, isValidBarcode, isBookIsbn, isValidProduct, extractCandidates, clean };
 })();
