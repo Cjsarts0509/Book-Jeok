@@ -252,6 +252,11 @@ textarea.input { resize: vertical; }
 .cam-isbn-status.bad { color: #c22d54; }
 .cam-isbn-input { height: 32px; max-width: 160px; font-size: 13px; }
 .cam-isbn .btn-sm { padding: 5px 8px; }
+.cam-isbn-alt { flex-basis: 100%; display: flex; flex-wrap: wrap; gap: 5px; align-items: center; }
+.cam-isbn-alt:empty { display: none; }
+.cam-isbn-altlabel { font-size: 11px; color: var(--text-muted); }
+.isbn-chip { padding: 4px 9px; border: 1px solid var(--border); border-radius: 13px; background: var(--surface); font-size: 12px; font-weight: 600; letter-spacing: .2px; cursor: pointer; }
+.isbn-chip.on { background: #06D6A0; color: #04372b; border-color: #06D6A0; }
 /* 스캔 구역 지정 */
 .region-wrap { position: relative; display: inline-block; max-width: 100%; line-height: 0; }
 .region-img { max-width: 100%; max-height: 60vh; touch-action: none; user-select: none; -webkit-user-drag: none; border-radius: var(--radius-sm); }

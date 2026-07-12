@@ -964,7 +964,7 @@ const App = (() => {
   // ── 카메라(사진) 업로드: 촬영 → 각 사진 제목·비고 입력(+ISBN 인식) → 업로드 ──────────
   function cameraReviewModal(files) {
     const urls = files.map((f) => URL.createObjectURL(f));
-    const meta = files.map(() => ({ region: null, isbn: null, method: null, scanning: false, tried: false }));
+    const meta = files.map(() => ({ region: null, isbn: null, candidates: [], method: null, scanning: false, tried: false }));
     const hasIsbn = !!window.ISBN;
     const rows = files.map((f, i) => `
       <div class="cam-item" data-i="${i}">
@@ -977,6 +977,7 @@ const App = (() => {
             <input class="input cam-isbn-input" placeholder="ISBN" inputmode="numeric" maxlength="17">
             <button type="button" class="btn btn-ghost btn-sm cam-region" data-region="${i}" title="스캔 구역 지정">🎯 구역</button>
             <button type="button" class="btn btn-ghost btn-sm cam-rescan" data-rescan="${i}" title="다시 인식">🔍</button>
+            <div class="cam-isbn-alt" data-alt="${i}"></div>
           </div>
         </div>
         <button class="icon-btn cam-rm" data-rm="${i}" title="제거">✕</button>
@@ -994,14 +995,29 @@ const App = (() => {
     const imgEl = (i) => m.el.querySelector(`[data-img="${i}"]`);
     const isbnOn = () => hasIsbn && !!m.q('#isbn-on')?.checked;
 
+    function renderChips(i) {
+      const alt = m.el.querySelector(`[data-alt="${i}"]`); if (!alt) return;
+      const cs = meta[i].candidates || [];
+      if (cs.length < 2) { alt.innerHTML = ''; return; }
+      const cur = (itemEl(i)?.querySelector('.cam-isbn-input')?.value || '').replace(/[^0-9X]/gi, '').toUpperCase();
+      alt.innerHTML = '<span class="cam-isbn-altlabel">여러 개 감지 — 선택:</span>' +
+        cs.map((c) => `<button type="button" class="isbn-chip${c === cur ? ' on' : ''}" data-pick="${c}">${c}</button>`).join('');
+      alt.querySelectorAll('[data-pick]').forEach((b) => b.addEventListener('click', () => {
+        meta[i].isbn = b.dataset.pick;
+        const inp = itemEl(i)?.querySelector('.cam-isbn-input'); if (inp) inp.value = b.dataset.pick;
+        renderChips(i);
+      }));
+    }
     function renderIsbn(i) {
       const row = m.el.querySelector(`[data-isbn-row="${i}"]`); if (!row) return;
       row.hidden = !isbnOn();
       const st = row.querySelector('.cam-isbn-status'); const inp = row.querySelector('.cam-isbn-input');
+      const n = (meta[i].candidates || []).length;
       if (meta[i].scanning) { st.textContent = '⏳ 인식 중…'; st.className = 'cam-isbn-status muted'; }
-      else if (meta[i].isbn) { st.textContent = meta[i].method === 'OCR' ? '📕 OCR' : '📕 바코드'; st.className = 'cam-isbn-status ok'; if (document.activeElement !== inp) inp.value = meta[i].isbn; }
+      else if (meta[i].isbn) { st.textContent = (meta[i].method === 'OCR' ? '📕 OCR' : '📕 바코드') + (n > 1 ? ` · ${n}개` : ''); st.className = 'cam-isbn-status ok'; if (document.activeElement !== inp) inp.value = meta[i].isbn; }
       else if (meta[i].tried) { st.textContent = '❌ 못 찾음'; st.className = 'cam-isbn-status bad'; }
       else { st.textContent = '⏳ 대기'; st.className = 'cam-isbn-status muted'; }
+      renderChips(i);
     }
     async function scanOne(i) {
       if (!isbnOn() || !kept.has(i)) return;
@@ -1009,11 +1025,11 @@ const App = (() => {
       meta[i].scanning = true; renderIsbn(i);
       let res;
       try { res = await window.ISBN.scan(img, { region: meta[i].region, useOcr: true }); }
-      catch (_) { res = { success: false, isbn: null, method: 'NONE' }; }
-      meta[i].scanning = false; meta[i].tried = true; meta[i].isbn = res.isbn; meta[i].method = res.method;
+      catch (_) { res = { success: false, isbn: null, candidates: [], method: 'NONE' }; }
+      meta[i].scanning = false; meta[i].tried = true; meta[i].isbn = res.isbn; meta[i].candidates = res.candidates || (res.isbn ? [res.isbn] : []); meta[i].method = res.method;
       renderIsbn(i);
     }
-    function scanAll() { [...kept].forEach((i) => { meta[i].isbn = null; meta[i].tried = false; renderIsbn(i); scanOne(i); }); }
+    function scanAll() { [...kept].forEach((i) => { meta[i].isbn = null; meta[i].candidates = []; meta[i].tried = false; renderIsbn(i); scanOne(i); }); }
 
     m.q('#cam-cancel').addEventListener('click', () => { cleanup(); m.close(); });
     m.el.querySelectorAll('[data-rm]').forEach((b) => b.addEventListener('click', () => {
@@ -1023,7 +1039,7 @@ const App = (() => {
     }));
     // ISBN: 토글 · 재인식 · 구역지정 · 이미지 로드 시 자동 스캔
     m.q('#isbn-on')?.addEventListener('change', () => { m.el.querySelectorAll('.cam-isbn').forEach((r) => { r.hidden = !isbnOn(); }); if (isbnOn()) scanAll(); });
-    m.el.querySelectorAll('[data-rescan]').forEach((b) => b.addEventListener('click', () => { const i = +b.dataset.rescan; meta[i].isbn = null; meta[i].tried = false; scanOne(i); }));
+    m.el.querySelectorAll('[data-rescan]').forEach((b) => b.addEventListener('click', () => { const i = +b.dataset.rescan; meta[i].isbn = null; meta[i].candidates = []; meta[i].tried = false; scanOne(i); }));
     m.el.querySelectorAll('[data-region]').forEach((b) => b.addEventListener('click', () => regionModal(+b.dataset.region)));
     m.el.querySelectorAll('[data-img]').forEach((img) => { const i = +img.dataset.img; if (img.complete && img.naturalWidth) scanOne(i); else img.addEventListener('load', () => scanOne(i)); });
     m.el.querySelectorAll('.cam-isbn').forEach((r) => { r.hidden = !isbnOn(); });

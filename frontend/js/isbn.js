@@ -33,6 +33,7 @@ window.ISBN = (() => {
     return false;
   }
   const clean = (raw) => String(raw || '').replace(/[^0-9X]/gi, '').toUpperCase();
+  const dedupe = (arr) => [...new Set(arr)];
 
   // OCR 텍스트에서 ISBN 후보 추출
   function extractCandidates(text) {
@@ -56,7 +57,7 @@ window.ISBN = (() => {
     });
     return loaded[src];
   }
-  const ensureZXing = () => loadScript('vendor/zxing.min.js?v=70', 'ZXing');
+  const ensureZXing = () => loadScript('vendor/zxing.min.js?v=71', 'ZXing');
   const TESS_CDN = 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js';
   const ensureTesseract = () => loadScript(TESS_CDN, 'Tesseract');
 
@@ -82,22 +83,26 @@ window.ISBN = (() => {
     return canvas;
   }
 
-  // ── 바코드: 네이티브 BarcodeDetector ──────────
+  // ── 바코드: 네이티브 BarcodeDetector (한 화면의 모든 바코드 반환) ──────────
+  // 여러 개면 위→아래, 왼→오 순으로 정렬해 예측 가능한 순서로 돌려줌
   async function scanNative(canvas) {
-    if (!('BarcodeDetector' in window)) return null;
+    if (!('BarcodeDetector' in window)) return [];
     try {
       const det = new window.BarcodeDetector({ formats: ['ean_13', 'ean_8', 'upc_a'] });
       const found = await det.detect(canvas);
-      for (const b of found) { if (isBookIsbn(b.rawValue)) return clean(b.rawValue); }
-    } catch (_) { /* 미지원 포맷/오류 → 폴백 */ }
-    return null;
+      const items = found
+        .filter((b) => isBookIsbn(b.rawValue))
+        .map((b) => ({ code: clean(b.rawValue), y: b.boundingBox ? b.boundingBox.y : 0, x: b.boundingBox ? b.boundingBox.x : 0 }))
+        .sort((a, b) => (a.y - b.y) || (a.x - b.x));
+      return dedupe(items.map((i) => i.code));
+    } catch (_) { return []; } // 미지원 포맷/오류 → 폴백
   }
 
-  // ── 바코드: ZXing (다방향, tryHarder) ──────────
+  // ── 바코드: ZXing (다방향, tryHarder) — 이 번들은 이미지당 1개만 디코드 ──────────
   let zxReader = null;
   async function scanZXing(canvas) {
     let Z;
-    try { Z = await ensureZXing(); } catch (_) { return null; }
+    try { Z = await ensureZXing(); } catch (_) { return []; }
     try {
       if (!zxReader) {
         const hints = new Map();
@@ -106,43 +111,44 @@ window.ISBN = (() => {
         zxReader = new Z.BrowserMultiFormatReader(hints);
       }
       const res = await zxReader.decodeFromImageUrl(canvas.toDataURL('image/png'));
-      if (res && isBookIsbn(res.getText())) return clean(res.getText());
+      if (res && isBookIsbn(res.getText())) return [clean(res.getText())];
     } catch (_) { /* NotFound 등 → 폴백 */ }
-    return null;
+    return [];
   }
 
   // ── OCR: Tesseract.js (숫자 전용, 단일 라인) ──────────
   let tessWorker = null;
   async function scanOcr(canvas) {
     let T;
-    try { T = await ensureTesseract(); } catch (_) { return null; }
+    try { T = await ensureTesseract(); } catch (_) { return []; }
     try {
       if (!tessWorker) {
         tessWorker = await T.createWorker('eng');
         await tessWorker.setParameters({ tessedit_char_whitelist: '0123456789Xx- ', tessedit_pageseg_mode: '6' });
       }
       const { data } = await tessWorker.recognize(canvas);
-      for (const c of extractCandidates(data.text)) { if (isBookIsbn(c)) return c; }
-    } catch (_) { /* OCR 실패 → 폴백 */ }
-    return null;
+      return dedupe(extractCandidates(data.text).filter(isBookIsbn));
+    } catch (_) { return []; } // OCR 실패 → 폴백
   }
 
-  // ── 메인: 이미지에서 ISBN 찾기 ──────────
-  // opts: { region, useOcr }  → { success, isbn, method, message }
+  // ── 메인: 이미지에서 ISBN 찾기 (여러 개면 candidates 로 모두 반환) ──────────
+  // opts: { region, useOcr }  → { success, isbn, candidates, method, message }
   async function scan(source, opts) {
     opts = opts || {};
     // 바코드는 해상도가 필요 → 크게(축소 상한 2600), OCR 은 라인 인식이라 상한 1800
     const bcCanvas = toCanvas(source, opts.region, 2600);
-    let isbn = await scanNative(bcCanvas);
-    if (isbn) return { success: true, isbn, method: 'BARCODE', message: '바코드 인식 성공' };
-    isbn = await scanZXing(bcCanvas);
-    if (isbn) return { success: true, isbn, method: 'BARCODE', message: '바코드 인식 성공(ZXing)' };
-    if (opts.useOcr !== false) {
+    let cands = await scanNative(bcCanvas);
+    let method = 'BARCODE';
+    if (!cands.length) cands = await scanZXing(bcCanvas);
+    if (!cands.length && opts.useOcr !== false) {
       const ocrCanvas = toCanvas(source, opts.region, 1800);
-      isbn = await scanOcr(ocrCanvas);
-      if (isbn) return { success: true, isbn, method: 'OCR', message: 'OCR 인식 성공' };
+      cands = await scanOcr(ocrCanvas);
+      if (cands.length) method = 'OCR';
     }
-    return { success: false, isbn: null, method: 'NONE', message: '유효한 ISBN을 찾지 못했습니다.' };
+    if (cands.length) {
+      return { success: true, isbn: cands[0], candidates: cands, method, message: cands.length > 1 ? `ISBN ${cands.length}개 감지` : '인식 성공' };
+    }
+    return { success: false, isbn: null, candidates: [], method: 'NONE', message: '유효한 ISBN을 찾지 못했습니다.' };
   }
 
   // ISBN 을 파일명에 안전하게 넣기용 하이픈 표기(978-89-...)는 생략, 숫자 그대로 사용
