@@ -134,7 +134,7 @@ const App = (() => {
       closeNavMenu(); // 다른 탭 이동 시 열려있던 메뉴는 닫기
       if (t === 'files') goTo('/');
       else if (t === 'search') { const si = document.getElementById('search-input'); if (si) { window.scrollTo({ top: 0, behavior: 'smooth' }); si.focus(); } }
-      else if (t === 'upload') document.getElementById('file-input')?.click();
+      else if (t === 'upload') uploadSheet();
       else if (t === 'notif') notifModal();
     }));
     root().querySelectorAll('.appbar-nav [data-nav]').forEach((el) => el.addEventListener('click', () => {
@@ -946,6 +946,19 @@ const App = (() => {
       if (!r || !r.rejected || r.rejected.length < fileList.length) UI.toast('업로드 완료 ✅', 'success');
       loadAll();
     } catch (err) { UI.toast(err.message, 'error'); }
+  }
+
+  // ── 모바일 하단 FAB(⬆️) → 파일/촬영 선택 시트 (상단 업로드·촬영 버튼 대체) ──────────
+  function uploadSheet() {
+    const m = UI.modal(`<h3>⬆️ 업로드</h3>
+      <div class="upload-sheet">
+        <button class="btn btn-primary" id="us-file">📁 파일 선택</button>
+        <button class="btn btn-accent" id="us-cam">📷 사진 촬영</button>
+      </div>
+      <div class="modal-actions"><button class="btn btn-ghost" id="us-cancel">취소</button></div>`);
+    m.q('#us-file').addEventListener('click', () => { m.close(); document.getElementById('file-input')?.click(); });
+    m.q('#us-cam').addEventListener('click', () => { m.close(); document.getElementById('cam-input')?.click(); });
+    m.q('#us-cancel').addEventListener('click', m.close);
   }
 
   // ── 카메라(사진) 업로드: 촬영 → 각 사진 제목·비고 입력 → 업로드 ──────────

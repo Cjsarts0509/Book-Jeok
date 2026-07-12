@@ -241,6 +241,9 @@ textarea.input { resize: vertical; }
 .cam-fields { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
 .cam-fields .input { height: 36px; }
 .cam-rm { flex: 0 0 auto; color: var(--danger); }
+/* 업로드 선택 시트(파일/촬영) */
+.upload-sheet { display: flex; flex-direction: column; gap: 10px; margin-top: 8px; }
+.upload-sheet .btn { width: 100%; padding: 15px; font-size: 15px; }
 
 /* 관리자 확장자 선택 그리드 */
 .ext-group { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px; margin-bottom: 12px; }
@@ -564,6 +567,8 @@ th { background: var(--bg); font-weight: 700; color: var(--text-muted); font-siz
   .content { padding: 10px 12px 12px; }
   .content-head { gap: 6px; margin-bottom: 8px; }
   .selbar { margin-bottom: 8px; }
+  /* 업로드·촬영은 하단 탭바 ⬆️ 버튼(파일/촬영 선택)으로 대체 → 상단에선 숨김 */
+  #upload-btn, #camera-btn { display: none; }
   /* 업로드·새폴더·조회·필터는 텍스트 버튼으로 (라벨 노출), 네비/뷰토글만 아이콘 */
   .content-head .btn .label { display: inline; }
   .content-head .btn-sm { padding: 6px 9px; gap: 5px; }   /* 텍스트 버튼이 두 줄에 담기도록 여백 축소 */
