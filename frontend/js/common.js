@@ -130,6 +130,18 @@ const UI = (() => {
     return !!t && (Date.now() - t) < days * 86400000;
   }
 
+  // ── 모달 히스토리 연동: 모달이 열릴 때마다 히스토리 항목을 하나 쌓아,
+  //    휴대폰 '뒤로가기'가 사이트를 벗어나지 않고 맨 위 모달만 닫도록 한다.
+  //    (앱 레벨 뒤로가기 가드와 충돌하지 않게, common 이 처리한 popstate 는 플래그로 알림) ──────────
+  const modalStack = [];
+  let suppressPop = 0;
+  const flagHandled = () => { window.__bjModalHandledPop = true; setTimeout(() => { window.__bjModalHandledPop = false; }, 0); };
+  window.addEventListener('popstate', () => {
+    if (suppressPop > 0) { suppressPop--; flagHandled(); return; }          // 프로그램적 닫기가 유발한 pop → 무시
+    if (modalStack.length) { flagHandled(); modalStack[modalStack.length - 1].doClose(true); } // 뒤로가기 → 맨 위 모달 닫기
+    // 모달과 무관하면 플래그를 세우지 않아 앱 레벨 핸들러가 처리
+  });
+
   // 간단 모달
   function modal(html, { onClose } = {}) {
     const backdrop = document.createElement('div');
@@ -138,14 +150,23 @@ const UI = (() => {
     document.body.appendChild(backdrop);
     // 부드러운 등장 애니메이션
     requestAnimationFrame(() => backdrop.classList.add('open'));
+    // 이 모달용 히스토리 항목 하나 push → 뒤로가기 시 이 모달부터 닫힘
+    let pushedState = false;
+    try { history.pushState({ bjModal: 1 }, ''); pushedState = true; } catch (_) {}
+    const entry = { doClose };
+    modalStack.push(entry);
     let closed = false;
-    function close() {
+    function doClose(fromPop) {
       if (closed) return; closed = true;
+      const i = modalStack.indexOf(entry); if (i >= 0) modalStack.splice(i, 1);
       backdrop.classList.remove('open');
       document.removeEventListener('keydown', onKey);
       setTimeout(() => backdrop.remove(), 200);
+      // X·ESC·버튼으로 닫을 땐 우리가 쌓은 히스토리 항목도 되돌려 정리(뒤로가기로 닫힌 경우는 이미 pop 됨)
+      if (!fromPop && pushedState) { suppressPop++; try { history.back(); } catch (_) { suppressPop--; } }
       if (typeof onClose === 'function') onClose();
     }
+    function close() { doClose(false); }
     // 바깥 클릭으로는 닫히지 않음 (요구사항). X 버튼 / 취소·닫기 버튼 / ESC 로만 닫힘.
     backdrop.querySelector('.modal-x').addEventListener('click', close);
     const onKey = (e) => { if (e.key === 'Escape') close(); };

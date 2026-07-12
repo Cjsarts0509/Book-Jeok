@@ -642,9 +642,9 @@ const App = (() => {
     rearm(); // 상단에 가드 상태 하나를 항상 유지
     let exitArmed = false, exitTimer = null;
     window.addEventListener('popstate', () => {
+      if (window.__bjModalHandledPop) return; // 모달은 common.js 가 처리(자체 히스토리 항목)
       if (!state.user) return; // 로그아웃 상태면 그냥 통과
-      const modals = document.querySelectorAll('.modal-backdrop');
-      if (modals.length) { modals[modals.length - 1].querySelector('.modal-x')?.click(); rearm(); return; }
+      if (document.querySelector('.modal-backdrop')) { rearm(); return; } // 안전망: 모달이 남아있으면 이탈 방지만
       if (state.selected && state.selected.size) { state.selected.clear(); applySelectionClasses(); rearm(); return; }
       if (state.search.on) { clearSearch(); rearm(); return; }
       if (state.nav && state.nav.idx > 0) { navBack(); rearm(); return; }
