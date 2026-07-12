@@ -1014,8 +1014,8 @@ const App = (() => {
       if (n === 'NotAllowedError' || n === 'SecurityError') return '카메라 권한이 거부되었습니다.<br><span style="font-size:12px">주소창의 자물쇠(🔒) → 사이트 권한 → 카메라를 <b>허용</b>으로 바꾼 뒤 다시 시도하세요.</span>';
       if (n === 'NotFoundError' || n === 'OverconstrainedError') return '사용 가능한 카메라를 찾지 못했습니다.';
       if (n === 'NotReadableError') return '다른 앱이 카메라를 쓰고 있습니다.<br><span style="font-size:12px">그 앱을 닫고 다시 시도하세요.</span>';
-      if (n === 'INSECURE') return '카메라는 보안 연결(HTTPS)에서만 사용할 수 있습니다.';
-      return '카메라를 열 수 없습니다.<br><span style="font-size:12px">권한을 허용했는지 확인하세요.</span>';
+      if (n === 'INSECURE') return '이 브라우저에서 카메라를 쓸 수 없습니다.<br><span style="font-size:12px">보안 연결(HTTPS)인지, 카메라 지원 브라우저인지 확인하세요.</span>';
+      return `카메라를 열 수 없습니다.<br><span style="font-size:12px">권한을 허용했는지 확인하세요. (${UI.escapeHtml(String(n || (err && err.message) || 'unknown'))})</span>`;
     }
     // 권한 팝업은 반드시 사용자의 직접 탭에서 요청해야 확실히 뜬다 → '카메라 켜기' 버튼으로 시작
     async function startCam() {
