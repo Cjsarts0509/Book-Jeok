@@ -57,7 +57,7 @@ window.ISBN = (() => {
     });
     return loaded[src];
   }
-  const ensureZXing = () => loadScript('vendor/zxing.min.js?v=72', 'ZXing');
+  const ensureZXing = () => loadScript('vendor/zxing.min.js?v=73', 'ZXing');
   const TESS_CDN = 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js';
   const ensureTesseract = () => loadScript(TESS_CDN, 'Tesseract');
 
@@ -100,19 +100,55 @@ window.ISBN = (() => {
 
   // ── 바코드: ZXing (다방향, tryHarder) — 이 번들은 이미지당 1개만 디코드 ──────────
   let zxReader = null;
-  async function scanZXing(canvas) {
-    let Z;
-    try { Z = await ensureZXing(); } catch (_) { return []; }
-    try {
-      if (!zxReader) {
-        const hints = new Map();
-        hints.set(Z.DecodeHintType.POSSIBLE_FORMATS, [Z.BarcodeFormat.EAN_13, Z.BarcodeFormat.EAN_8, Z.BarcodeFormat.UPC_A]);
-        hints.set(Z.DecodeHintType.TRY_HARDER, true);
-        zxReader = new Z.BrowserMultiFormatReader(hints);
-      }
-      const res = await zxReader.decodeFromImageUrl(canvas.toDataURL('image/png'));
-      if (res && isBookIsbn(res.getText())) return [clean(res.getText())];
-    } catch (_) { /* NotFound 등 → 폴백 */ }
+  async function ensureReader() {
+    const Z = await ensureZXing();
+    if (!zxReader) {
+      const hints = new Map();
+      hints.set(Z.DecodeHintType.POSSIBLE_FORMATS, [Z.BarcodeFormat.EAN_13, Z.BarcodeFormat.EAN_8, Z.BarcodeFormat.UPC_A]);
+      hints.set(Z.DecodeHintType.TRY_HARDER, true);
+      zxReader = new Z.BrowserMultiFormatReader(hints);
+    }
+    return zxReader;
+  }
+  async function zxDecode(canvas) {
+    try { const r = await (await ensureReader()).decodeFromImageUrl(canvas.toDataURL('image/png')); if (r && isBookIsbn(r.getText())) return clean(r.getText()); }
+    catch (_) { /* NotFound → null */ }
+    return null;
+  }
+  // 원본 이미지에서 (x,y,w,h) 잘라 긴 변이 targetLong 이 되도록 확대/축소한 캔버스
+  function cropCanvas(source, x, y, w, h, targetLong) {
+    const long = Math.max(w, h); const k = targetLong ? targetLong / long : 1;
+    const c = document.createElement('canvas');
+    c.width = Math.max(1, Math.round(w * k)); c.height = Math.max(1, Math.round(h * k));
+    const ctx = c.getContext('2d'); ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(source, x, y, w, h, 0, 0, c.width, c.height);
+    return c;
+  }
+  // 같은 영역을 여러 배율로 시도 — ZXing 은 모듈/픽셀 정렬에 민감해 특정 배율에서만 성공하는 경우가 있음
+  async function zxDecodeMulti(source, x, y, w, h, scales) {
+    for (const tl of scales) { const code = await zxDecode(cropCanvas(source, x, y, w, h, tl)); if (code) return code; }
+    return null;
+  }
+  // ZXing 견고 스캔: 구역이면 여러 배율로, 전체면 통짜 + 겹치는 타일(여러 배율)로 작은 바코드까지 탐색
+  async function scanZXingRobust(source, region) {
+    try { await ensureZXing(); } catch (_) { return []; }
+    const nw = source.naturalWidth || source.videoWidth || source.width;
+    const nh = source.naturalHeight || source.videoHeight || source.height;
+    if (region && region.w > 4 && region.h > 4) {
+      const code = await zxDecodeMulti(source, region.x, region.y, region.w, region.h, [900, 1300, 1700, 2100]);
+      return code ? [code] : [];
+    }
+    // 1) 통짜(여러 배율)
+    let code = await zxDecodeMulti(source, 0, 0, nw, nh, [Math.min(2200, Math.max(nw, nh)), 1600]);
+    if (code) return [code];
+    // 2) 겹치는 3x3 타일을 각각 여러 배율로 재시도 — 프레임 대비 작은 바코드도 잡음
+    const nx = 3, ny = 3, ov = 0.35, tw = nw / nx, th = nh / ny;
+    for (let iy = 0; iy < ny; iy++) for (let ix = 0; ix < nx; ix++) {
+      const x = Math.max(0, tw * ix - tw * ov), y = Math.max(0, th * iy - th * ov);
+      const w = Math.min(nw - x, tw * (1 + 2 * ov)), h = Math.min(nh - y, th * (1 + 2 * ov));
+      code = await zxDecodeMulti(source, x, y, w, h, [1200, 1600]);
+      if (code) return [code];
+    }
     return [];
   }
 
@@ -139,7 +175,7 @@ window.ISBN = (() => {
     const bcCanvas = toCanvas(source, opts.region, 2600);
     let cands = await scanNative(bcCanvas);
     let method = 'BARCODE';
-    if (!cands.length) cands = await scanZXing(bcCanvas);
+    if (!cands.length) cands = await scanZXingRobust(source, opts.region);
     if (!cands.length && opts.useOcr !== false) {
       const ocrCanvas = toCanvas(source, opts.region, 1800);
       cands = await scanOcr(ocrCanvas);
