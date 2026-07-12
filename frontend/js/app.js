@@ -979,7 +979,7 @@ const App = (() => {
     const items = new Map(); // code -> { code, count, ts }
     let scanner = null, torchOn = false;
     const m = UI.modal(`<h3>📚 바코드 연속 스캔</h3>
-      <div class="scan-wrap"><video id="scan-video" playsinline muted></video><div class="scan-frame"></div><div class="scan-hint" id="scan-hint">카메라 준비 중…</div></div>
+      <div class="scan-wrap"><video id="scan-video" playsinline muted></video><div class="scan-frame" id="scan-frame" hidden></div><div class="scan-hint" id="scan-hint"><button type="button" class="btn btn-primary" id="scan-start">📷 카메라 켜기</button></div></div>
       <div class="scan-bar">
         <label class="scan-toggle"><input type="checkbox" id="scan-cont" checked> 연속 모드</label>
         <button type="button" class="btn btn-ghost btn-sm" id="scan-torch" hidden>🔦 손전등</button>
@@ -1017,11 +1017,12 @@ const App = (() => {
       if (n === 'INSECURE') return '카메라는 보안 연결(HTTPS)에서만 사용할 수 있습니다.';
       return '카메라를 열 수 없습니다.<br><span style="font-size:12px">권한을 허용했는지 확인하세요.</span>';
     }
+    // 권한 팝업은 반드시 사용자의 직접 탭에서 요청해야 확실히 뜬다 → '카메라 켜기' 버튼으로 시작
     async function startCam() {
       const hint = m.q('#scan-hint'); hint.style.display = ''; hint.innerHTML = '카메라 준비 중…';
       try {
         scanner = await window.ISBN.startLiveScan(video, onScan);
-        hint.style.display = 'none';
+        hint.style.display = 'none'; m.q('#scan-frame').hidden = false;
         setTimeout(() => { // 손전등 지원 시 버튼 노출
           const tr = scanner && scanner.track && scanner.track();
           const caps = tr && tr.getCapabilities ? tr.getCapabilities() : null;
@@ -1031,12 +1032,12 @@ const App = (() => {
           }
         }, 600);
       } catch (err) {
-        scanner = null;
-        hint.innerHTML = `${camErrMsg(err)}<br><button type="button" class="btn btn-secondary btn-sm" id="scan-retry" style="margin-top:10px">다시 시도</button>`;
-        m.q('#scan-retry')?.addEventListener('click', startCam);
+        scanner = null; m.q('#scan-frame').hidden = true;
+        hint.innerHTML = `${camErrMsg(err)}<br><button type="button" class="btn btn-secondary btn-sm" id="scan-start" style="margin-top:10px">📷 다시 시도</button>`;
+        m.q('#scan-start').addEventListener('click', startCam);
       }
     }
-    startCam();
+    m.q('#scan-start').addEventListener('click', startCam);
     m.q('#scan-clear').addEventListener('click', () => { items.clear(); renderList(); });
     m.q('#scan-close').addEventListener('click', m.close);
     m.q('#scan-save').addEventListener('click', async () => {
