@@ -795,8 +795,10 @@ const App = (() => {
     bar.classList.remove('hidden', 'closing');
     bar.classList.toggle('empty', dis);
     const nImg = window.ISBN ? [...state.selected.values()].filter((it) => it.type === 'file' && isImage(it.name)).length : 0;
+    const nFile = [...state.selected.values()].filter((it) => it.type === 'file').length;
     bar.innerHTML = `<b>${n > 0 ? `${n}개 선택` : '항목을 선택하세요'}</b><div style="flex:1"></div>
       <button class="btn btn-sm btn-ghost" id="sel-rename" ${n !== 1 ? 'disabled' : ''}>✏️ 이름변경</button>
+      <button class="btn btn-sm btn-ghost" id="sel-bulkname" ${nFile < 2 ? 'disabled' : ''} title="선택 파일을 규칙(원본·연번·날짜)으로 한 번에 이름변경">🔢 일괄이름</button>
       ${window.ISBN ? `<button class="btn btn-sm btn-ghost" id="sel-barcode" ${nImg === 0 ? 'disabled' : ''} title="이미지에서 바코드/ISBN을 읽어 제목 변경">📕 바코드 제목변경</button>` : ''}
       <button class="btn btn-sm btn-primary" id="sel-dl" ${dis ? 'disabled' : ''}>⬇️ 다운로드(ZIP)</button>
       <button class="btn btn-sm btn-secondary" id="sel-move" ${dis ? 'disabled' : ''}>📂 폴더이동</button>
@@ -808,6 +810,8 @@ const App = (() => {
     bar.querySelector('#sel-move').addEventListener('click', bulkMoveModal);
     const bc = bar.querySelector('#sel-barcode');
     if (bc && !bc.disabled) bc.addEventListener('click', () => barcodeRename([...state.selected.values()]));
+    const brn = bar.querySelector('#sel-bulkname');
+    if (brn && !brn.disabled) brn.addEventListener('click', () => bulkRenameModal([...state.selected.values()].filter((it) => it.type === 'file')));
     const rn = bar.querySelector('#sel-rename');
     if (!rn.disabled) rn.addEventListener('click', () => {
       const item = [...state.selected.values()][0];
@@ -1140,6 +1144,59 @@ const App = (() => {
       const msg = `📕 ${renamed}개 제목 변경${failed.length ? ` · ${failed.length}개 실패(ISBN 못 찾음)` : ''}`;
       UI.toast(msg, failed.length && !renamed ? 'error' : 'success');
     }
+  }
+
+  // ── 일괄 이름변경 (템플릿: 원본이름·연번·날짜) ──────────
+  function bulkRenameModal(items) {
+    const files = (items || []).filter((it) => it.type === 'file');
+    if (files.length < 2) return UI.toast('파일을 2개 이상 선택하세요', 'info');
+    files.sort((a, b) => a.name.localeCompare(b.name, 'ko'));
+    const splitExt = (nm) => { const i = nm.lastIndexOf('.'); return i > 0 ? [nm.slice(0, i), nm.slice(i)] : [nm, '']; };
+    const now = new Date(); const p2 = (x) => String(x).padStart(2, '0');
+    const y = now.getFullYear(), mo = p2(now.getMonth() + 1), d = p2(now.getDate());
+    const dateFmt = { 'YYYY-MM-DD': `${y}-${mo}-${d}`, 'YYYYMMDD': `${y}${mo}${d}`, 'YYMMDD': `${String(y).slice(2)}${mo}${d}` };
+    const build = (tpl, base, idx, start, pad, dstr) => tpl
+      .replace(/\{name\}/g, base)
+      .replace(/\{n\}/g, String(start + idx).padStart(pad, '0'))
+      .replace(/\{idx\}/g, String(idx + 1))
+      .replace(/\{date\}/g, dstr)
+      .replace(/[/\\]/g, '_').replace(/[\x00-\x1f]/g, '').trim();
+    const m = UI.modal(`<h3>🔢 일괄 이름변경 <span class="muted" style="font-size:13px;font-weight:400">· ${files.length}개</span></h3>
+      <div class="field"><label>이름 규칙</label>
+        <input class="input" id="br-tpl" value="{name}" placeholder="예: 정산_{date}_{n}">
+        <div class="br-tokens"><button type="button" class="btn btn-ghost btn-sm" data-tok="{name}">원본이름</button><button type="button" class="btn btn-ghost btn-sm" data-tok="{n}">연번</button><button type="button" class="btn btn-ghost btn-sm" data-tok="{date}">날짜</button></div>
+      </div>
+      <div class="br-row">
+        <div class="field"><label>연번 시작</label><input class="input" id="br-start" type="number" value="1" min="0" style="width:90px"></div>
+        <div class="field"><label>자릿수</label><select class="input" id="br-pad"><option value="1">1</option><option value="2">2</option><option value="3" selected>3 (001)</option><option value="4">4</option></select></div>
+        <div class="field"><label>날짜 형식</label><select class="input" id="br-date"><option>YYYY-MM-DD</option><option>YYYYMMDD</option><option>YYMMDD</option></select></div>
+      </div>
+      <div class="field"><label>미리보기</label><div id="br-prev" class="br-prev"></div></div>
+      <div class="modal-actions"><button class="btn btn-ghost" id="br-cancel">취소</button><button class="btn btn-primary" id="br-go">적용</button></div>`);
+    m.el.querySelector('.modal').classList.add('modal-wide');
+    const getOpts = () => ({ tpl: m.q('#br-tpl').value || '{name}', start: parseInt(m.q('#br-start').value, 10) || 0, pad: parseInt(m.q('#br-pad').value, 10) || 1, dstr: dateFmt[m.q('#br-date').value] });
+    function renderPrev() {
+      const o = getOpts();
+      const rows = files.slice(0, 8).map((f, i) => { const [base, ext] = splitExt(f.name); const nb = build(o.tpl, base, i, o.start, o.pad, o.dstr); return `<div class="br-line"><span class="old">${UI.escapeHtml(f.name)}</span><span class="arr">→</span><span class="new ${nb ? '' : 'bad'}">${UI.escapeHtml(nb ? nb + ext : '(빈 이름)')}</span></div>`; }).join('');
+      m.q('#br-prev').innerHTML = rows + (files.length > 8 ? `<div class="muted" style="font-size:12px;margin-top:4px">… 외 ${files.length - 8}개</div>` : '');
+    }
+    ['#br-tpl', '#br-start', '#br-pad', '#br-date'].forEach((s) => m.q(s).addEventListener('input', renderPrev));
+    m.el.querySelectorAll('[data-tok]').forEach((b) => b.addEventListener('click', () => {
+      const inp = m.q('#br-tpl'); const s = inp.selectionStart ?? inp.value.length; const e = inp.selectionEnd ?? s;
+      inp.value = inp.value.slice(0, s) + b.dataset.tok + inp.value.slice(e); renderPrev(); inp.focus();
+    }));
+    renderPrev();
+    m.q('#br-cancel').addEventListener('click', m.close);
+    m.q('#br-go').addEventListener('click', async () => {
+      const o = getOpts();
+      const plan = files.map((f, i) => { const [base, ext] = splitExt(f.name); const nb = build(o.tpl, base, i, o.start, o.pad, o.dstr); return { id: f.id, nb, nn: nb + ext }; });
+      if (plan.some((p) => !p.nb)) return UI.toast('빈 이름이 생깁니다. 규칙을 확인하세요.', 'error');
+      const btn = m.q('#br-go'); btn.disabled = true; btn.innerHTML = '<span class="btn-spin"></span>변경 중…';
+      let ok = 0; const fail = [];
+      for (const p of plan) { try { await API.renameFile(p.id, p.nn); ok++; } catch (_) { fail.push(p.nn); } }
+      m.close(); state.selected.clear(); await loadFiles();
+      UI.toast(`🔢 ${ok}개 이름변경${fail.length ? ` · ${fail.length}개 실패` : ''}`, fail.length && !ok ? 'error' : 'success');
+    });
   }
 
   // Content-Disposition에서 파일명 추출 (filename*=UTF-8'' 우선, 없으면 filename=)
