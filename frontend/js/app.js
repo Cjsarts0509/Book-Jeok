@@ -1146,7 +1146,7 @@ const App = (() => {
     }
   }
 
-  // ── 일괄 이름변경 (템플릿: 원본이름·연번·날짜) ──────────
+  // ── 일괄 이름변경 (구성요소를 골라 조합: 앞텍스트·원본이름·날짜·연번) ──────────
   function bulkRenameModal(items) {
     const files = (items || []).filter((it) => it.type === 'file');
     if (files.length < 2) return UI.toast('파일을 2개 이상 선택하세요', 'info');
@@ -1155,42 +1155,57 @@ const App = (() => {
     const now = new Date(); const p2 = (x) => String(x).padStart(2, '0');
     const y = now.getFullYear(), mo = p2(now.getMonth() + 1), d = p2(now.getDate());
     const dateFmt = { 'YYYY-MM-DD': `${y}-${mo}-${d}`, 'YYYYMMDD': `${y}${mo}${d}`, 'YYMMDD': `${String(y).slice(2)}${mo}${d}` };
-    const build = (tpl, base, idx, start, pad, dstr) => tpl
-      .replace(/\{name\}/g, base)
-      .replace(/\{n\}/g, String(start + idx).padStart(pad, '0'))
-      .replace(/\{idx\}/g, String(idx + 1))
-      .replace(/\{date\}/g, dstr)
-      .replace(/[/\\]/g, '_').replace(/[\x00-\x1f]/g, '').trim();
     const m = UI.modal(`<h3>🔢 일괄 이름변경 <span class="muted" style="font-size:13px;font-weight:400">· ${files.length}개</span></h3>
-      <div class="field"><label>이름 규칙</label>
-        <input class="input" id="br-tpl" value="{name}" placeholder="예: 정산_{date}_{n}">
-        <div class="br-tokens"><button type="button" class="btn btn-ghost btn-sm" data-tok="{name}">원본이름</button><button type="button" class="btn btn-ghost btn-sm" data-tok="{n}">연번</button><button type="button" class="btn btn-ghost btn-sm" data-tok="{date}">날짜</button></div>
+      <p class="muted" style="font-size:12px;margin-bottom:10px">넣을 항목을 켜서 순서대로 조합됩니다. (확장자는 유지)</p>
+      <div class="br-build">
+        <div class="br-item">
+          <label class="br-opt"><input type="checkbox" id="br-usePrefix"><span class="br-name">앞 텍스트</span><input class="input br-inline" id="br-prefix" placeholder="예: 정산" maxlength="40" disabled></label>
+          <p class="br-desc">이름 맨 앞에 붙일 고정 글자</p>
+        </div>
+        <div class="br-item">
+          <label class="br-opt"><input type="checkbox" id="br-useName" checked><span class="br-name">원본 이름</span></label>
+          <p class="br-desc">기존 파일 이름을 그대로 사용</p>
+        </div>
+        <div class="br-item">
+          <label class="br-opt"><input type="checkbox" id="br-useDate"><span class="br-name">날짜</span><select class="input br-inline" id="br-date" disabled><option>YYYY-MM-DD</option><option>YYYYMMDD</option><option>YYMMDD</option></select></label>
+          <p class="br-desc">오늘 날짜를 넣습니다 (${dateFmt['YYYY-MM-DD']})</p>
+        </div>
+        <div class="br-item">
+          <label class="br-opt"><input type="checkbox" id="br-useSeq"><span class="br-name">연번</span><span class="br-inline2">시작 <input class="input" id="br-start" type="number" value="1" min="0" style="width:64px" disabled> 자릿수 <select class="input" id="br-pad" disabled><option value="1">1</option><option value="2">2</option><option value="3" selected>3</option><option value="4">4</option></select></span></label>
+          <p class="br-desc">001, 002 … 순서대로 번호를 붙입니다</p>
+        </div>
+        <div class="br-item br-sep-row">
+          <span class="br-name">구분자</span>
+          <select class="input br-inline" id="br-sep"><option value="_">_ (밑줄)</option><option value="-">- (하이픈)</option><option value=" ">공백</option><option value="">없음</option></select>
+          <p class="br-desc">항목 사이를 잇는 문자</p>
+        </div>
       </div>
-      <div class="br-row">
-        <div class="field"><label>연번 시작</label><input class="input" id="br-start" type="number" value="1" min="0" style="width:90px"></div>
-        <div class="field"><label>자릿수</label><select class="input" id="br-pad"><option value="1">1</option><option value="2">2</option><option value="3" selected>3 (001)</option><option value="4">4</option></select></div>
-        <div class="field"><label>날짜 형식</label><select class="input" id="br-date"><option>YYYY-MM-DD</option><option>YYYYMMDD</option><option>YYMMDD</option></select></div>
-      </div>
-      <div class="field"><label>미리보기</label><div id="br-prev" class="br-prev"></div></div>
+      <div class="field" style="margin-top:12px"><label>미리보기</label><div id="br-prev" class="br-prev"></div></div>
       <div class="modal-actions"><button class="btn btn-ghost" id="br-cancel">취소</button><button class="btn btn-primary" id="br-go">적용</button></div>`);
     m.el.querySelector('.modal').classList.add('modal-wide');
-    const getOpts = () => ({ tpl: m.q('#br-tpl').value || '{name}', start: parseInt(m.q('#br-start').value, 10) || 0, pad: parseInt(m.q('#br-pad').value, 10) || 1, dstr: dateFmt[m.q('#br-date').value] });
+    // 체크박스로 개별 입력 활성/비활성
+    const bind = (cb, ...ctrls) => { const on = m.q(cb).checked; ctrls.forEach((c) => { const el = m.q(c); if (el) el.disabled = !on; }); };
+    const syncEnabled = () => { bind('#br-usePrefix', '#br-prefix'); bind('#br-useDate', '#br-date'); bind('#br-useSeq', '#br-start', '#br-pad'); };
+    const buildName = (base, idx) => {
+      const sep = m.q('#br-sep').value;
+      const parts = [];
+      if (m.q('#br-usePrefix').checked && m.q('#br-prefix').value.trim()) parts.push(m.q('#br-prefix').value.trim());
+      if (m.q('#br-useName').checked) parts.push(base);
+      if (m.q('#br-useDate').checked) parts.push(dateFmt[m.q('#br-date').value]);
+      if (m.q('#br-useSeq').checked) { const start = parseInt(m.q('#br-start').value, 10) || 0; const pad = parseInt(m.q('#br-pad').value, 10) || 1; parts.push(String(start + idx).padStart(pad, '0')); }
+      return parts.join(sep).replace(/[/\\]/g, '_').replace(/[\x00-\x1f]/g, '').trim();
+    };
     function renderPrev() {
-      const o = getOpts();
-      const rows = files.slice(0, 8).map((f, i) => { const [base, ext] = splitExt(f.name); const nb = build(o.tpl, base, i, o.start, o.pad, o.dstr); return `<div class="br-line"><span class="old">${UI.escapeHtml(f.name)}</span><span class="arr">→</span><span class="new ${nb ? '' : 'bad'}">${UI.escapeHtml(nb ? nb + ext : '(빈 이름)')}</span></div>`; }).join('');
+      syncEnabled();
+      const rows = files.slice(0, 8).map((f, i) => { const [base, ext] = splitExt(f.name); const nb = buildName(base, i); return `<div class="br-line"><span class="old">${UI.escapeHtml(f.name)}</span><span class="arr">→</span><span class="new ${nb ? '' : 'bad'}">${UI.escapeHtml(nb ? nb + ext : '(빈 이름)')}</span></div>`; }).join('');
       m.q('#br-prev').innerHTML = rows + (files.length > 8 ? `<div class="muted" style="font-size:12px;margin-top:4px">… 외 ${files.length - 8}개</div>` : '');
     }
-    ['#br-tpl', '#br-start', '#br-pad', '#br-date'].forEach((s) => m.q(s).addEventListener('input', renderPrev));
-    m.el.querySelectorAll('[data-tok]').forEach((b) => b.addEventListener('click', () => {
-      const inp = m.q('#br-tpl'); const s = inp.selectionStart ?? inp.value.length; const e = inp.selectionEnd ?? s;
-      inp.value = inp.value.slice(0, s) + b.dataset.tok + inp.value.slice(e); renderPrev(); inp.focus();
-    }));
+    m.el.querySelectorAll('.br-build input, .br-build select').forEach((el) => { el.addEventListener('input', renderPrev); el.addEventListener('change', renderPrev); });
     renderPrev();
     m.q('#br-cancel').addEventListener('click', m.close);
     m.q('#br-go').addEventListener('click', async () => {
-      const o = getOpts();
-      const plan = files.map((f, i) => { const [base, ext] = splitExt(f.name); const nb = build(o.tpl, base, i, o.start, o.pad, o.dstr); return { id: f.id, nb, nn: nb + ext }; });
-      if (plan.some((p) => !p.nb)) return UI.toast('빈 이름이 생깁니다. 규칙을 확인하세요.', 'error');
+      const plan = files.map((f, i) => { const [base, ext] = splitExt(f.name); const nb = buildName(base, i); return { id: f.id, nb, nn: nb + ext }; });
+      if (plan.some((p) => !p.nb)) return UI.toast('빈 이름이 생깁니다. 항목을 하나 이상 켜주세요.', 'error');
       const btn = m.q('#br-go'); btn.disabled = true; btn.innerHTML = '<span class="btn-spin"></span>변경 중…';
       let ok = 0; const fail = [];
       for (const p of plan) { try { await API.renameFile(p.id, p.nn); ok++; } catch (_) { fail.push(p.nn); } }
