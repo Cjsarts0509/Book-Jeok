@@ -794,8 +794,10 @@ const App = (() => {
     const n = state.selected.size, dis = n === 0;
     bar.classList.remove('hidden', 'closing');
     bar.classList.toggle('empty', dis);
+    const nImg = window.ISBN ? [...state.selected.values()].filter((it) => it.type === 'file' && isImage(it.name)).length : 0;
     bar.innerHTML = `<b>${n > 0 ? `${n}개 선택` : '항목을 선택하세요'}</b><div style="flex:1"></div>
       <button class="btn btn-sm btn-ghost" id="sel-rename" ${n !== 1 ? 'disabled' : ''}>✏️ 이름변경</button>
+      ${window.ISBN ? `<button class="btn btn-sm btn-ghost" id="sel-barcode" ${nImg === 0 ? 'disabled' : ''} title="이미지에서 바코드/ISBN을 읽어 제목 변경">📕 바코드 제목변경</button>` : ''}
       <button class="btn btn-sm btn-primary" id="sel-dl" ${dis ? 'disabled' : ''}>⬇️ 다운로드(ZIP)</button>
       <button class="btn btn-sm btn-secondary" id="sel-move" ${dis ? 'disabled' : ''}>📂 폴더이동</button>
       <button class="btn btn-sm btn-danger" id="sel-del" ${dis ? 'disabled' : ''}>🗑️ 삭제</button>
@@ -804,6 +806,8 @@ const App = (() => {
     bar.querySelector('#sel-del').addEventListener('click', bulkDelete);
     bar.querySelector('#sel-dl').addEventListener('click', bulkDownload);
     bar.querySelector('#sel-move').addEventListener('click', bulkMoveModal);
+    const bc = bar.querySelector('#sel-barcode');
+    if (bc && !bc.disabled) bc.addEventListener('click', () => barcodeRename([...state.selected.values()]));
     const rn = bar.querySelector('#sel-rename');
     if (!rn.disabled) rn.addEventListener('click', () => {
       const item = [...state.selected.values()][0];
@@ -1098,6 +1102,46 @@ const App = (() => {
     });
   }
 
+  // ── 업로드된 이미지 파일을 바코드 스캔해 ISBN으로 제목 변경 (개별·다건) ──────────
+  function loadImgEl(url) {
+    return new Promise((resolve, reject) => { const im = new Image(); im.onload = () => resolve(im); im.onerror = () => reject(new Error('이미지 로드 실패')); im.src = url; });
+  }
+  // 저장된 파일 이미지를 받아 ISBN 스캔 → { isbn, candidates, method } (실패 시 null)
+  async function scanStoredImage(id) {
+    const res = await fetch(API.downloadUrl(id), { headers: { Authorization: 'Bearer ' + API.getToken() }, credentials: 'include' });
+    if (!res.ok) throw new Error('이미지 불러오기 실패');
+    const url = URL.createObjectURL(await res.blob());
+    try { const img = await loadImgEl(url); return await window.ISBN.scan(img, { useOcr: true }); }
+    finally { URL.revokeObjectURL(url); }
+  }
+  // items: 선택 항목 배열({type,id,name}) 또는 단일 파일. 이미지 파일만 대상.
+  async function barcodeRename(items) {
+    if (!window.ISBN) return UI.toast('ISBN 인식 모듈을 사용할 수 없습니다', 'error');
+    const imgs = items.filter((it) => it.type === 'file' && isImage(it.name));
+    if (!imgs.length) return UI.toast('이미지 파일을 선택하세요', 'info');
+    const m = UI.modal(`<h3>📕 바코드로 제목 변경 <span class="muted" style="font-size:13px;font-weight:400">· ${imgs.length}개</span></h3>
+      <div id="bc-prog" class="muted" style="padding:8px 0">준비 중…</div>
+      <div class="modal-actions"><button class="btn btn-ghost" id="bc-cancel">중단</button></div>`);
+    let cancelled = false; m.q('#bc-cancel').addEventListener('click', () => { cancelled = true; m.close(); });
+    let done = 0, renamed = 0; const failed = [];
+    for (const it of imgs) {
+      if (cancelled) break;
+      m.q('#bc-prog').textContent = `${done + 1}/${imgs.length} 스캔 중… (${it.name})`;
+      try {
+        const r = await scanStoredImage(it.id);
+        if (r && r.isbn) { const ext = (it.name.split('.').pop() || '').toLowerCase(); await API.renameFile(it.id, r.isbn + (ext ? '.' + ext : '')); renamed++; }
+        else failed.push(it.name);
+      } catch (_) { failed.push(it.name); }
+      done++;
+    }
+    if (!cancelled) m.close();
+    if (renamed) { state.selected.clear(); await loadFiles(); }
+    if (!cancelled) {
+      const msg = `📕 ${renamed}개 제목 변경${failed.length ? ` · ${failed.length}개 실패(ISBN 못 찾음)` : ''}`;
+      UI.toast(msg, failed.length && !renamed ? 'error' : 'success');
+    }
+  }
+
   // Content-Disposition에서 파일명 추출 (filename*=UTF-8'' 우선, 없으면 filename=)
   function filenameFromCD(cd, fallback) {
     cd = cd || '';
@@ -1310,6 +1354,7 @@ const App = (() => {
       { icon: '🏷️', label: '태그', onClick: () => tagPickerModal(item.id) },
       { icon: '📝', label: '비고', onClick: () => noteModal(item.id) },
       { icon: '✏️', label: '이름 변경', onClick: () => inlineRename('file', item.id) },
+      ...((window.ISBN && isImage(item.name)) ? [{ icon: '📕', label: '바코드로 제목변경', onClick: () => barcodeRename([{ type: 'file', id: String(item.id), name: item.name }]) }] : []),
       { sep: true },
       { icon: (state.files.find((x) => String(x.id) === String(item.id)) || {}).fav ? '⭐' : '☆', label: '즐겨찾기', onClick: () => toggleFavFile(item.id) },
       { icon: '🗑️', label: '삭제', danger: true, onClick: () => deleteFile(item.id) },
