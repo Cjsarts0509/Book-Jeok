@@ -74,7 +74,7 @@ window.ISBN = (() => {
     });
     return loaded[src];
   }
-  const ensureZXing = () => loadScript('vendor/zxing.min.js?v=86', 'ZXing');
+  const ensureZXing = () => loadScript('vendor/zxing.min.js?v=87', 'ZXing');
   const TESS_CDN = 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js';
   const ensureTesseract = () => loadScript(TESS_CDN, 'Tesseract');
 
@@ -204,73 +204,126 @@ window.ISBN = (() => {
     return { success: false, isbn: null, candidates: [], method: 'NONE', message: '유효한 ISBN을 찾지 못했습니다.' };
   }
 
-  // 네이티브 BarcodeDetector 로 한 번에 모든 바코드를 위치와 함께 → [{code, box:{x,y,w,h}}]
-  async function detectAllNative(source) {
-    if (!('BarcodeDetector' in window)) return [];
-    try {
-      const det = new window.BarcodeDetector({ formats: ['ean_13', 'ean_8', 'upc_a'] });
-      const found = await det.detect(source);
-      const seen = new Set(); const out = [];
-      for (const b of found) {
-        if (!isValidProduct(b.rawValue)) continue;
-        const code = clean(b.rawValue); if (seen.has(code)) continue; seen.add(code);
-        const bb = b.boundingBox || {};
-        out.push({ code, box: { x: bb.x || 0, y: bb.y || 0, w: bb.width || 0, h: bb.height || 0 } });
-      }
-      return out;
-    } catch (_) { return []; }
+  // ── 흐림 보정: 흑백화 + 대비 스트레치 + 샤픈(3x3) → 새 캔버스 ──────────
+  // 흐린 사진의 바코드 모듈 경계를 살려 디코드 성공률을 높인다.
+  function enhance(srcCanvas) {
+    const w = srcCanvas.width, h = srcCanvas.height;
+    if (w < 3 || h < 3) return srcCanvas;
+    let img;
+    try { img = srcCanvas.getContext('2d').getImageData(0, 0, w, h); }
+    catch (_) { return srcCanvas; }
+    const d = img.data, N = w * h;
+    const gray = new Float32Array(N);
+    let mn = 255, mx = 0;
+    for (let i = 0; i < N; i++) { const g = 0.299 * d[i * 4] + 0.587 * d[i * 4 + 1] + 0.114 * d[i * 4 + 2]; gray[i] = g; if (g < mn) mn = g; if (g > mx) mx = g; }
+    const range = Math.max(1, mx - mn);
+    const norm = new Float32Array(N);
+    for (let i = 0; i < N; i++) norm[i] = (gray[i] - mn) / range * 255;   // 대비 스트레치
+    const out = new Uint8ClampedArray(N * 4);
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {             // 샤픈 커널 [0,-1,0,-1,5,-1,0,-1,0]
+      const i = y * w + x;
+      let v = (x > 0 && x < w - 1 && y > 0 && y < h - 1)
+        ? 5 * norm[i] - norm[i - 1] - norm[i + 1] - norm[i - w] - norm[i + w]
+        : norm[i];
+      v = v < 0 ? 0 : v > 255 ? 255 : v;
+      const j = i * 4; out[j] = out[j + 1] = out[j + 2] = v; out[j + 3] = 255;
+    }
+    const c = document.createElement('canvas'); c.width = w; c.height = h;
+    c.getContext('2d').putImageData(new ImageData(out, w, h), 0, 0);
+    return c;
   }
-  // ZXing 디코드 + 실제 바코드 좌표(resultPoints)로 원본 기준 정밀 박스 계산 → {code, box}|null
-  async function zxDecodeAt(source, x, y, w, h, targetLong) {
-    const long = Math.max(w, h); const k = targetLong ? targetLong / long : 1;
-    const canvas = cropCanvas(source, x, y, w, h, targetLong);
-    try {
-      const r = await (await ensureReader()).decodeFromImageUrl(canvas.toDataURL('image/png'));
-      if (!r || !isValidProduct(r.getText())) return null;
+
+  // 한 캔버스에서 바코드를 "찾고 → 그 자리를 흰색으로 지우고 → 다시 찾기" 반복해 여러 개를 모두 수집.
+  // ZXing 은 이미지당 1개만 반환하므로, 겹쳐 있어도 마스킹으로 두 번째·세 번째를 잡아낸다.
+  // ox,oy,k: 캔버스 좌표 → 원본 좌표 역변환 (srcX = ox + canvasX/k)
+  async function zxDecodeAllOnCanvas(canvas, ox, oy, k, maxCodes) {
+    const ctx = canvas.getContext('2d');
+    const out = [];
+    for (let i = 0; i < (maxCodes || 5); i++) {
+      let r;
+      try { r = await (await ensureReader()).decodeFromImageUrl(canvas.toDataURL('image/png')); }
+      catch (_) { break; }                                   // NotFound → 더 없음
+      if (!r || !isValidProduct(r.getText())) break;
       const code = clean(r.getText());
-      let box = null;
-      try {
-        const pts = r.getResultPoints && r.getResultPoints();
-        if (pts && pts.length) {
-          let minX = Infinity, maxX = -Infinity, sumY = 0, n = 0;
-          for (const p of pts) { const px = p.getX(), py = p.getY(); if (px < minX) minX = px; if (px > maxX) maxX = px; sumY += py; n++; }
-          const bw = Math.max(1, maxX - minX), bh = bw * 0.85, yl = sumY / n;
-          box = { x: x + minX / k, y: y + (yl - bh / 2) / k, w: bw / k, h: bh / k };
-        }
-      } catch (_) {}
-      return { code, box };
-    } catch (_) { return null; }
+      let pts = null; try { pts = r.getResultPoints && r.getResultPoints(); } catch (_) {}
+      let box = null, mask = null;
+      if (pts && pts.length) {
+        let minX = Infinity, maxX = -Infinity, sumY = 0, n = 0;
+        for (const p of pts) { const px = p.getX(), py = p.getY(); if (px < minX) minX = px; if (px > maxX) maxX = px; sumY += py; n++; }
+        const bw = Math.max(1, maxX - minX), bh = bw * 0.85, yl = sumY / n;
+        box = { x: ox + minX / k, y: oy + (yl - bh / 2) / k, w: bw / k, h: bh / k };
+        const mh = bw * 0.95, pad = bw * 0.12;               // 세로로 넉넉히 덮어 바코드를 확실히 지움
+        mask = { x: minX - pad, y: yl - mh / 2, w: bw + 2 * pad, h: mh };
+      }
+      if (!out.some((o) => o.code === code)) out.push({ code, box });
+      if (!mask) break;                                      // 위치를 몰라 못 지우면 무한루프 방지 위해 종료
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(mask.x, mask.y, mask.w, mask.h);
+    }
+    return out;
   }
-  async function zxDecodeMultiAt(source, x, y, w, h, scales) {
-    for (const tl of scales) { const hit = await zxDecodeAt(source, x, y, w, h, tl); if (hit) return hit; }
-    return null;
-  }
-  // ZXing 은 이미지당 1개만 디코드 → 통짜 + 겹치는 타일을 돌며 서로 다른 바코드를 모두 수집(정밀 위치)
+  // ZXing 은 이미지당 1개만 디코드 → 통짜(원본/샤픈) + 겹치는 타일을 돌며 마스킹 반복으로 모두 수집
   async function zxingMultiTiles(source) {
     try { await ensureZXing(); } catch (_) { return []; }
     const nw = source.naturalWidth || source.videoWidth || source.width;
     const nh = source.naturalHeight || source.videoHeight || source.height;
     const found = new Map();
-    const record = (code, box) => { const cur = found.get(code); if (!cur) found.set(code, { code, box: box || null }); else if (!cur.box && box) cur.box = box; };
-    { const hit = await zxDecodeMultiAt(source, 0, 0, nw, nh, [Math.min(2200, Math.max(nw, nh)), 1600]); if (hit) record(hit.code, hit.box); }
-    const nx = 3, ny = 3, ov = 0.45, tw = nw / nx, th = nh / ny; // 겹침을 키워 경계의 바코드도 온전히 포함
+    const record = (r) => { const cur = found.get(r.code); if (!cur) found.set(r.code, { code: r.code, box: r.box || null }); else if (!cur.box && r.box) cur.box = r.box; };
+    // 1) 통짜: 여러 배율 × (원본 + 샤픈), 각 캔버스에서 마스킹 반복
+    for (const tl of [Math.min(2200, Math.max(nw, nh)), 1600]) {
+      const k = tl / Math.max(nw, nh);
+      const base = cropCanvas(source, 0, 0, nw, nh, tl);
+      (await zxDecodeAllOnCanvas(base, 0, 0, k, 6)).forEach(record);
+      (await zxDecodeAllOnCanvas(enhance(cropCanvas(source, 0, 0, nw, nh, tl)), 0, 0, k, 6)).forEach(record);
+    }
+    // 2) 겹치는 3x3 타일 — 프레임 대비 작은 바코드까지 확대해 재시도(원본만; 작은 타일의 흐림은 샤픈으로도 잘 안 살아나 비용만 큼)
+    const nx = 3, ny = 3, ov = 0.45, tw = nw / nx, th = nh / ny;
     for (let iy = 0; iy < ny; iy++) for (let ix = 0; ix < nx; ix++) {
       const x = Math.max(0, tw * ix - tw * ov), y = Math.max(0, th * iy - th * ov);
       const w = Math.min(nw - x, tw * (1 + 2 * ov)), h = Math.min(nh - y, th * (1 + 2 * ov));
-      const hit = await zxDecodeMultiAt(source, x, y, w, h, [1400, 1000]); if (hit) record(hit.code, hit.box);
+      const tl = 1400, k = tl / Math.max(w, h);
+      (await zxDecodeAllOnCanvas(cropCanvas(source, x, y, w, h, tl), x, y, k, 4)).forEach(record);
+    }
+    return [...found.values()];
+  }
+  // 네이티브 BarcodeDetector 를 통짜 + 확대 타일에 적용해 흐린/작은 바코드까지 위치와 함께 수집
+  async function detectAllNativeTiled(source) {
+    if (!('BarcodeDetector' in window)) return [];
+    let det;
+    try { det = new window.BarcodeDetector({ formats: ['ean_13', 'ean_8', 'upc_a'] }); }
+    catch (_) { return []; }
+    const nw = source.naturalWidth || source.videoWidth || source.width;
+    const nh = source.naturalHeight || source.videoHeight || source.height;
+    const found = new Map();
+    const addFrom = async (canvas, ox, oy, k) => {
+      let res; try { res = await det.detect(canvas); } catch (_) { return; }
+      for (const b of res) {
+        if (!isValidProduct(b.rawValue)) continue;
+        const code = clean(b.rawValue); if (found.has(code)) continue;
+        const bb = b.boundingBox || {};
+        found.set(code, { code, box: { x: ox + (bb.x || 0) / k, y: oy + (bb.y || 0) / k, w: (bb.width || 0) / k, h: (bb.height || 0) / k } });
+      }
+    };
+    await addFrom(source, 0, 0, 1);
+    const nx = 3, ny = 3, ov = 0.45, tw = nw / nx, th = nh / ny;
+    for (let iy = 0; iy < ny; iy++) for (let ix = 0; ix < nx; ix++) {
+      const x = Math.max(0, tw * ix - tw * ov), y = Math.max(0, th * iy - th * ov);
+      const w = Math.min(nw - x, tw * (1 + 2 * ov)), h = Math.min(nh - y, th * (1 + 2 * ov));
+      const tl = 1400, k = tl / Math.max(w, h);
+      await addFrom(cropCanvas(source, x, y, w, h, tl), x, y, k);
     }
     return [...found.values()];
   }
   const byPos = (a, b) => ((a.box ? a.box.y : 1e9) - (b.box ? b.box.y : 1e9)) || ((a.box ? a.box.x : 0) - (b.box ? b.box.x : 0));
   // 한 이미지의 바코드를 하나도 빠뜨리지 않고 모두 수집 → [{code, box|null}] (위→아래 정렬)
-  // 네이티브(정확 위치) 우선, 부족하면 ZXing 타일로 보강. 다중 바코드 선택 UI 용.
+  // 네이티브(통짜+타일)로 2개 이상이면 즉시 반환, 아니면 ZXing 타일(마스킹+샤픈)로 보강. 다중 선택 UI 용.
   async function scanMulti(source) {
-    const native = await detectAllNative(source);
+    const native = await detectAllNativeTiled(source);
     if (native.length >= 2) return native.slice().sort(byPos);
     const zx = await zxingMultiTiles(source);
     const map = new Map();
     for (const b of zx) map.set(b.code, b);
-    for (const b of native) map.set(b.code, b); // 네이티브 위치가 더 정확 → 덮어씀
+    for (const b of native) { const cur = map.get(b.code); if (!cur || !cur.box) map.set(b.code, b); } // 네이티브 위치가 더 정확
     return [...map.values()].sort(byPos);
   }
 
