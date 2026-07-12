@@ -978,7 +978,7 @@ const App = (() => {
           <input class="input cam-note" placeholder="비고(선택)">
           <div class="cam-isbn" data-isbn-row="${i}" hidden>
             <span class="cam-isbn-status muted">⏳ 대기</span>
-            <input class="input cam-isbn-input" placeholder="ISBN" inputmode="numeric" maxlength="17">
+            <input class="input cam-isbn-input" placeholder="바코드 번호" inputmode="numeric" maxlength="17">
             <button type="button" class="btn btn-ghost btn-sm cam-region" data-region="${i}" title="스캔 구역 지정">🎯 구역</button>
             <button type="button" class="btn btn-ghost btn-sm cam-rescan" data-rescan="${i}" title="다시 인식">🔍</button>
             <div class="cam-isbn-alt" data-alt="${i}"></div>
@@ -988,7 +988,7 @@ const App = (() => {
       </div>`).join('');
     const loc = state.folder === '/' ? '홈' : state.folder;
     const m = UI.modal(`<h3>📷 촬영 업로드 <span class="muted" style="font-size:13px;font-weight:400">· ${files.length}장 → ${UI.escapeHtml(loc)}</span></h3>
-      ${hasIsbn ? `<label class="cam-isbn-toggle"><input type="checkbox" id="isbn-on" checked><span class="ci-main">📕 ISBN 자동 인식</span><span class="ci-hint muted">바코드·OCR로 읽어 파일명에 넣기</span></label>` : ''}
+      ${hasIsbn ? `<label class="cam-isbn-toggle"><input type="checkbox" id="isbn-on" checked><span class="ci-main">📕 바코드 자동 인식</span><span class="ci-hint muted">ISBN·상품 바코드를 읽어 파일명에 넣기</span></label>` : ''}
       <p class="muted" style="font-size:12px;margin-bottom:10px">각 사진의 제목·비고를 입력하고 업로드하세요. (제목 비우면 자동 이름)</p>
       <div id="cam-list">${rows}</div>
       <div class="modal-actions"><button class="btn btn-ghost" id="cam-cancel">취소</button><button class="btn btn-primary" id="cam-go">⬆️ ${files.length}장 업로드</button></div>`);
@@ -1082,7 +1082,7 @@ const App = (() => {
         if (isbnOn()) {
           const raw = item.querySelector('.cam-isbn-input')?.value || meta[i].isbn || '';
           const code = window.ISBN.clean(raw);
-          const good = window.ISBN.isBookIsbn(code) ? code : '';
+          const good = window.ISBN.isValidProduct(code) ? code : '';
           if (good) title = title ? `${good}_${title}` : good;
         }
         fd.append('file', files[i]);

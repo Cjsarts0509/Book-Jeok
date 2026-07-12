@@ -19,6 +19,12 @@ window.ISBN = (() => {
     sum += code[9] === 'X' ? 10 : parseInt(code[9], 10);
     return sum % 11 === 0;
   }
+  function isValidEAN8(code) {
+    if (!/^\d{8}$/.test(code)) return false;
+    let sum = 0;
+    for (let i = 0; i < 7; i++) sum += parseInt(code[i], 10) * (i % 2 === 0 ? 3 : 1);
+    return parseInt(code[7], 10) === (10 - (sum % 10)) % 10;
+  }
   function isValidBarcode(raw) {
     const c = String(raw || '').replace(/[^0-9X]/gi, '').toUpperCase();
     if (c.length === 13) return isValidEAN13(c);
@@ -32,15 +38,26 @@ window.ISBN = (() => {
     if (c.length === 10) return isValidISBN10(c);
     return false;
   }
+  // 일반 상품 바코드까지 인정: EAN-13(모든 접두) · UPC-A(12) · EAN-8(8) · ISBN-10(10)
+  function isValidProduct(raw) {
+    const c = String(raw || '').replace(/[^0-9X]/gi, '').toUpperCase();
+    if (c.length === 13) return isValidEAN13(c);
+    if (c.length === 12) return isValidEAN13('0' + c);   // UPC-A = 앞 0 붙인 EAN-13
+    if (c.length === 8) return isValidEAN8(c);
+    if (c.length === 10) return isValidISBN10(c);
+    return false;
+  }
   const clean = (raw) => String(raw || '').replace(/[^0-9X]/gi, '').toUpperCase();
   const dedupe = (arr) => [...new Set(arr)];
 
-  // OCR 텍스트에서 ISBN 후보 추출
+  // OCR 텍스트에서 바코드/ISBN 후보 추출 (8·10·12·13자리 숫자열)
   function extractCandidates(text) {
-    const regex = /(?:97[89][- ]?)?(?:\d[- ]?){9}[\dxX]\b/gi;
-    const matches = String(text || '').match(regex);
-    if (!matches) return [];
-    return matches.map((m) => clean(m)).filter((c) => c.length === 10 || c.length === 13);
+    const s = String(text || '');
+    const out = [];
+    const re = /[0-9](?:[\s-]?[0-9Xx]){6,17}/g;
+    let m;
+    while ((m = re.exec(s))) { const c = clean(m[0]); if (c.length === 8 || c.length === 10 || c.length === 12 || c.length === 13) out.push(c); }
+    return dedupe(out);
   }
 
   // ── 지연 로더 ──────────
@@ -57,7 +74,7 @@ window.ISBN = (() => {
     });
     return loaded[src];
   }
-  const ensureZXing = () => loadScript('vendor/zxing.min.js?v=73', 'ZXing');
+  const ensureZXing = () => loadScript('vendor/zxing.min.js?v=74', 'ZXing');
   const TESS_CDN = 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js';
   const ensureTesseract = () => loadScript(TESS_CDN, 'Tesseract');
 
@@ -91,7 +108,7 @@ window.ISBN = (() => {
       const det = new window.BarcodeDetector({ formats: ['ean_13', 'ean_8', 'upc_a'] });
       const found = await det.detect(canvas);
       const items = found
-        .filter((b) => isBookIsbn(b.rawValue))
+        .filter((b) => isValidProduct(b.rawValue))
         .map((b) => ({ code: clean(b.rawValue), y: b.boundingBox ? b.boundingBox.y : 0, x: b.boundingBox ? b.boundingBox.x : 0 }))
         .sort((a, b) => (a.y - b.y) || (a.x - b.x));
       return dedupe(items.map((i) => i.code));
@@ -111,7 +128,7 @@ window.ISBN = (() => {
     return zxReader;
   }
   async function zxDecode(canvas) {
-    try { const r = await (await ensureReader()).decodeFromImageUrl(canvas.toDataURL('image/png')); if (r && isBookIsbn(r.getText())) return clean(r.getText()); }
+    try { const r = await (await ensureReader()).decodeFromImageUrl(canvas.toDataURL('image/png')); if (r && isValidProduct(r.getText())) return clean(r.getText()); }
     catch (_) { /* NotFound → null */ }
     return null;
   }
@@ -163,7 +180,7 @@ window.ISBN = (() => {
         await tessWorker.setParameters({ tessedit_char_whitelist: '0123456789Xx- ', tessedit_pageseg_mode: '6' });
       }
       const { data } = await tessWorker.recognize(canvas);
-      return dedupe(extractCandidates(data.text).filter(isBookIsbn));
+      return dedupe(extractCandidates(data.text).filter(isValidProduct));
     } catch (_) { return []; } // OCR 실패 → 폴백
   }
 
@@ -188,5 +205,5 @@ window.ISBN = (() => {
   }
 
   // ISBN 을 파일명에 안전하게 넣기용 하이픈 표기(978-89-...)는 생략, 숫자 그대로 사용
-  return { scan, isValidBarcode, isBookIsbn, extractCandidates, clean };
+  return { scan, isValidBarcode, isBookIsbn, isValidProduct, extractCandidates, clean };
 })();
