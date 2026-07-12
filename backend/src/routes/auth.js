@@ -9,7 +9,6 @@ const { hashPassword, verifyPassword, encryptSecret, decryptSecret } = require('
 const { authenticate } = require('../middleware/auth');
 const { audit, wrap, clientIp } = require('../util');
 const { shareQrEnabled } = require('../settings');
-const ocr = require('../ocr');
 const notify = require('../notify');
 const totp = require('../totp');
 const QRCode = require('qrcode');
@@ -117,7 +116,6 @@ router.post('/login', loginLimiter, wrap(async (req, res) => {
       displayName: user.display_name,
       role: user.role,
       qrEnabled: shareQrEnabled(),
-      ocrEnabled: ocr.enabled(),
     },
   });
 }));
@@ -144,7 +142,6 @@ router.get('/me', authenticate, wrap(async (req, res) => {
       uploadConflict: row.upload_conflict || 'rename',
       totpEnabled: !!row.totp_enabled,
       qrEnabled: shareQrEnabled(),
-      ocrEnabled: ocr.enabled(),
     },
   });
 }));

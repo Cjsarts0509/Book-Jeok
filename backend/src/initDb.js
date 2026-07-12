@@ -245,11 +245,6 @@ CREATE INDEX IF NOT EXISTS idx_file_tags_tag ON file_tags(tag_id);
 -- 전역 설정 기본값(휴지통 보관일수, 공유 QR 사용여부)
 INSERT INTO settings (key, value) VALUES ('trash_retention_days', '30') ON CONFLICT (key) DO NOTHING;
 INSERT INTO settings (key, value) VALUES ('share_qr_enabled', '1') ON CONFLICT (key) DO NOTHING;
-
--- 이미지 OCR(문서 속 글자) 텍스트 + 처리 상태
-ALTER TABLE files ADD COLUMN IF NOT EXISTS ocr_text   TEXT NOT NULL DEFAULT '';
-ALTER TABLE files ADD COLUMN IF NOT EXISTS ocr_status VARCHAR(16) NOT NULL DEFAULT '';  -- '' | pending | done | error
-ALTER TABLE files ADD COLUMN IF NOT EXISTS ocr_confidence SMALLINT;                       -- 0~100 (단어 신뢰도 평균, NULL=미측정)
 `;
 
 const DEFAULT_EXT = 'csv,xls,xlsx,xlsm,xlsb,jpg,jpeg,png,gif,ppt,pptx,doc,docx,txt';
