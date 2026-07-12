@@ -74,7 +74,7 @@ window.ISBN = (() => {
     });
     return loaded[src];
   }
-  const ensureZXing = () => loadScript('vendor/zxing.min.js?v=84', 'ZXing');
+  const ensureZXing = () => loadScript('vendor/zxing.min.js?v=85', 'ZXing');
   const TESS_CDN = 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js';
   const ensureTesseract = () => loadScript(TESS_CDN, 'Tesseract');
 
@@ -204,9 +204,8 @@ window.ISBN = (() => {
     return { success: false, isbn: null, candidates: [], method: 'NONE', message: '유효한 ISBN을 찾지 못했습니다.' };
   }
 
-  // 이미지에서 유효 바코드를 위치(원본 픽셀 박스)와 함께 모두 반환 — 다중 바코드 선택 UI 용.
-  // 네이티브 BarcodeDetector 가 있어야 위치가 나옴(없으면 빈 배열).
-  async function detectAll(source) {
+  // 네이티브 BarcodeDetector 로 한 번에 모든 바코드를 위치와 함께 → [{code, box:{x,y,w,h}}]
+  async function detectAllNative(source) {
     if (!('BarcodeDetector' in window)) return [];
     try {
       const det = new window.BarcodeDetector({ formats: ['ean_13', 'ean_8', 'upc_a'] });
@@ -216,13 +215,40 @@ window.ISBN = (() => {
         if (!isValidProduct(b.rawValue)) continue;
         const code = clean(b.rawValue); if (seen.has(code)) continue; seen.add(code);
         const bb = b.boundingBox || {};
-        out.push({ code, x: bb.x || 0, y: bb.y || 0, w: bb.width || 0, h: bb.height || 0 });
+        out.push({ code, box: { x: bb.x || 0, y: bb.y || 0, w: bb.width || 0, h: bb.height || 0 } });
       }
-      out.sort((a, b) => (a.y - b.y) || (a.x - b.x));
       return out;
     } catch (_) { return []; }
   }
+  // ZXing 은 이미지당 1개만 디코드 → 통짜 + 겹치는 타일을 돌며 서로 다른 바코드를 모두 수집(근사 위치)
+  async function zxingMultiTiles(source) {
+    try { await ensureZXing(); } catch (_) { return []; }
+    const nw = source.naturalWidth || source.videoWidth || source.width;
+    const nh = source.naturalHeight || source.videoHeight || source.height;
+    const found = new Map();
+    const record = (code, box) => { const cur = found.get(code); if (!cur) found.set(code, { code, box: box || null }); else if (!cur.box && box) cur.box = box; };
+    { const c = await zxDecodeMulti(source, 0, 0, nw, nh, [Math.min(2200, Math.max(nw, nh)), 1600]); if (c) record(c, null); } // 통짜(위치 모름)
+    const nx = 3, ny = 3, ov = 0.35, tw = nw / nx, th = nh / ny;
+    for (let iy = 0; iy < ny; iy++) for (let ix = 0; ix < nx; ix++) {
+      const x = Math.max(0, tw * ix - tw * ov), y = Math.max(0, th * iy - th * ov);
+      const w = Math.min(nw - x, tw * (1 + 2 * ov)), h = Math.min(nh - y, th * (1 + 2 * ov));
+      const c = await zxDecodeMulti(source, x, y, w, h, [1200]); if (c) record(c, { x, y, w, h });
+    }
+    return [...found.values()];
+  }
+  const byPos = (a, b) => ((a.box ? a.box.y : 1e9) - (b.box ? b.box.y : 1e9)) || ((a.box ? a.box.x : 0) - (b.box ? b.box.x : 0));
+  // 한 이미지의 바코드를 하나도 빠뜨리지 않고 모두 수집 → [{code, box|null}] (위→아래 정렬)
+  // 네이티브(정확 위치) 우선, 부족하면 ZXing 타일로 보강. 다중 바코드 선택 UI 용.
+  async function scanMulti(source) {
+    const native = await detectAllNative(source);
+    if (native.length >= 2) return native.slice().sort(byPos);
+    const zx = await zxingMultiTiles(source);
+    const map = new Map();
+    for (const b of zx) map.set(b.code, b);
+    for (const b of native) map.set(b.code, b); // 네이티브 위치가 더 정확 → 덮어씀
+    return [...map.values()].sort(byPos);
+  }
 
   // ISBN 을 파일명에 안전하게 넣기용 하이픈 표기(978-89-...)는 생략, 숫자 그대로 사용
-  return { scan, detectAll, isValidBarcode, isBookIsbn, isValidProduct, extractCandidates, clean };
+  return { scan, scanMulti, isValidBarcode, isBookIsbn, isValidProduct, extractCandidates, clean };
 })();

@@ -1011,13 +1011,14 @@ const App = (() => {
       renderList();
     }
 
-    function showPicker(url, nw, nh, boxes, cands, onPick) {
+    function showPicker(url, nw, nh, items, onPick) {
       const box = m.q('#cap-pick'); box.hidden = false;
-      const list = (boxes && boxes.length >= 2) ? boxes.map((b) => b.code) : cands;
-      const bhtml = (boxes || []).map((b, i) => `<button type="button" class="cap-bbox" data-code="${b.code}" style="left:${(b.x / nw * 100).toFixed(2)}%;top:${(b.y / nh * 100).toFixed(2)}%;width:${(b.w / nw * 100).toFixed(2)}%;height:${(b.h / nh * 100).toFixed(2)}%"><span>${i + 1}</span></button>`).join('');
+      const bhtml = items.map((b, i) => (b.box && b.box.w > 0 && b.box.h > 0)
+        ? `<button type="button" class="cap-bbox" data-code="${b.code}" style="left:${(b.box.x / nw * 100).toFixed(2)}%;top:${(b.box.y / nh * 100).toFixed(2)}%;width:${(b.box.w / nw * 100).toFixed(2)}%;height:${(b.box.h / nh * 100).toFixed(2)}%"><span>${i + 1}</span></button>`
+        : '').join('');
       box.innerHTML = `<p class="cap-pick-title">바코드가 여러 개예요 — 저장할 것을 선택하세요</p>
         <div class="cap-pick-img"><img src="${url}" alt="">${bhtml}</div>
-        <div class="cap-pick-chips">${list.map((c, i) => `<button type="button" class="isbn-chip" data-code="${c}">${(boxes && boxes.length >= 2) ? (i + 1) + '. ' : ''}${c}</button>`).join('')}</div>`;
+        <div class="cap-pick-chips">${items.map((b, i) => `<button type="button" class="isbn-chip" data-code="${b.code}">${i + 1}. ${b.code}</button>`).join('')}</div>`;
       box.querySelectorAll('[data-code]').forEach((el) => el.addEventListener('click', () => { box.hidden = true; box.innerHTML = ''; onPick(el.dataset.code); }));
     }
 
@@ -1027,16 +1028,18 @@ const App = (() => {
       let img, url;
       try { url = URL.createObjectURL(file); img = await loadImgEl(url); shot.thumb = thumbData(img); renderList(); }
       catch (_) { shot.status = 'error'; renderList(); return; }
-      let res; try { res = await window.ISBN.scan(img, { useOcr: true }); } catch (_) { res = { candidates: [] }; }
-      const cands = res.candidates || [];
-      if (cands.length >= 2) { // 여러 개 → 이미지에서 선택
+      // 사진 속 바코드를 모두 수집(하나 찾고 멈추지 않음)
+      let found = []; try { found = await window.ISBN.scanMulti(img); } catch (_) {}
+      if (found.length >= 2) { // 여러 개 → 이미지에서 선택
         shot.status = 'choosing'; renderList(); setShoot(false);
-        let boxes = []; try { boxes = await window.ISBN.detectAll(img); } catch (_) {}
-        showPicker(url, img.naturalWidth, img.naturalHeight, boxes, cands, (code) => { URL.revokeObjectURL(url); setShoot(true); saveShot(file, code, shot); });
+        showPicker(url, img.naturalWidth, img.naturalHeight, found, (code) => { URL.revokeObjectURL(url); setShoot(true); saveShot(file, code, shot); });
         return;
       }
       URL.revokeObjectURL(url);
-      saveShot(file, cands[0] || null, shot);
+      if (found.length === 1) return saveShot(file, found[0].code, shot);
+      // 0개 → OCR 포함 견고 단일 재시도
+      let res; try { res = await window.ISBN.scan(img, { useOcr: true }); } catch (_) {}
+      saveShot(file, (res && res.candidates && res.candidates[0]) || null, shot);
     }
 
     cam.addEventListener('change', async () => { const files = [...cam.files]; cam.value = ''; for (const f of files) await handleFile(f); });
