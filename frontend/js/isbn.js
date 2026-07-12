@@ -74,7 +74,7 @@ window.ISBN = (() => {
     });
     return loaded[src];
   }
-  const ensureZXing = () => loadScript('vendor/zxing.min.js?v=78', 'ZXing');
+  const ensureZXing = () => loadScript('vendor/zxing.min.js?v=79', 'ZXing');
   const TESS_CDN = 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js';
   const ensureTesseract = () => loadScript(TESS_CDN, 'Tesseract');
 
@@ -204,6 +204,24 @@ window.ISBN = (() => {
     return { success: false, isbn: null, candidates: [], method: 'NONE', message: '유효한 ISBN을 찾지 못했습니다.' };
   }
 
+  // ── 라이브 카메라 연속 스캔 ──────────
+  // videoEl 에 후면 카메라를 붙여 계속 디코드, 유효 바코드마다 onCode(code) 호출.
+  // 반환: { stop(), track() } — track 은 손전등 제어용 MediaStreamTrack
+  async function startLiveScan(videoEl, onCode) {
+    const Z = await ensureZXing();
+    const hints = new Map();
+    hints.set(Z.DecodeHintType.POSSIBLE_FORMATS, [Z.BarcodeFormat.EAN_13, Z.BarcodeFormat.EAN_8, Z.BarcodeFormat.UPC_A]);
+    hints.set(Z.DecodeHintType.TRY_HARDER, true);
+    const reader = new Z.BrowserMultiFormatReader(hints, 250); // 스캔 간격(ms)
+    await reader.decodeFromConstraints({ video: { facingMode: { ideal: 'environment' } } }, videoEl, (result) => {
+      if (result && isValidProduct(result.getText())) onCode(clean(result.getText()));
+    });
+    return {
+      stop() { try { reader.reset(); } catch (_) {} },
+      track() { try { return videoEl.srcObject && videoEl.srcObject.getVideoTracks()[0]; } catch (_) { return null; } },
+    };
+  }
+
   // ISBN 을 파일명에 안전하게 넣기용 하이픈 표기(978-89-...)는 생략, 숫자 그대로 사용
-  return { scan, isValidBarcode, isBookIsbn, isValidProduct, extractCandidates, clean };
+  return { scan, startLiveScan, isValidBarcode, isBookIsbn, isValidProduct, extractCandidates, clean };
 })();

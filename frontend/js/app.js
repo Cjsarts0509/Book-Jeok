@@ -958,17 +958,89 @@ const App = (() => {
     } catch (err) { UI.toast(err.message, 'error'); }
   }
 
-  // ── 모바일 하단 FAB(⬆️) → 파일/촬영 선택 시트 (상단 업로드·촬영 버튼 대체) ──────────
+  // ── 모바일 하단 FAB(⬆️) → 파일/촬영/스캔 선택 시트 ──────────
   function uploadSheet() {
     const m = UI.modal(`<h3>⬆️ 업로드</h3>
       <div class="upload-sheet">
         <button class="btn btn-primary" id="us-file">📁 파일 선택</button>
         <button class="btn btn-accent" id="us-cam">📷 사진 촬영</button>
+        ${window.ISBN ? `<button class="btn btn-secondary" id="us-scan">📚 바코드 연속 스캔</button>` : ''}
       </div>
       <div class="modal-actions"><button class="btn btn-ghost" id="us-cancel">취소</button></div>`);
     m.q('#us-file').addEventListener('click', () => { m.close(); document.getElementById('file-input')?.click(); });
     m.q('#us-cam').addEventListener('click', () => { m.close(); document.getElementById('cam-input')?.click(); });
+    m.q('#us-scan')?.addEventListener('click', () => { m.close(); barcodeScanModal(); });
     m.q('#us-cancel').addEventListener('click', m.close);
+  }
+
+  // ── 바코드 연속 스캔: 라이브 카메라로 여러 권 연달아 스캔 → 목록 누적 → CSV 저장 ──────────
+  function barcodeScanModal() {
+    if (!window.ISBN) return UI.toast('바코드 모듈을 사용할 수 없습니다', 'error');
+    const items = new Map(); // code -> { code, count, ts }
+    let scanner = null, torchOn = false;
+    const m = UI.modal(`<h3>📚 바코드 연속 스캔</h3>
+      <div class="scan-wrap"><video id="scan-video" playsinline muted></video><div class="scan-frame"></div><div class="scan-hint" id="scan-hint">카메라 준비 중…</div></div>
+      <div class="scan-bar">
+        <label class="scan-toggle"><input type="checkbox" id="scan-cont" checked> 연속 모드</label>
+        <button type="button" class="btn btn-ghost btn-sm" id="scan-torch" hidden>🔦 손전등</button>
+        <span class="scan-count" id="scan-count">0종 · 0개</span>
+      </div>
+      <div class="scan-list" id="scan-list"></div>
+      <div class="modal-actions"><button class="btn btn-ghost" id="scan-clear" disabled>목록 비우기</button><button class="btn btn-ghost" id="scan-close">닫기</button><button class="btn btn-primary" id="scan-save" disabled>💾 목록 저장</button></div>`,
+      { onClose: () => { try { scanner && scanner.stop(); } catch (_) {} } });
+    m.el.querySelector('.modal').classList.add('modal-wide');
+    const beep = () => { try { const A = window.AudioContext || window.webkitAudioContext; if (!A) return; const ac = new A(); const o = ac.createOscillator(); const g = ac.createGain(); o.connect(g); g.connect(ac.destination); o.frequency.value = 880; g.gain.value = 0.08; o.start(); setTimeout(() => { o.stop(); ac.close(); }, 110); } catch (_) {} };
+    const feedback = () => { beep(); if (navigator.vibrate) try { navigator.vibrate(55); } catch (_) {} };
+    function renderList() {
+      const arr = [...items.values()];
+      const total = arr.reduce((s, x) => s + x.count, 0);
+      m.q('#scan-count').textContent = `${arr.length}종 · ${total}개`;
+      m.q('#scan-save').disabled = !arr.length; m.q('#scan-clear').disabled = !arr.length;
+      m.q('#scan-list').innerHTML = arr.length
+        ? arr.slice().reverse().map((x) => `<div class="scan-row"><span class="scan-code">${x.code}</span>${x.count > 1 ? `<span class="scan-qty">×${x.count}</span>` : ''}<button type="button" class="scan-del" data-del="${x.code}" title="제거">✕</button></div>`).join('')
+        : '<p class="muted" style="text-align:center;padding:16px">스캔한 바코드가 여기에 쌓입니다</p>';
+      m.q('#scan-list').querySelectorAll('[data-del]').forEach((b) => b.addEventListener('click', () => { items.delete(b.dataset.del); renderList(); }));
+    }
+    function onScan(code) {
+      const cont = m.q('#scan-cont').checked;
+      if (items.has(code)) { if (cont) { items.get(code).count++; feedback(); renderList(); } return; }
+      items.set(code, { code, count: 1, ts: Date.now() });
+      feedback(); renderList();
+    }
+    const video = m.q('#scan-video');
+    video.__push = onScan; // 테스트/디버그 훅
+    (async () => {
+      try {
+        scanner = await window.ISBN.startLiveScan(video, onScan);
+        m.q('#scan-hint').style.display = 'none';
+        // 손전등 지원 시 버튼 노출
+        setTimeout(() => {
+          const tr = scanner.track && scanner.track();
+          const caps = tr && tr.getCapabilities ? tr.getCapabilities() : null;
+          if (caps && caps.torch) {
+            const tb = m.q('#scan-torch'); tb.hidden = false;
+            tb.addEventListener('click', async () => { torchOn = !torchOn; try { await tr.applyConstraints({ advanced: [{ torch: torchOn }] }); tb.classList.toggle('on', torchOn); } catch (_) {} });
+          }
+        }, 600);
+      } catch (err) {
+        m.q('#scan-hint').innerHTML = '카메라를 열 수 없습니다.<br><span style="font-size:12px">권한을 허용했는지 확인하세요.</span>';
+      }
+    })();
+    m.q('#scan-clear').addEventListener('click', () => { items.clear(); renderList(); });
+    m.q('#scan-close').addEventListener('click', m.close);
+    m.q('#scan-save').addEventListener('click', async () => {
+      const arr = [...items.values()]; if (!arr.length) return;
+      const p2 = (x) => String(x).padStart(2, '0'); const dt = (t) => { const dd = new Date(t); return `${dd.getFullYear()}-${p2(dd.getMonth() + 1)}-${p2(dd.getDate())} ${p2(dd.getHours())}:${p2(dd.getMinutes())}`; };
+      const rows = [['번호', '바코드', '수량', '인식시각'], ...arr.map((x, i) => [i + 1, x.code, x.count, dt(x.ts)])];
+      const csv = '﻿' + rows.map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\r\n');
+      const now = new Date(); const stamp = `${now.getFullYear()}${p2(now.getMonth() + 1)}${p2(now.getDate())}_${p2(now.getHours())}${p2(now.getMinutes())}`;
+      const file = new File([csv], `바코드스캔_${stamp}.csv`, { type: 'text/csv' });
+      const fd = new FormData(); fd.append('folder', state.folder); fd.append('file', file);
+      const btn = m.q('#scan-save'); btn.disabled = true; btn.innerHTML = '<span class="btn-spin"></span>저장 중…';
+      try { await API.upload(fd, state.ownerId); m.close(); UI.toast(`📚 바코드 ${arr.length}종 저장됨`, 'success'); loadAll(); }
+      catch (err) { UI.toast('저장 실패: ' + err.message, 'error'); btn.disabled = false; btn.textContent = '💾 목록 저장'; }
+    });
+    renderList();
   }
 
   // ── 카메라(사진) 업로드: 촬영 → 각 사진 제목·비고 입력(+ISBN 인식) → 업로드 ──────────
