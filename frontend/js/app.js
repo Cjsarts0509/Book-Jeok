@@ -389,7 +389,7 @@ const App = (() => {
     // 모바일 리스트 뷰: 항목을 눌러 펼치는 아코디언 카드 + 텍스트 버튼
     if (isMobile() && state.view === 'list') box.innerHTML = mobileListHTML();
     else box.innerHTML = state.view === 'grid' ? gridHTML() : listHTML();
-    wireListing(); updateSelbar(); if (state.view === 'grid') loadThumbs();
+    wireListing(); updateSelbar(); loadThumbs(); // 그리드 파일 썸네일 + 모든 뷰의 폴더 커버
   }
 
   // 모바일 전용: 기본정보(이름·크기·등록일)만 보이고, 탭하면 상세+기능이 펼쳐지는 카드
@@ -401,7 +401,7 @@ const App = (() => {
         <div class="mcard-head">
           <input type="checkbox" class="rowcheck" data-sel-folder="${esc(f.path)}" data-name="${esc(f.name)}" ${isSel(key) ? 'checked' : ''}>
           <div class="mcard-main">
-            <div class="mcard-name"><span class="ic${f.color ? ' tint' : ''}" style="${folderIcoStyle(f.color)}">${f.icon || '📁'}</span> ${esc(f.name)}${updateBadge(f, true)}</div>
+            <div class="mcard-name"><span class="ic${f.color ? ' tint' : ''}${f.cover ? ' has-cover' : ''}"${f.cover ? ` data-thumb="${f.cover}"` : ''} style="${folderIcoStyle(f.color)}">${f.icon || '📁'}</span> ${esc(f.name)}${updateBadge(f, true)}</div>
             <div class="mcard-sub">${UI.bytes(f.size)} · ${f.createdAt ? UI.date(f.createdAt) : '폴더'}</div>
           </div>
           ${favBtn(true, f.path, f.fav)}
@@ -463,7 +463,9 @@ const App = (() => {
           <button class="icon-btn" data-fdel="${UI.escapeHtml(f.path)}" title="삭제">🗑️</button>
         </div>
         ${favBtn(true, f.path, f.fav)}
-        <div class="file-ico${f.color ? ' tint' : ''}" style="${folderIcoStyle(f.color)}">${f.icon || '📁'}</div>
+        ${f.cover
+          ? `<div class="file-ico folder-cover" data-thumb="${f.cover}">${f.icon || '📁'}</div>`
+          : `<div class="file-ico${f.color ? ' tint' : ''}" style="${folderIcoStyle(f.color)}">${f.icon || '📁'}</div>`}
         <div class="file-name">${UI.escapeHtml(f.name)}${updateBadge(f, true)}</div>
         <div class="file-meta num">${UI.bytes(f.size)} · ${f.createdAt ? UI.date(f.createdAt) : '폴더'}</div>
         ${f.note ? `<div class="file-note" title="${UI.escapeHtml(f.note)}">📝 ${UI.escapeHtml(f.note)}</div>` : ''}
@@ -1226,8 +1228,8 @@ const App = (() => {
   // ── 이미지 썸네일 (그리드 뷰, 지연 로딩) ──────────
   const thumbCache = new Map(); // fileId -> objectURL
   const isImage = (name) => ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg', 'ico'].includes((name.split('.').pop() || '').toLowerCase());
-  function loadThumbs() {
-    const els = document.querySelectorAll('#listing [data-thumb]'); if (!els.length || !('IntersectionObserver' in window)) return;
+  function loadThumbsIn(root) {
+    const els = (root || document).querySelectorAll('[data-thumb]'); if (!els.length || !('IntersectionObserver' in window)) return;
     const setImg = (el, url) => { el.innerHTML = `<img class="thumb-img" alt="" src="${url}">`; };
     const io = new IntersectionObserver((ents) => {
       ents.forEach((en) => {
@@ -1239,6 +1241,7 @@ const App = (() => {
     }, { rootMargin: '150px' });
     els.forEach((el) => io.observe(el));
   }
+  function loadThumbs() { loadThumbsIn(document.getElementById('listing')); }
 
   // ── 파일 미리보기 ──────────────────────────
   const PV_IMG = new Set(['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg', 'ico']);
@@ -1461,18 +1464,37 @@ const App = (() => {
     const name = path.split('/').pop(); const parent = path.slice(0, path.lastIndexOf('/'));
     const f = state.folders.find((x) => x.path === path) || {};
     const st = f.icon || f.color ? f : folderStyle(path);
+    const curCover = f.cover || folderStyle(path).cover || null;
     const m = UI.modal(`<h3>폴더 설정</h3>
       <div class="field"><label>폴더 이름</label><input class="input" id="nm" value="${UI.escapeHtml(name)}"></div>
       ${stylePickerHTML(st.icon, st.color)}
+      <div class="field"><label>커버 이미지 <span class="muted" style="font-weight:400;font-size:12px">· 폴더 안 사진 하나를 대표로</span></label>
+        <div class="cover-picker" id="cover-pick"><p class="muted" style="font-size:13px">불러오는 중…</p></div>
+      </div>
       <div class="modal-actions"><button class="btn btn-ghost" id="c">취소</button><button class="btn btn-primary" id="ok">저장</button></div>`);
+    m.el.querySelector('.modal').classList.add('modal-wide');
     const picker = wireStylePicker(m);
+    let coverSel = curCover ? String(curCover) : '';
+    // 폴더 안 이미지 목록을 불러와 커버 후보로 표시
+    (async () => {
+      try {
+        const list = await API.listFiles(path, state.ownerId);
+        const imgs = (list.files || []).filter((x) => isImage(x.name));
+        const box = m.q('#cover-pick');
+        if (!imgs.length) { box.innerHTML = '<p class="muted" style="font-size:13px">이 폴더에 이미지 파일이 없습니다.</p>'; return; }
+        box.innerHTML = `<button type="button" class="cover-opt cover-none${coverSel ? '' : ' on'}" data-cover="">없음</button>` +
+          imgs.map((x) => `<button type="button" class="cover-opt${coverSel === String(x.id) ? ' on' : ''}" data-cover="${x.id}" data-thumb="${x.id}" title="${UI.escapeHtml(x.name)}">🖼️</button>`).join('');
+        box.querySelectorAll('[data-cover]').forEach((b) => b.addEventListener('click', () => { coverSel = b.dataset.cover; box.querySelectorAll('.cover-opt').forEach((x) => x.classList.toggle('on', x === b)); }));
+        loadThumbsIn(box); // 썸네일 지연 로딩
+      } catch (_) { m.q('#cover-pick').innerHTML = '<p class="muted" style="font-size:13px">목록을 불러오지 못했습니다.</p>'; }
+    })();
     m.q('#c').addEventListener('click', m.close);
     m.q('#ok').addEventListener('click', async () => {
       const nn = m.q('#nm').value.trim().replace(/\//g, ''); if (!nn) return;
       try {
         let target = path;
         if (nn !== name) { const r = await API.renameFolder(path, (parent || '') + '/' + nn, state.ownerId); target = r.path || (parent || '') + '/' + nn; if (state.folder === path || state.folder.startsWith(path + '/')) state.folder = target; }
-        await API.setFolderStyle(target, picker.icon, picker.color, state.ownerId);
+        await API.setFolderStyle(target, picker.icon, picker.color, state.ownerId, coverSel || '');
         m.close(); UI.toast('폴더 설정 저장됨', 'success'); loadAll();
       } catch (err) { UI.toast(err.message, 'error'); }
     });

@@ -139,7 +139,7 @@ router.get('/accounts', authenticate, wrap(async (req, res) => {
 // ── 폴더 트리 ──────────
 router.get('/tree', authenticate, wrap(resolveOwner), wrap(async (req, res) => {
   const [ff, fx] = await Promise.all([
-    query('SELECT path, icon, color FROM folders WHERE owner_id=$1 AND deleted_at IS NULL', [req.targetOwnerId]),
+    query('SELECT path, icon, color, cover_file_id FROM folders WHERE owner_id=$1 AND deleted_at IS NULL', [req.targetOwnerId]),
     query('SELECT DISTINCT folder AS path FROM files WHERE owner_id=$1 AND folder<>$2 AND deleted_at IS NULL', [req.targetOwnerId, '/']),
   ]);
   const set = new Set();
@@ -148,7 +148,7 @@ router.get('/tree', authenticate, wrap(resolveOwner), wrap(async (req, res) => {
     const parts = row.path.split('/').filter(Boolean); let acc = '';
     for (const p of parts) { acc += '/' + p; set.add(acc); }
   }
-  for (const row of ff.rows) { if (row.icon || row.color) styles[row.path] = { icon: row.icon || '', color: row.color || '' }; }
+  for (const row of ff.rows) { if (row.icon || row.color || row.cover_file_id) styles[row.path] = { icon: row.icon || '', color: row.color || '', cover: row.cover_file_id || null }; }
   res.json({ ownerId: req.targetOwnerId, folders: [...set].sort(), styles });
 }));
 
@@ -174,6 +174,16 @@ router.patch('/folders/style', authenticate, wrap(resolveOwner), wrap(async (req
   const color = String(req.body.color || '').slice(0, 16);
   await ensureFolder(req.targetOwnerId, folder);
   await query('UPDATE folders SET icon=$1, color=$2 WHERE owner_id=$3 AND path=$4', [icon, color, req.targetOwnerId, folder]);
+  // 커버 이미지: 해당 폴더 안의 이미지 파일만 허용, 빈 값이면 해제
+  if (req.body.cover !== undefined) {
+    const coverId = parseInt(req.body.cover, 10);
+    let cover = null;
+    if (Number.isFinite(coverId) && coverId > 0) {
+      const c = await query('SELECT 1 FROM files WHERE id=$1 AND owner_id=$2 AND folder=$3 AND deleted_at IS NULL', [coverId, req.targetOwnerId, folder]);
+      if (c.rowCount) cover = coverId;
+    }
+    await query('UPDATE folders SET cover_file_id=$1 WHERE owner_id=$2 AND path=$3', [cover, req.targetOwnerId, folder]);
+  }
   await audit(req, 'folder_style', `${folder}`);
   res.json({ ok: true });
 }));
@@ -242,7 +252,7 @@ router.get('/', authenticate, wrap(resolveOwner), wrap(async (req, res) => {
   const folders = [];
   for (const p of [...childPaths].sort()) {
     await query('INSERT INTO folders (owner_id, path) VALUES ($1,$2) ON CONFLICT (owner_id, path) DO NOTHING', [req.targetOwnerId, p]);
-    const fr = await query('SELECT id, note, note_updated_at, created_at, icon, color FROM folders WHERE owner_id=$1 AND path=$2', [req.targetOwnerId, p]);
+    const fr = await query('SELECT id, note, note_updated_at, created_at, icon, color, cover_file_id FROM folders WHERE owner_id=$1 AND path=$2', [req.targetOwnerId, p]);
     const agg = await query(
       'SELECT COALESCE(SUM(size_bytes),0) AS s, COUNT(*)::int AS c FROM files WHERE owner_id=$1 AND deleted_at IS NULL AND (folder=$2 OR folder LIKE $3)',
       [req.targetOwnerId, p, p + '/%']
@@ -251,7 +261,7 @@ router.get('/', authenticate, wrap(resolveOwner), wrap(async (req, res) => {
       id: fr.rows[0]?.id, path: p, name: p.split('/').pop(),
       note: fr.rows[0]?.note || '', noteUpdatedAt: fr.rows[0]?.note_updated_at || null,
       createdAt: fr.rows[0]?.created_at || null,
-      icon: fr.rows[0]?.icon || '', color: fr.rows[0]?.color || '',
+      icon: fr.rows[0]?.icon || '', color: fr.rows[0]?.color || '', cover: fr.rows[0]?.cover_file_id || null,
       size: Number(agg.rows[0].s), fileCount: agg.rows[0].c, fav: false,
     });
   }

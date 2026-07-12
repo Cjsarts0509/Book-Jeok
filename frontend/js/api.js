@@ -58,7 +58,7 @@ const API = (() => {
     deleteFolder: (path, ownerId) => req('DELETE', `/files/folders?path=${encodeURIComponent(path)}${ownerId ? '&ownerId=' + ownerId : ''}`),
     renameFolder: (oldPath, newPath, ownerId) => req('PATCH', '/files/folders', { oldPath, newPath, ownerId }),
     setFolderNote: (path, note, ownerId) => req('PATCH', '/files/folders/note', { path, note, ownerId }),
-    setFolderStyle: (path, icon, color, ownerId) => req('PATCH', '/files/folders/style', { path, icon, color, ownerId }),
+    setFolderStyle: (path, icon, color, ownerId, cover) => req('PATCH', '/files/folders/style', { path, icon, color, ownerId, ...(cover !== undefined ? { cover } : {}) }),
     deleteFile: (id) => req('DELETE', `/files/${id}`),
     renameFile: (id, name) => req('PATCH', `/files/${id}/rename`, { name }),
     setNote: (id, note) => req('PATCH', `/files/${id}/note`, { note }),

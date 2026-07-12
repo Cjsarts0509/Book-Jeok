@@ -389,6 +389,15 @@ textarea.input { resize: vertical; }
 /* 이미지 썸네일 (그리드) */
 .file-ico.thumb { width: 66px; height: 66px; margin: 0 auto 8px; border-radius: 12px; overflow: hidden; display: flex; align-items: center; justify-content: center; background: var(--bg); font-size: 30px; }
 .thumb-img { width: 100%; height: 100%; object-fit: cover; }
+/* 폴더 커버 이미지 */
+.file-ico.folder-cover { width: 66px; height: 66px; margin: 0 auto 8px; border-radius: 12px; overflow: hidden; display: flex; align-items: center; justify-content: center; background: var(--bg); font-size: 30px; box-shadow: inset 0 0 0 1px var(--border); }
+.mcard-name .ic.has-cover { width: 30px; height: 30px; padding: 0; border-radius: 7px; overflow: hidden; display: inline-flex; align-items: center; justify-content: center; font-size: 16px; vertical-align: middle; flex: 0 0 auto; }
+/* 커버 선택기(폴더 설정) */
+.cover-picker { display: flex; gap: 8px; flex-wrap: wrap; max-height: 30vh; overflow-y: auto; }
+.cover-opt { width: 58px; height: 58px; border: 2px solid var(--border); border-radius: 9px; background: var(--bg); display: flex; align-items: center; justify-content: center; overflow: hidden; font-size: 24px; cursor: pointer; padding: 0; flex: 0 0 auto; }
+.cover-opt.on { border-color: var(--primary); box-shadow: 0 0 0 2px var(--primary); }
+.cover-opt.cover-none { font-size: 12px; font-weight: 700; color: var(--text-muted); }
+.cover-opt .thumb-img { width: 100%; height: 100%; }
 
 /* 공유 폴더 열람 페이지 */
 .fs-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 4px; border-bottom: 1px solid var(--border); font-size: 14px; }
