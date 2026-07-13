@@ -105,6 +105,7 @@ const API = (() => {
     // 도서 조회 (교보 키오스크 · bookpulse 프록시)
     bookSearch: (keyword, limit = 8) => req('GET', `/books/search?keyword=${encodeURIComponent(keyword)}&limit=${limit}`),
     bookDetail: (isbn) => req('GET', `/books/detail?isbn=${encodeURIComponent(isbn)}`),
+    bookOcr: (dataUrl) => req('POST', '/books/ocr', { image: dataUrl }),
     // admin
     adminUsers: () => req('GET', '/admin/users'),
     createUser: (data) => req('POST', '/admin/users', data),

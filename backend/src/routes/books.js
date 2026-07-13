@@ -50,4 +50,25 @@ router.get('/detail', wrap(async (req, res) => {
   return pass(res, `/book-detail?isbn=${encodeURIComponent(isbn)}`, { isbn });
 }));
 
+// 책등/표지 사진(base64) → 제목 리스트 (python-api /spine-ocr, Gemini 비전)
+router.post('/ocr', wrap(async (req, res) => {
+  if (!BASE) return res.status(503).json({ status: 'error', message: '도서 조회 서버(BOOKPULSE_API)가 설정되지 않았습니다', books: [] });
+  const dataUrl = (req.body && req.body.image) || '';
+  const mm = /^data:([^;]+);base64,(.*)$/s.exec(dataUrl);
+  const mime = mm ? mm[1] : 'image/jpeg';
+  const b64 = mm ? mm[2] : dataUrl;
+  if (!b64) return res.status(400).json({ status: 'error', message: '이미지가 필요합니다', books: [] });
+  let buf;
+  try { buf = Buffer.from(b64, 'base64'); } catch (_) { return res.status(400).json({ status: 'error', message: '잘못된 이미지', books: [] }); }
+  try {
+    const fd = new FormData();
+    fd.append('file', new Blob([buf], { type: mime }), 'spine.jpg');
+    const r = await fetch(BASE + '/spine-ocr', { method: 'POST', body: fd, signal: AbortSignal.timeout(70000) });
+    const data = await r.json();
+    return res.status(r.ok ? 200 : r.status).json(data);
+  } catch (e) {
+    return res.status(502).json({ status: 'error', message: '인식 서버 연결 실패: ' + e.message, books: [] });
+  }
+}));
+
 module.exports = router;

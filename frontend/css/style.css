@@ -647,6 +647,12 @@ th { background: var(--bg); font-weight: 700; color: var(--text-muted); font-siz
 .bl-cand-t { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .bl-cand-t b { font-size: 14px; }
 .bl-cand-t .muted { font-size: 12px; }
+.bl-review { display: flex; flex-direction: column; gap: 6px; max-height: 60vh; overflow: auto; }
+.oc-row { display: flex; gap: 10px; align-items: center; padding: 8px; border: 1px solid var(--border); border-radius: 10px; }
+.oc-row.oc-on { border-color: var(--accent); background: rgba(6, 214, 160, 0.06); }
+.oc-info { flex: 1; min-width: 0; }
+.oc-ck { width: 18px; height: 18px; flex-shrink: 0; }
+.oc-alt { flex-shrink: 0; }
 
 /* 비밀번호 일치 표시 */
 .pw-match { font-size: 12px; font-weight: 600; margin-top: 4px; display: inline-block; }
