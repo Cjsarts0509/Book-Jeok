@@ -74,7 +74,7 @@ window.ISBN = (() => {
     });
     return loaded[src];
   }
-  const ensureZXing = () => loadScript('vendor/zxing.min.js?v=91', 'ZXing');
+  const ensureZXing = () => loadScript('vendor/zxing.min.js?v=92', 'ZXing');
   const TESS_CDN = 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js';
   const ensureTesseract = () => loadScript(TESS_CDN, 'Tesseract');
 
@@ -344,22 +344,23 @@ window.ISBN = (() => {
     const ex = reg.w * 0.25, ey = reg.h * 0.25;               // 여백(quiet zone) 포함해 넉넉히
     const x = Math.max(0, reg.x - ex), y = Math.max(0, reg.y - ey);
     const w = Math.min(NW - x, reg.w + 2 * ex), h = Math.min(NH - y, reg.h + 2 * ey);
-    // 배율은 영역 크기에 비례 — 작은 영역을 과도하게 확대하면 흐림이 증폭돼 오독됨. 원본~2.6배로 제한.
+    // 배율은 영역 크기에 비례 — 작은 영역을 과도하게 확대하면 흐림이 증폭돼 오독됨. 원본~2.4배로 제한.
     const base = Math.max(w, h);
     const cap = (t) => Math.min(1600, Math.max(600, Math.round(t)));
-    const scales = [...new Set([cap(base), cap(base * 1.6), cap(base * 2.4)])];
+    const scales = [...new Set([cap(base), cap(base * 1.3), cap(base * 1.7), cap(base * 2.2)])];
     const votes = {};
     const tally = (c) => { if (c) votes[c] = (votes[c] || 0) + 1; };
     const pick = () => { let b = null, n = 0; for (const c in votes) if (votes[c] > n) { b = c; n = votes[c]; } return { best: b, n }; };
-    // 1) 0°(가로 바코드는 대부분 여기서 2표 확정 → 빠름)
+    // 1) 0° 여러 배율 + 흐림 보정(가로 바코드는 대부분 여기서 2표 확정 → 빠름)
     for (const tl of scales) tally(await zxDecode(cropCanvas(source, x, y, w, h, tl)));
+    tally(await zxDecode(enhance(cropCanvas(source, x, y, w, h, cap(base * 1.5)))));
     let p = pick();
-    if (p.n >= 2) return { code: p.best, weak: p.best };
-    // 2) 확실하지 않으면 세로용 90° + 흐림 보정 투표를 더한다
+    if (p.n >= 2) return { code: p.best, votes: p.n };
+    // 2) 확실하지 않으면 세로용 90°(+흐림 보정) 투표를 더한다
     for (const tl of scales) tally(await zxDecode(rotate90(cropCanvas(source, x, y, w, h, tl))));
-    tally(await zxDecode(enhance(cropCanvas(source, x, y, w, h, cap(base * 1.6)))));
+    tally(await zxDecode(rotate90(enhance(cropCanvas(source, x, y, w, h, cap(base * 1.5))))));
     p = pick();
-    return { code: p.n >= 2 ? p.best : null, weak: p.n >= 1 ? p.best : null };
+    return { code: p.n >= 2 ? p.best : null, votes: p.n };
   }
   // 검출 완전성 보강: 통짜+2x2 를 마스킹 디코드해 코드만 수집(영역 검출/디코드가 놓친 것 대비). 폴백 전용.
   async function zxingAllCodes(source) {
@@ -423,31 +424,31 @@ window.ISBN = (() => {
       return { code: b.code, box: { x, y, w, h } };
     };
     const result = new Map(); // code -> {code, box|null}
-    const setBox = (code, box) => { const cur = result.get(code); if (!cur || (!cur.box && box)) result.set(code, { code, box: box || null }); };
-    const hasBox = (code) => { const c = result.get(code); return c && c.box; };
-    // 1) 네이티브 BarcodeDetector(있으면): 정확한 위치 + 코드
-    for (const b of await detectAllNativeTiled(source)) setBox(b.code, b.box);
-    // 2) 구조텐서로 바코드 '영역'을 직접 찾고(방향 무관) → 각 영역을 디코드해 그 코드의 정밀 박스로 사용
-    const weakRegions = []; // {reg, weak}  (2표는 못 얻었지만 바코드처럼 보이는 영역 → 나중에 교차검증)
+    // 1) 네이티브 BarcodeDetector(있으면): 정확한 위치 + 코드 (가장 신뢰)
+    for (const b of await detectAllNativeTiled(source)) result.set(b.code, { code: b.code, box: b.box });
+    // 2) 구조텐서로 바코드 '영역'을 직접 찾고(방향 무관) → 각 영역을 '확실히' 디코드(2표↑)한 것만 채택.
+    //    한 영역=한 코드로, 표가 많은(확실한) 순으로 1:1 배정 → 코드가 엉뚱한 영역에 붙는 오배치 방지.
     let regionCount = 0;
     if (result.size < 2 || [...result.values()].some((v) => !v.box)) {
       const regions = findBarcodeRegions(source);
       regionCount = regions.length;
+      const hits = [];
       for (const reg of regions) {
         const v = await decodeRegionVotes(source, reg);
-        if (v.code) setBox(v.code, { x: reg.x, y: reg.y, w: reg.w, h: reg.h });
-        else if (v.weak) weakRegions.push({ reg, weak: v.weak });
+        if (v.code) hits.push({ reg, code: v.code, votes: v.votes });
+      }
+      hits.sort((a, b) => b.votes - a.votes);                 // 확실한 것부터
+      const usedReg = new Set(), boxed = new Set();
+      for (const h of hits) {
+        if (boxed.has(h.code) || usedReg.has(h.reg)) continue; // 이미 배정된 코드/영역은 건너뜀(1:1)
+        if (!result.has(h.code) || !result.get(h.code).box) result.set(h.code, { code: h.code, box: { x: h.reg.x, y: h.reg.y, w: h.reg.w, h: h.reg.h } });
+        boxed.add(h.code); usedReg.add(h.reg);
       }
     }
-    // 3) 코드가 2개 미만이면(놓친/디코드 실패) 통짜·격자 폴백으로 '진짜 코드 집합'을 확인.
-    //    단건 사진(영역 1개 이하)에는 폴백 생략 → 빠름.
+    // 3) 코드가 2개 미만이면(영역 디코드가 놓쳤을 수 있음) 통짜·격자 폴백으로 코드만 보강(위치 불명 칩).
+    //    영역 디코드가 실패한 바코드는 '엉뚱한 박스' 대신 정직하게 칩으로 → 오배치 없음. 단건 사진은 폴백 생략.
     if (result.size < 2 && regionCount >= 2) {
-      const trueCodes = new Set(await zxingAllCodes(source));
-      // 약한 영역 디코드가 독립 확인된 코드와 일치하면(오독 아님) 그 영역을 박스로 채택
-      for (const wr of weakRegions) {
-        if (trueCodes.has(wr.weak) && !hasBox(wr.weak)) setBox(wr.weak, { x: wr.reg.x, y: wr.reg.y, w: wr.reg.w, h: wr.reg.h });
-      }
-      for (const c of trueCodes) if (!result.has(c)) result.set(c, { code: c, box: null }); // 위치 못 찾은 것만 칩
+      for (const c of await zxingAllCodes(source)) if (!result.has(c)) result.set(c, { code: c, box: null });
     }
     return [...result.values()].map(clamp).sort(byPos);
   }
