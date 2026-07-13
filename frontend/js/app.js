@@ -997,11 +997,13 @@ const App = (() => {
         <button class="btn btn-primary" id="us-file">📁 파일 선택</button>
         <button class="btn btn-accent" id="us-cam">📷 사진 촬영</button>
         ${window.ISBN ? `<button class="btn btn-secondary" id="us-scan">📚 바코드 연속 촬영</button>` : ''}
+        ${window.ISBN ? `<button class="btn btn-secondary" id="us-books">📖 도서 목록 만들기</button>` : ''}
       </div>
       <div class="modal-actions"><button class="btn btn-ghost" id="us-cancel">취소</button></div>`);
     m.q('#us-file').addEventListener('click', () => { m.close(); document.getElementById('file-input')?.click(); });
     m.q('#us-cam').addEventListener('click', () => { m.close(); document.getElementById('cam-input')?.click(); });
     m.q('#us-scan')?.addEventListener('click', () => { m.close(); continuousBarcodeCapture(); });
+    m.q('#us-books')?.addEventListener('click', () => { m.close(); bookListScan(); });
     m.q('#us-cancel').addEventListener('click', m.close);
   }
 
@@ -1084,6 +1086,114 @@ const App = (() => {
     m.q('#cap-shoot').addEventListener('click', () => { try { cam.click(); } catch (_) {} });
     m.q('#cap-done').addEventListener('click', m.close);
     renderList();
+  }
+
+  // ── 책장/도서 스캔 → 도서 목록 테이블 (바코드 우선 · 제목검색 폴백 · CSV 내보내기) ──────────
+  //  · 바코드가 보이면 scanMulti로 읽어 ISBN→교보 상세로 자동 채움
+  //  · 바코드가 없으면(책등 사진 등) 제목으로 검색 → 후보 중 선택해 추가
+  function bookListScan() {
+    const rows = [];            // {isbn,title,subtitle,author,publisher,category,price,stock,img}
+    const seen = new Set();
+    const esc = UI.escapeHtml;
+    const cover = (isbn, size) => (isbn ? `https://contents.kyobobook.co.kr/sih/fit-in/${size}/pdt/${isbn}.jpg` : '');
+    const cam = document.createElement('input');
+    cam.type = 'file'; cam.accept = 'image/*'; cam.capture = 'environment'; cam.multiple = true; cam.style.display = 'none';
+    document.body.appendChild(cam);
+    const m = UI.modal(`<h3>📖 도서 목록 만들기 <span class="muted" style="font-size:13px;font-weight:400">· 바코드 우선, 안 되면 제목 검색</span></h3>
+      <div class="bl-tools">
+        <button type="button" class="btn btn-secondary btn-sm" id="bl-shoot">📷 촬영·사진</button>
+        <div class="bl-search"><input class="input" id="bl-q" placeholder="제목으로 추가 (예: 사려 깊은 수다)"><button type="button" class="btn btn-primary btn-sm" id="bl-add">검색</button></div>
+      </div>
+      <div class="bl-wrap"><table class="bl-table"><thead><tr><th></th><th>제목</th><th>저자</th><th>출판사</th><th>ISBN</th><th>재고</th><th></th></tr></thead><tbody id="bl-body"></tbody></table></div>
+      <p class="bl-empty muted" id="bl-empty">아직 추가된 책이 없습니다. 촬영하거나 제목으로 검색해 추가하세요.</p>
+      <div class="modal-actions">
+        <span class="muted" id="bl-count" style="flex:1;font-size:13px"></span>
+        <button class="btn btn-ghost" id="bl-csv">⬇️ CSV</button>
+        <button class="btn btn-primary" id="bl-done">완료</button>
+      </div>`, { onClose: () => { try { cam.remove(); } catch (_) {} } });
+    m.el.querySelector('.modal').classList.add('modal-wide');
+
+    function render() {
+      const body = m.q('#bl-body');
+      m.q('#bl-empty').style.display = rows.length ? 'none' : '';
+      body.innerHTML = rows.map((r, i) => `<tr>
+        <td>${r.img ? `<img class="bl-cover" src="${esc(r.img)}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">` : '<span class="bl-cover bl-cover-ph">📕</span>'}</td>
+        <td><div class="bl-title">${esc(r.title || '(제목 미상)')}</div>${r.subtitle ? `<div class="bl-sub muted">${esc(r.subtitle)}</div>` : ''}</td>
+        <td>${esc(r.author || '')}</td>
+        <td>${esc(r.publisher || '')}</td>
+        <td class="bl-isbn">${esc(r.isbn || '')}</td>
+        <td>${esc(r.stock || '')}</td>
+        <td><button type="button" class="bl-del" data-i="${i}" title="삭제">✕</button></td>
+      </tr>`).join('');
+      m.q('#bl-count').textContent = rows.length ? `${rows.length}권` : '';
+      body.querySelectorAll('.bl-del').forEach((b) => b.addEventListener('click', () => {
+        rows.splice(+b.dataset.i, 1); seen.clear(); rows.forEach((r) => r.isbn && seen.add(r.isbn)); render();
+      }));
+    }
+
+    function addRow(r) {
+      if (r.isbn && seen.has(r.isbn)) { UI.toast('이미 추가된 책입니다', 'info'); return false; }
+      if (r.isbn) seen.add(r.isbn);
+      rows.push(r); render(); return true;
+    }
+    const rowFrom = (d, isbn) => ({
+      isbn: isbn || d.isbn || '', title: d.title || '', subtitle: d.subtitle || '',
+      author: d.author || '', publisher: d.publisher || '', category: d.category || d.class_nm || '',
+      price: d.price || '', stock: d.stock || '', img: cover(isbn || d.isbn, '120x0'),
+    });
+
+    async function resolveIsbn(isbn) {
+      try {
+        const d = await API.bookDetail(isbn);
+        if (d && d.status === 'success') return addRow(rowFrom(d, isbn));
+      } catch (_) {}
+      return addRow({ isbn, title: '', subtitle: '', author: '', publisher: '', category: '', price: '', stock: '', img: cover(isbn, '120x0') });
+    }
+
+    async function searchAdd(keyword) {
+      keyword = (keyword || '').trim(); if (!keyword) return;
+      let data; try { data = await API.bookSearch(keyword, 8); } catch (e) { return UI.toast('검색 실패: ' + e.message, 'error'); }
+      const items = (data && data.items) || [];
+      if (!items.length) return UI.toast('검색 결과가 없습니다', 'info');
+      const caps = items.map((it, k) => `<button type="button" class="bl-cand" data-k="${k}">
+        <img class="bl-cover" src="${esc(cover(it.isbn, '80x0'))}" alt="" onerror="this.style.visibility='hidden'">
+        <span class="bl-cand-t"><b>${esc(it.title)}</b><span class="muted">${esc(it.author || '')}${it.publisher ? ' · ' + esc(it.publisher) : ''}</span></span></button>`).join('');
+      const pm = UI.modal(`<h3>📚 "${esc(keyword)}" 검색 결과</h3><p class="muted" style="font-size:13px">추가할 책을 선택하세요</p><div class="bl-cands">${caps}</div><div class="modal-actions"><button class="btn btn-ghost" id="bl-pc">취소</button></div>`);
+      pm.el.querySelector('.modal').classList.add('modal-wide');
+      pm.el.querySelectorAll('.bl-cand').forEach((b) => b.addEventListener('click', () => { const it = items[+b.dataset.k]; addRow(rowFrom(it, it.isbn)); pm.close(); }));
+      pm.q('#bl-pc').addEventListener('click', pm.close);
+    }
+
+    async function handleImage(file) {
+      let img, url;
+      try { url = URL.createObjectURL(file); img = await loadImgEl(url); } catch (_) { try { URL.revokeObjectURL(url); } catch (__) {} return UI.toast('이미지를 열 수 없습니다', 'error'); }
+      let found = []; try { found = await window.ISBN.scanMulti(img); } catch (_) {}
+      URL.revokeObjectURL(url);
+      const codes = [...new Set(found.map((f) => f.code).filter((c) => window.ISBN.isBookIsbn(c)))];
+      if (!codes.length) return UI.toast('바코드를 못 찾았습니다. 제목으로 추가하세요.', 'info');
+      let added = 0; for (const c of codes) { if (await resolveIsbn(c)) added++; }
+      if (added) UI.toast(`${added}권 추가됨`, 'success');
+    }
+
+    function exportCsv() {
+      if (!rows.length) return UI.toast('내보낼 책이 없습니다', 'info');
+      const cell = (v) => `"${String(v == null ? '' : v).replace(/"/g, '""')}"`;
+      const lines = [['제목', '부제', '저자', '출판사', 'ISBN', '분류', '가격', '재고'].join(',')]
+        .concat(rows.map((r) => [r.title, r.subtitle, r.author, r.publisher, r.isbn, r.category, r.price, r.stock].map(cell).join(',')));
+      const blob = new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
+      const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+      const d = new Date(); const p2 = (x) => String(x).padStart(2, '0');
+      a.download = `도서목록_${d.getFullYear()}${p2(d.getMonth() + 1)}${p2(d.getDate())}_${p2(d.getHours())}${p2(d.getMinutes())}.csv`;
+      a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    }
+
+    cam.addEventListener('change', async () => { const files = [...cam.files]; cam.value = ''; for (const f of files) await handleImage(f); });
+    m.q('#bl-shoot').addEventListener('click', () => { try { cam.click(); } catch (_) {} });
+    m.q('#bl-add').addEventListener('click', () => { const q = m.q('#bl-q'); searchAdd(q.value); q.value = ''; q.focus(); });
+    m.q('#bl-q').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); m.q('#bl-add').click(); } });
+    m.q('#bl-csv').addEventListener('click', exportCsv);
+    m.q('#bl-done').addEventListener('click', m.close);
+    render();
   }
 
   // ── 바코드 선택: 촬영 사진(참고용)과 함께 감지된 코드를 캡션 목록으로 탭 선택 → Promise<code|null> ──────────

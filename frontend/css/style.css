@@ -620,6 +620,30 @@ th { background: var(--bg); font-weight: 700; color: var(--text-muted); font-siz
 .modal.modal-wide { max-width: 720px; }
 @media (max-width: 768px) { .modal.modal-wide { max-width: 100%; } }
 
+/* 도서 목록 만들기 (책장 스캔) */
+.bl-tools { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; flex-wrap: wrap; }
+.bl-search { display: flex; gap: 6px; flex: 1; min-width: 200px; }
+.bl-search .input { flex: 1; }
+.bl-wrap { max-height: 52vh; overflow: auto; border: 1px solid var(--border); border-radius: 10px; }
+.bl-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.bl-table thead th { position: sticky; top: 0; background: var(--bg); z-index: 1; text-align: left; padding: 8px 10px; font-weight: 600; color: var(--text-muted); border-bottom: 1px solid var(--border); white-space: nowrap; }
+.bl-table td { padding: 8px 10px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+.bl-table tr:last-child td { border-bottom: none; }
+.bl-cover { width: 34px; height: 48px; object-fit: cover; border-radius: 3px; background: #f1f3f5; display: inline-block; }
+.bl-cover-ph { display: inline-flex; align-items: center; justify-content: center; font-size: 20px; }
+.bl-title { font-weight: 600; color: var(--text); }
+.bl-sub { font-size: 11px; margin-top: 2px; }
+.bl-isbn { font-variant-numeric: tabular-nums; color: var(--text-muted); white-space: nowrap; }
+.bl-del { background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 15px; padding: 2px 6px; border-radius: 6px; }
+.bl-del:hover { background: var(--bg); color: #ef476f; }
+.bl-empty { text-align: center; padding: 24px 12px; }
+.bl-cands { display: flex; flex-direction: column; gap: 6px; max-height: 60vh; overflow: auto; }
+.bl-cand { display: flex; gap: 10px; align-items: center; text-align: left; padding: 8px; border: 1px solid var(--border); border-radius: 10px; background: var(--card); cursor: pointer; }
+.bl-cand:hover { border-color: var(--secondary); background: var(--bg); }
+.bl-cand-t { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.bl-cand-t b { font-size: 14px; }
+.bl-cand-t .muted { font-size: 12px; }
+
 /* 비밀번호 일치 표시 */
 .pw-match { font-size: 12px; font-weight: 600; margin-top: 4px; display: inline-block; }
 .pw-match.ok { color: #05835f; } .pw-match.bad { color: var(--danger); }
