@@ -101,6 +101,7 @@ const API = (() => {
     folderShares: (ownerId) => req('GET', `/files/folder-shares${ownerId ? '?ownerId=' + ownerId : ''}`),
     deleteFolderShare: (id, ownerId) => req('DELETE', `/files/folder-shares/${id}${ownerId ? '?ownerId=' + ownerId : ''}`),
     downloadUrl: (id) => `${BASE}/api/files/${id}/download`,
+    pdfUrl: (id) => `${BASE}/api/files/${id}/pdf`,
     // admin
     adminUsers: () => req('GET', '/admin/users'),
     createUser: (data) => req('POST', '/admin/users', data),

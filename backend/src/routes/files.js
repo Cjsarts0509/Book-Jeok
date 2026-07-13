@@ -13,6 +13,7 @@ const { audit, wrap, canAccessOwner } = require('../util');
 const { generateToken, hashPassword } = require('../crypto');
 const filetype = require('../filetype');
 const yara = require('../yara');
+const officePdf = require('../officePdf');
 const notify = require('../notify');
 const { isAllowed, allowedLabel, getAllowedExtensions, trashRetentionDays, shareQrEnabled } = require('../settings');
 const QRCode = require('qrcode');
@@ -349,6 +350,27 @@ router.get('/:id(\\d+)/download', authenticate, wrap(async (req, res) => {
   if (!fs.existsSync(disk)) return res.status(410).json({ error: '파일 실체가 존재하지 않습니다.' });
   await audit(req, 'download', `file=${file.id}`);
   res.download(disk, file.original_name);
+}));
+
+// ── 오피스 문서(PPT/PPTX/DOC/DOCX 등) → PDF 완전 레이아웃 미리보기 (LibreOffice, 캐시) ──────────
+router.get('/:id(\\d+)/pdf', authenticate, wrap(async (req, res) => {
+  const r = await query('SELECT * FROM files WHERE id=$1 AND deleted_at IS NULL', [req.params.id]);
+  const file = r.rows[0];
+  if (!file) return res.status(404).json({ error: '파일을 찾을 수 없습니다.' });
+  if (!(await canAccessOwner(req.user, file.owner_id))) return res.status(403).json({ error: '접근 권한이 없습니다.' });
+  const ext = (file.original_name.split('.').pop() || '').toLowerCase();
+  if (!officePdf.canConvert(ext)) return res.status(415).json({ error: '변환할 수 없는 형식입니다.' });
+  if (!officePdf.sofficeAvailable()) return res.status(501).json({ error: '문서 변환기(LibreOffice)가 설치되어 있지 않습니다.' });
+  const disk = path.join(userDir(file.owner_id), file.stored_name);
+  if (!fs.existsSync(disk)) return res.status(410).json({ error: '파일 실체가 존재하지 않습니다.' });
+  try {
+    const pdf = await officePdf.convert(disk, ext, file.stored_name);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'inline; filename="preview.pdf"');
+    fs.createReadStream(pdf).pipe(res);
+  } catch (_) {
+    res.status(500).json({ error: '문서를 변환하지 못했습니다.' });
+  }
 }));
 
 // ── 비고 ──────────

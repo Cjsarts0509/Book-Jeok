@@ -1396,8 +1396,9 @@ const App = (() => {
   const PV_IMG = new Set(['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg', 'ico']);
   const PV_TXT = new Set(['txt', 'md', 'log', 'json', 'xml', 'yml', 'yaml', 'html', 'css', 'js', 'ts', 'sql', 'ini', 'cfg', 'env']);
   const PV_OFFICE = new Set(['xlsx', 'xls', 'xlsm', 'csv']);   // 표 형식(엑셀/CSV)은 표로 렌더
-  const PV_PPT = new Set(['pptx', 'ppsx']);                    // 프레젠테이션(슬라이드별 이미지·텍스트)
-  const canPreview = (name) => { const e = (name.split('.').pop() || '').toLowerCase(); return PV_IMG.has(e) || PV_TXT.has(e) || PV_OFFICE.has(e) || PV_PPT.has(e) || e === 'pdf'; };
+  const PV_PPT = new Set(['pptx', 'ppsx']);                    // 서버 변환 실패 시 텍스트+이미지 폴백 가능
+  const PV_DOC = new Set(['ppt', 'pptx', 'ppsx', 'pps', 'doc', 'docx', 'odp', 'odt', 'rtf']); // 서버 PDF 로 완전 레이아웃 렌더
+  const canPreview = (name) => { const e = (name.split('.').pop() || '').toLowerCase(); return PV_IMG.has(e) || PV_TXT.has(e) || PV_OFFICE.has(e) || PV_DOC.has(e) || e === 'pdf'; };
   let pvObjUrl = null, pvCurrentId = null, pvExtraUrls = [];
   function revokeExtra() { pvExtraUrls.forEach((u) => { try { URL.revokeObjectURL(u); } catch (_) {} }); pvExtraUrls = []; }
   function closePreview() {
@@ -1424,6 +1425,7 @@ const App = (() => {
     applySelectionClasses();
     const body = document.getElementById('pp-body');
     body.innerHTML = '<p class="muted pp-msg">불러오는 중…</p>';
+    if (PV_DOC.has(ext)) { renderDocPdf(body, id, ext); return; } // PPT·워드 등은 서버 PDF 로 완전 렌더
     fetch(API.downloadUrl(id), { headers: { Authorization: 'Bearer ' + API.getToken() }, credentials: 'include' })
       .then((r) => { if (!r.ok) throw new Error('불러오기 실패'); return r.blob(); })
       .then(async (blob) => {
@@ -1431,10 +1433,32 @@ const App = (() => {
         if (PV_IMG.has(ext)) { pvObjUrl = URL.createObjectURL(blob); body.innerHTML = `<img class="pp-img" alt="" src="${pvObjUrl}">`; }
         else if (ext === 'pdf') { pvObjUrl = URL.createObjectURL(blob); body.innerHTML = `<iframe class="pp-frame" src="${pvObjUrl}"></iframe>`; }
         else if (PV_OFFICE.has(ext)) { await renderSheetPreview(body, blob); }
-        else if (PV_PPT.has(ext)) { await renderPptPreview(body, blob, id); }
         else { let text = await blob.text(); if (text.length > 200000) text = text.slice(0, 200000) + '\n…(생략됨)'; const pre = document.createElement('pre'); pre.className = 'pp-text'; pre.textContent = text; body.innerHTML = ''; body.appendChild(pre); }
       })
       .catch((e) => { if (pvCurrentId === id) body.innerHTML = `<p class="muted pp-msg" style="color:var(--danger)">${UI.escapeHtml(e.message)}</p>`; });
+  }
+  // 오피스 문서 → 서버에서 PDF 로 변환해 완전한 레이아웃으로 렌더. 변환 불가/실패 시 폴백.
+  async function renderDocPdf(body, id, ext) {
+    body.innerHTML = '<p class="muted pp-msg">📄 레이아웃 변환 중… (처음 한 번만 잠시 걸려요)</p>';
+    try {
+      const r = await fetch(API.pdfUrl(id), { headers: { Authorization: 'Bearer ' + API.getToken() }, credentials: 'include' });
+      if (!r.ok) throw new Error(String(r.status));
+      const blob = await r.blob();
+      if (pvCurrentId !== id) return;
+      pvObjUrl = URL.createObjectURL(blob);
+      body.innerHTML = `<iframe class="pp-frame" src="${pvObjUrl}"></iframe>`;
+    } catch (_) {
+      if (pvCurrentId !== id) return;
+      // 서버 변환기가 없거나(501) 실패 → pptx·ppsx 는 텍스트+이미지 폴백, 그 외는 안내
+      if (PV_PPT.has(ext)) {
+        try {
+          const fb = await (await fetch(API.downloadUrl(id), { headers: { Authorization: 'Bearer ' + API.getToken() }, credentials: 'include' })).blob();
+          if (pvCurrentId === id) await renderPptPreview(body, fb, id);
+        } catch (_) { if (pvCurrentId === id) body.innerHTML = '<p class="muted pp-msg">미리보기를 표시할 수 없습니다. 다운로드해서 확인해 주세요.</p>'; }
+      } else if (pvCurrentId === id) {
+        body.innerHTML = '<p class="muted pp-msg">이 형식은 미리보기를 표시할 수 없습니다.<br>다운로드해서 확인해 주세요.</p>';
+      }
+    }
   }
   // 엑셀/CSV 미리보기 — 표가 크면 앞 N행 × M열만 읽어 렌더(로딩 지연 방지)
   const PV_MAX_ROWS = 100, PV_MAX_COLS = 40;

@@ -1,9 +1,15 @@
-FROM node:20-alpine
+FROM node:20-bookworm-slim
 
 WORKDIR /app
 
-# YARA(로컬 악성 패턴 검사) — Alpine community, 외부 통신 없음
-RUN apk add --no-cache yara
+# YARA(로컬 악성 패턴 검사) + LibreOffice(오피스 문서 → PDF 완전 레이아웃 미리보기) + 한글 폰트
+#  - libreoffice-impress: PPT/PPTX, libreoffice-writer: DOC/DOCX, fonts-noto-cjk: 한글 렌더
+#  - 오피스 미리보기가 필요 없으면 libreoffice-* / fonts-noto-cjk 줄을 빼도 됩니다(그 경우 텍스트 폴백).
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      yara \
+      libreoffice-impress libreoffice-writer \
+      fonts-noto-cjk \
+    && rm -rf /var/lib/apt/lists/*
 
 # 의존성 먼저 설치 (레이어 캐시)
 COPY package.json ./
