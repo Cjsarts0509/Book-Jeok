@@ -1437,27 +1437,35 @@ const App = (() => {
       })
       .catch((e) => { if (pvCurrentId === id) body.innerHTML = `<p class="muted pp-msg" style="color:var(--danger)">${UI.escapeHtml(e.message)}</p>`; });
   }
-  // 오피스 문서 → 서버에서 PDF 로 변환해 완전한 레이아웃으로 렌더. 변환 불가/실패 시 폴백.
+  // 오피스 문서 → 서버에서 PDF 로 변환해 완전한 레이아웃으로 렌더. 변환 불가/실패 시 폴백(사유 표시).
   async function renderDocPdf(body, id, ext) {
     body.innerHTML = '<p class="muted pp-msg">📄 레이아웃 변환 중… (처음 한 번만 잠시 걸려요)</p>';
+    let status = 0;
     try {
       const r = await fetch(API.pdfUrl(id), { headers: { Authorization: 'Bearer ' + API.getToken() }, credentials: 'include' });
+      status = r.status;
       if (!r.ok) throw new Error(String(r.status));
       const blob = await r.blob();
       if (pvCurrentId !== id) return;
       pvObjUrl = URL.createObjectURL(blob);
       body.innerHTML = `<iframe class="pp-frame" src="${pvObjUrl}"></iframe>`;
-    } catch (_) {
-      if (pvCurrentId !== id) return;
-      // 서버 변환기가 없거나(501) 실패 → pptx·ppsx 는 텍스트+이미지 폴백, 그 외는 안내
-      if (PV_PPT.has(ext)) {
-        try {
-          const fb = await (await fetch(API.downloadUrl(id), { headers: { Authorization: 'Bearer ' + API.getToken() }, credentials: 'include' })).blob();
-          if (pvCurrentId === id) await renderPptPreview(body, fb, id);
-        } catch (_) { if (pvCurrentId === id) body.innerHTML = '<p class="muted pp-msg">미리보기를 표시할 수 없습니다. 다운로드해서 확인해 주세요.</p>'; }
-      } else if (pvCurrentId === id) {
-        body.innerHTML = '<p class="muted pp-msg">이 형식은 미리보기를 표시할 수 없습니다.<br>다운로드해서 확인해 주세요.</p>';
-      }
+      return;
+    } catch (_) { /* 아래에서 폴백 */ }
+    if (pvCurrentId !== id) return;
+    const reason = status === 404 ? '백엔드가 아직 업데이트되지 않았습니다(서버 재배포 필요).'
+      : status === 501 ? '서버에 문서 변환기(LibreOffice)가 설치되어 있지 않습니다.'
+        : status === 415 ? '변환할 수 없는 형식입니다.'
+          : status ? `변환 실패(${status}).` : '서버에 연결하지 못했습니다.';
+    const banner = `<div class="pp-sheet-note">⚠️ 완전 레이아웃(PDF) 미리보기를 못 불러왔습니다 — ${UI.escapeHtml(reason)} 아래는 내용 미리보기입니다.</div>`;
+    if (PV_PPT.has(ext)) {                                     // pptx·ppsx 는 텍스트+이미지 폴백 + 사유 배너
+      try {
+        const fb = await (await fetch(API.downloadUrl(id), { headers: { Authorization: 'Bearer ' + API.getToken() }, credentials: 'include' })).blob();
+        if (pvCurrentId !== id) return;
+        await renderPptPreview(body, fb, id);
+        if (pvCurrentId === id) body.insertAdjacentHTML('afterbegin', banner);
+      } catch (_) { if (pvCurrentId === id) body.innerHTML = banner; }
+    } else if (pvCurrentId === id) {
+      body.innerHTML = banner + '<p class="muted pp-msg">다운로드해서 확인해 주세요.</p>';
     }
   }
   // 엑셀/CSV 미리보기 — 표가 크면 앞 N행 × M열만 읽어 렌더(로딩 지연 방지)
