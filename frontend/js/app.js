@@ -1104,6 +1104,7 @@ const App = (() => {
         <button type="button" class="btn btn-secondary btn-sm" id="bl-shoot">📷 촬영·사진</button>
         <div class="bl-search"><input class="input" id="bl-q" placeholder="제목으로 추가 (예: 사려 깊은 수다)"><button type="button" class="btn btn-primary btn-sm" id="bl-add">검색</button></div>
       </div>
+      <div class="bl-status" id="bl-status" hidden></div>
       <div class="bl-wrap"><table class="bl-table"><thead><tr><th></th><th>제목</th><th>저자</th><th>출판사</th><th>ISBN</th><th>재고</th><th></th></tr></thead><tbody id="bl-body"></tbody></table></div>
       <p class="bl-empty muted" id="bl-empty">아직 추가된 책이 없습니다. 촬영하거나 제목으로 검색해 추가하세요.</p>
       <div class="modal-actions">
@@ -1164,15 +1165,27 @@ const App = (() => {
       pm.q('#bl-pc').addEventListener('click', pm.close);
     }
 
-    async function handleImage(file) {
+    function setStatus(msg, kind) {
+      const el = m.q('#bl-status'); if (!el) return;
+      if (!msg) { el.hidden = true; el.textContent = ''; return; }
+      el.hidden = false; el.textContent = msg; el.className = 'bl-status' + (kind ? ' bl-status-' + kind : '');
+    }
+    function flashSearch() { const q = m.q('#bl-q'); if (!q) return; q.classList.add('bl-flash'); q.focus(); setTimeout(() => q.classList.remove('bl-flash'), 1400); }
+
+    async function handleImage(file, idx, total) {
+      const tag = total > 1 ? ` (${idx}/${total})` : '';
+      setStatus(`⏳ 사진 분석 중…${tag}`);
       let img, url;
-      try { url = URL.createObjectURL(file); img = await loadImgEl(url); } catch (_) { try { URL.revokeObjectURL(url); } catch (__) {} return UI.toast('이미지를 열 수 없습니다', 'error'); }
-      let found = []; try { found = await window.ISBN.scanMulti(img); } catch (_) {}
+      try { url = URL.createObjectURL(file); img = await loadImgEl(url); }
+      catch (_) { try { URL.revokeObjectURL(url); } catch (__) {} setStatus('⚠️ 이미지를 열 수 없습니다', 'bad'); return 0; }
+      let found = [];
+      try { found = await Promise.race([window.ISBN.scanMulti(img), new Promise((r) => setTimeout(() => r([]), 15000))]); } catch (_) {}
       URL.revokeObjectURL(url);
       const codes = [...new Set(found.map((f) => f.code).filter((c) => window.ISBN.isBookIsbn(c)))];
-      if (!codes.length) return UI.toast('바코드를 못 찾았습니다. 제목으로 추가하세요.', 'info');
+      if (!codes.length) { setStatus('⚠️ 이 사진에서 바코드를 못 찾았어요. 책등만 보이면 아래 “제목으로 추가”로 검색해 넣으세요.', 'bad'); flashSearch(); return 0; }
+      setStatus(`⏳ 교보에서 도서정보 채우는 중… (바코드 ${codes.length}개)`);
       let added = 0; for (const c of codes) { if (await resolveIsbn(c)) added++; }
-      if (added) UI.toast(`${added}권 추가됨`, 'success');
+      return added;
     }
 
     function exportCsv() {
@@ -1187,7 +1200,12 @@ const App = (() => {
       a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
     }
 
-    cam.addEventListener('change', async () => { const files = [...cam.files]; cam.value = ''; for (const f of files) await handleImage(f); });
+    cam.addEventListener('change', async () => {
+      const files = [...cam.files]; cam.value = ''; if (!files.length) return;
+      let added = 0;
+      for (let i = 0; i < files.length; i++) added += await handleImage(files[i], i + 1, files.length);
+      if (added) setStatus(`✓ ${added}권 추가됨`, 'ok');
+    });
     m.q('#bl-shoot').addEventListener('click', () => { try { cam.click(); } catch (_) {} });
     m.q('#bl-add').addEventListener('click', () => { const q = m.q('#bl-q'); searchAdd(q.value); q.value = ''; q.focus(); });
     m.q('#bl-q').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); m.q('#bl-add').click(); } });
