@@ -300,6 +300,7 @@ const App = (() => {
           </div>
           <button class="btn btn-primary btn-sm" id="upload-btn" title="허용: ${state.allowedExt.join(' · ')}">⬆️ <span class="label">업로드</span></button>
           <button class="btn btn-accent btn-sm" id="camera-btn" title="사진 촬영해서 업로드">📷 <span class="label">촬영</span></button>
+          <button class="btn btn-secondary btn-sm" id="smart-btn" title="파일명(지점·날짜)으로 폴더를 추천해 업로드">🧭 <span class="label">추천</span></button>
           <button class="btn btn-secondary btn-sm" id="new-folder">📂 <span class="label">새 폴더</span></button>
           <input type="file" id="file-input" multiple hidden accept="${state.allowedExt.map((e) => '.' + e).join(',')}">
           <input type="file" id="cam-input" accept="image/*" capture="environment" multiple hidden>
@@ -512,33 +513,76 @@ const App = (() => {
   // 파일명 기반 폴더 추천: 파일명 속 지점명(영업점) + 날짜(YYYYMMDD/YYYY-MM 등)와 매칭되는 폴더를 경로째 추천
   function recommendFolders(fileItems) {
     const folders = (state.treeFolders || []).filter((p) => p && p !== '/');
-    const branches = (state.branches || []).map((b) => b.name).filter(Boolean);
+    const core = (s) => String(s || '').replace(/\s+/g, '').replace(/점$/, ''); // 공백·끝 '점' 제거
+    const branchCores = (state.branches || []).map((b) => core(b.name)).filter((c) => c.length >= 2);
     const score = new Map();
     for (const it of fileItems) {
       const name = String(it.name || '');
-      const branch = branches.find((b) => name.includes(b)) || null;
-      // 파일명 날짜: YYYYMMDD / YYYY-MM-DD / YYYY.MM.DD → 정규화
+      const nameC = core(name);
+      // 장소 토큰: 등록 지점(코어 매칭) + 파일명 선두 토큰(날짜·구분자 앞) — '~점' 유무/미등록 대응
+      const places = new Set(branchCores.filter((bc) => nameC.includes(bc)));
+      const leadC = core((name.split(/[_\-\s]|20\d{2}/)[0] || ''));
+      if (leadC.length >= 2) places.add(leadC);
       const dm = name.match(/(20\d{2})[-_. ]?(0[1-9]|1[0-2])[-_. ]?(0[1-9]|[12]\d|3[01])/);
       const ymd = dm ? dm[1] + dm[2] + dm[3] : null;   // 20251021
       const ym = dm ? dm[1] + dm[2] : null;            // 202510
-      if (!branch && !ymd) continue;                    // 지점·날짜 둘 다 없으면 추천 근거 없음
+      if (!places.size && !ymd) continue;
       for (const p of folders) {
-        if (branch && !p.includes(branch)) continue;    // 파일에 지점명 있으면 그 지점 폴더만
+        const pc = core(p);
+        const placeHit = [...places].some((pl) => pc.includes(pl));
         const pdates = p.match(/20\d{6}/g) || [];        // 폴더 속 8자리 날짜들
         const dateHit = ymd && pdates.includes(ymd);
         const monthHit = ym && pdates.some((d) => d.slice(0, 6) === ym);
         let s = 0;
-        if (!branch) { s = dateHit ? 6 : 0; }            // 지점 없으면 '날짜 완전일치'만 인정
-        else {
-          s = 6;                                         // 지점 일치
-          if (dateHit) s += 5; else if (monthHit) s += 2;
-          else if (ymd) s = 2;                           // 지점만 맞고 날짜 전혀 불일치 → 약한 후보
-        }
+        if (placeHit) { s = 6; if (dateHit) s += 5; else if (monthHit) s += 2; }  // 지점 맞으면 날짜 안 맞아도 후보
+        else if (dateHit) { s = 6; }                     // 지점 못 맞춰도 '날짜 완전일치'면 후보
+        // 지점도 없고 날짜 완전일치도 아니면(월만 일치 등) 추천 안 함 → 노이즈 차단
         if (s > 0) score.set(p, (score.get(p) || 0) + s);
       }
     }
-    // 임계값 5 이상만 추천(연/월만 걸린 노이즈·다른 날짜 제거). 없으면 아무것도 안 뜸.
-    return [...score.entries()].filter(([, s]) => s >= 5).sort((a, b) => b[1] - a[1]).slice(0, 5).map((e) => e[0]);
+    return [...score.entries()].filter(([, s]) => s >= 6).sort((a, b) => b[1] - a[1]).slice(0, 6).map((e) => e[0]);
+  }
+
+  // 추천 업로드: 파일 선택 → 파일명으로 폴더 추천 → 파일별 대상 확인/수정 후 업로드
+  function pickForSmartUpload() {
+    const inp = document.createElement('input');
+    inp.type = 'file'; inp.multiple = true; inp.accept = (state.allowedExt || []).map((e) => '.' + e).join(','); inp.style.display = 'none';
+    document.body.appendChild(inp);
+    inp.addEventListener('change', () => { const files = [...inp.files]; inp.remove(); if (files.length) smartUpload(files); });
+    inp.click();
+  }
+  function smartUpload(files) {
+    const esc = UI.escapeHtml;
+    const rows = files.map((f) => ({ file: f, target: recommendFolders([{ name: f.name }])[0] || state.folder }));
+    const allFolders = ['/'].concat((state.treeFolders || []).slice().sort((a, b) => a.localeCompare(b, 'ko')));
+    const optHtml = (sel) => allFolders.map((p) => `<option value="${esc(p)}"${p === sel ? ' selected' : ''}>${esc(prettyPath(p))}</option>`).join('');
+    const recN = rows.filter((r) => r.target !== state.folder).length;
+    const list = rows.map((r, i) => `<div class="su-row">
+        <span class="ic">${UI.fileIcon(r.file.name)}</span>
+        <span class="su-name" title="${esc(r.file.name)}">${esc(r.file.name)}</span>
+        <select class="input su-sel" data-i="${i}">${optHtml(r.target)}</select>
+      </div>`).join('');
+    const m = UI.modal(`<h3>🧭 추천 업로드</h3><p class="muted" style="font-size:12px;margin:-8px 0 12px">파일명(지점·날짜)으로 폴더를 추천했습니다${recN ? ` · ${recN}개 추천됨` : ''}. 확인/수정 후 업로드하세요.</p>
+      <div class="su-list">${list}</div>
+      <div class="modal-actions"><button class="btn btn-ghost" id="su-c">취소</button><button class="btn btn-primary" id="su-go">⬆️ ${files.length}개 업로드</button></div>`);
+    m.el.querySelector('.modal').classList.add('modal-wide');
+    m.el.querySelectorAll('.su-sel').forEach((s) => s.addEventListener('change', () => { rows[+s.dataset.i].target = s.value; }));
+    m.q('#su-c').addEventListener('click', m.close);
+    m.q('#su-go').addEventListener('click', async () => {
+      m.close();
+      const groups = new Map();
+      for (const r of rows) { const k = r.target || '/'; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(r.file); }
+      UI.toast(`${files.length}개 업로드 중… (백그라운드)`, 'info');
+      let ok = 0, bad = 0;
+      for (const [folder, fs] of groups) {
+        const fd = new FormData(); fd.append('folder', folder);
+        for (const f of fs) fd.append('file', f);
+        try { const r = await API.upload(fd, state.ownerId); const rj = (r && r.rejected && r.rejected.length) || 0; ok += fs.length - rj; bad += rj; }
+        catch (_) { bad += fs.length; }
+      }
+      UI.toast(`추천 업로드 완료 ✅ ${ok}개${bad ? ` · ${bad}개 실패/차단` : ''}`, bad ? 'error' : 'success');
+      loadAll();
+    });
   }
 
   function listHTML() {
@@ -588,6 +632,7 @@ const App = (() => {
     const cam = document.getElementById('cam-input');
     document.getElementById('camera-btn').addEventListener('click', () => cam.click());
     cam.addEventListener('change', () => { if (cam.files.length) cameraReviewModal([...cam.files]); cam.value = ''; });
+    document.getElementById('smart-btn')?.addEventListener('click', pickForSmartUpload);
     document.getElementById('new-folder').addEventListener('click', newFolderModal);
     document.getElementById('nav-back').addEventListener('click', navBack);
     document.getElementById('nav-fwd').addEventListener('click', navForward);
@@ -1047,12 +1092,14 @@ const App = (() => {
     const m = UI.modal(`<h3>⬆️ 업로드</h3>
       <div class="upload-sheet">
         <button class="btn btn-primary" id="us-file">📁 파일 선택</button>
+        <button class="btn btn-secondary" id="us-smart">🧭 추천 업로드 <span class="muted" style="font-weight:400;font-size:12px">· 파일명으로 폴더 추천</span></button>
         <button class="btn btn-accent" id="us-cam">📷 사진 촬영</button>
         ${window.ISBN ? `<button class="btn btn-secondary" id="us-scan">📷 바코드 단건 연속 촬영</button>` : ''}
         ${window.ISBN ? `<button class="btn btn-secondary" id="us-books">📷 바코드 다건 촬영</button>` : ''}
       </div>
       <div class="modal-actions"><button class="btn btn-ghost" id="us-cancel">취소</button></div>`);
     m.q('#us-file').addEventListener('click', () => { m.close(); document.getElementById('file-input')?.click(); });
+    m.q('#us-smart').addEventListener('click', () => { m.close(); pickForSmartUpload(); });
     m.q('#us-cam').addEventListener('click', () => { m.close(); document.getElementById('cam-input')?.click(); });
     m.q('#us-scan')?.addEventListener('click', () => { m.close(); continuousBarcodeCapture(); });
     m.q('#us-books')?.addEventListener('click', () => { m.close(); multiBarcodeCapture(); });

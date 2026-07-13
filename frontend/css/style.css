@@ -632,6 +632,12 @@ th { background: var(--bg); font-weight: 700; color: var(--text-muted); font-siz
 .rec-row:hover { background: rgba(6, 214, 160, 0.18); }
 .rec-path { font-size: 13px; }
 
+/* 추천 업로드 */
+.su-list { max-height: 55vh; overflow: auto; display: flex; flex-direction: column; gap: 6px; }
+.su-row { display: flex; align-items: center; gap: 8px; }
+.su-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.su-sel { max-width: 46%; flex-shrink: 0; height: 34px; font-size: 13px; }
+
 /* 바코드 다건 촬영 상태 표시 */
 .bl-status { margin: 0 0 10px; padding: 8px 12px; border-radius: 8px; font-size: 13px; background: var(--bg); color: var(--text-muted); }
 .bl-status-ok { background: rgba(6, 214, 160, 0.14); color: #06845f; }
