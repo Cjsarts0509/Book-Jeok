@@ -443,6 +443,7 @@ const App = (() => {
           <div class="mcard-main">
             <div class="mcard-name"><span class="ic">${UI.fileIcon(f.name)}</span> ${esc(f.name)}${updateBadge(f, false)}</div>
             <div class="mcard-sub">${UI.bytes(f.size)} · ${UI.date(f.createdAt)}</div>
+            ${state.search.on ? `<div class="mcard-sub mcard-path" data-goto="${esc(f.folder || '/')}">📁 ${esc(prettyPath(f.folder))}</div>` : ''}
             ${tagChips(f.tags)}
           </div>
           ${favBtn(false, f.id, f.fav)}
@@ -505,13 +506,41 @@ const App = (() => {
     return `<div class="file-grid">${folders}${files}</div>`;
   }
 
+  // 파일 폴더 경로를 보기 좋게 (홈 / 세그먼트 › ...)
+  const prettyPath = (folder) => (!folder || folder === '/') ? '🏠 홈' : folder.split('/').filter(Boolean).join(' › ');
+
+  // 파일명 기반 폴더 추천: 파일명 속 지점명(영업점) + 날짜(YYYYMMDD/YYYY-MM 등)와 매칭되는 폴더를 경로째 추천
+  function recommendFolders(fileItems) {
+    const folders = (state.treeFolders || []).filter((p) => p && p !== '/');
+    const branches = (state.branches || []).map((b) => b.name).filter(Boolean);
+    const score = new Map();
+    for (const it of fileItems) {
+      const name = String(it.name || '');
+      const branch = branches.find((b) => name.includes(b));
+      const dm = name.match(/(20\d{2})[-_. ]?(0[1-9]|1[0-2])[-_. ]?(0[1-9]|[12]\d|3[01])/) || name.match(/(20\d{2})[-_. ]?(0[1-9]|1[0-2])/);
+      const y = dm ? dm[1] : null, mo = dm ? dm[2] : null;
+      if (!branch && !y) continue;
+      for (const p of folders) {
+        let s = 0;
+        if (branch && p.includes(branch)) s += 5;
+        if (y && p.includes(y)) s += 2;
+        if (y && mo && (p.includes(y + '-' + mo) || p.includes(y + mo) || p.includes(y + '.' + mo))) s += 2;
+        if (mo && p.includes(mo + '월')) s += 1;
+        if (s > 0) score.set(p, (score.get(p) || 0) + s);
+      }
+    }
+    return [...score.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5).map((e) => e[0]);
+  }
+
   function listHTML() {
     const isSel = (key) => state.selected.has(key);
     const folders = sortItems(filteredFolders(), true).map((f) => {
       const key = `folder:${f.path}`;
+      const par = f.path.replace(/\/[^/]*$/, '') || '/';
       return `<tr data-folder-row="${UI.escapeHtml(f.path)}" data-row-key="${UI.escapeHtml(key)}" data-drop-folder="${UI.escapeHtml(f.path)}" draggable="true" class="${isSel(key) ? 'sel' : ''}">
         <td><input type="checkbox" class="rowcheck" data-sel-folder="${UI.escapeHtml(f.path)}" data-name="${UI.escapeHtml(f.name)}" ${isSel(key) ? 'checked' : ''}></td>
         <td class="open-cell name-cell" data-open="${UI.escapeHtml(f.path)}" title="더블클릭하여 열기">${favBtn(true, f.path, f.fav)}<span class="ic${f.color ? ' tint' : ''}" style="${folderIcoStyle(f.color)}">${f.icon || '📁'}</span> ${UI.escapeHtml(f.name)}${updateBadge(f, true)}</td>
+        <td class="path-cell" data-goto="${UI.escapeHtml(par)}" title="${UI.escapeHtml(par)}">${UI.escapeHtml(prettyPath(par))}</td>
         <td class="num muted" data-label="크기">${UI.bytes(f.size)}</td>
         <td class="num muted" data-label="등록">${f.createdAt ? UI.date(f.createdAt) : '—'}</td>
         <td class="num muted" data-label="수정">${f.noteUpdatedAt ? UI.date(f.noteUpdatedAt) : '—'}</td>
@@ -524,6 +553,7 @@ const App = (() => {
       return `<tr data-file="${f.id}" data-row-key="${UI.escapeHtml(key)}" draggable="true" class="${isSel(key) ? 'sel' : ''}">
         <td><input type="checkbox" class="rowcheck" data-sel-file="${f.id}" data-name="${UI.escapeHtml(f.name)}" ${isSel(key) ? 'checked' : ''}></td>
         <td class="name-cell">${favBtn(false, f.id, f.fav)}<span class="ic">${UI.fileIcon(f.name)}</span> ${UI.escapeHtml(f.name)}${updateBadge(f, false)}${tagChips(f.tags)}</td>
+        <td class="path-cell" data-goto="${UI.escapeHtml(f.folder || '/')}" title="${UI.escapeHtml(f.folder || '/')}">${UI.escapeHtml(prettyPath(f.folder))}</td>
         <td class="num muted" data-label="크기">${UI.bytes(f.size)}</td>
         <td class="num muted" data-label="등록">${UI.date(f.createdAt)}</td>
         <td class="num muted" data-label="수정">${UI.date(f.updatedAt || f.createdAt)}</td>
@@ -536,7 +566,7 @@ const App = (() => {
     const total = vfo.length + vf.length;
     const allSel = total > 0 && vfo.every((f) => isSel(`folder:${f.path}`)) && vf.every((f) => isSel(`file:${f.id}`));
     return `<div class="table-wrap fade-in"><table class="filetable">
-      <thead><tr><th style="width:34px"><input type="checkbox" id="check-all" title="전체선택/해제" ${allSel ? 'checked' : ''}></th>${th('name', '이름')}${th('size', '크기', 'width:84px')}${th('createdAt', '등록일', 'width:96px')}${th('updatedAt', '수정일', 'width:96px')}${th('note', '비고')}<th style="width:70px"></th></tr></thead>
+      <thead><tr><th style="width:34px"><input type="checkbox" id="check-all" title="전체선택/해제" ${allSel ? 'checked' : ''}></th>${th('name', '이름')}<th class="path-col">경로</th>${th('size', '크기', 'width:84px')}${th('createdAt', '등록일', 'width:96px')}${th('updatedAt', '수정일', 'width:96px')}${th('note', '비고')}<th style="width:70px"></th></tr></thead>
       <tbody>${folders}${files}</tbody></table></div>`;
   }
 
@@ -778,6 +808,7 @@ const App = (() => {
       el.addEventListener('drop', (e) => { if (!state.drag) return; e.preventDefault(); el.classList.remove('drop-target'); moveDraggedTo(el.dataset.dropFolder); });
     });
     // 파일 액션
+    box.querySelectorAll('.path-cell[data-goto], .mcard-path[data-goto]').forEach((el) => el.addEventListener('click', (e) => { e.stopPropagation(); goTo(el.dataset.goto); }));
     box.querySelectorAll('[data-preview]').forEach((el) => el.addEventListener('click', (e) => { e.stopPropagation(); openPreview(el.dataset.preview); }));
     box.querySelectorAll('[data-dl]').forEach((el) => el.addEventListener('click', (e) => { e.stopPropagation(); downloadFile(el.dataset.dl); }));
     box.querySelectorAll('[data-del]').forEach((el) => el.addEventListener('click', (e) => { e.stopPropagation(); deleteFile(el.dataset.del); }));
@@ -937,6 +968,7 @@ const App = (() => {
     const note = isCopy && nFolders ? `<p class="muted" style="font-size:12px;margin-bottom:8px">※ 복사는 파일만 됩니다. 선택한 폴더 ${nFolders}개는 제외됩니다.</p>` : '';
     const m = UI.modal(`<h3>선택 항목 ${verb}</h3>
       <p class="muted" style="font-size:13px;margin-bottom:8px">아래에서 ${verb}할 폴더를 선택하세요.</p>${note}
+      <div class="rec-box" id="rec-box"></div>
       <div class="folder-picker" id="picker"></div>
       <div class="picked-bar">${verb} 위치: <b id="picked">${UI.escapeHtml(picked())}</b></div>
       <div class="modal-actions"><button class="btn btn-ghost" id="c">취소</button><button class="btn btn-primary" id="ok">여기로 ${verb}</button></div>`);
@@ -961,6 +993,17 @@ const App = (() => {
       box.querySelectorAll('.pick-row:not(.disabled)').forEach((r) => r.addEventListener('click', () => { dest = r.dataset.path; m.q('#picked').textContent = picked(); drawPicker(); }));
     }
     drawPicker();
+    // 파일명 기반 폴더 추천 (지점명·날짜 매칭) — 경로째 보여줌
+    const recs = recommendFolders(items.filter((i) => i.type === 'file'));
+    if (recs.length) {
+      m.q('#rec-box').innerHTML = `<div class="rec-title">📂 파일명 기반 추천 위치 <span class="muted">(눌러서 선택)</span></div>`
+        + recs.map((p) => `<button type="button" class="rec-row" data-rec="${UI.escapeHtml(p)}"><span class="pk-ic">📁</span><span class="rec-path">${UI.escapeHtml(prettyPath(p))}</span></button>`).join('');
+      m.q('#rec-box').querySelectorAll('[data-rec]').forEach((b) => b.addEventListener('click', () => {
+        dest = b.dataset.rec; m.q('#picked').textContent = picked();
+        for (const seg of pathChain(dest)) openSet.add(seg);
+        drawPicker();
+      }));
+    }
     m.q('#c').addEventListener('click', m.close);
     m.q('#ok').addEventListener('click', async () => {
       const files = items.filter((i) => i.type === 'file'), folders = items.filter((i) => i.type === 'folder');

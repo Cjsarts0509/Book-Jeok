@@ -616,6 +616,21 @@ th { background: var(--bg); font-weight: 700; color: var(--text-muted); font-siz
 .modal.modal-wide { max-width: 720px; }
 @media (max-width: 768px) { .modal.modal-wide { max-width: 100%; } }
 
+/* 경로 칼럼 (윈도우식 위치 표시) + 이름 칼럼 축소 */
+.filetable .path-col { width: 190px; }
+.filetable td.name-cell { max-width: 340px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.filetable td.path-cell { color: var(--text-muted); font-size: 12px; cursor: pointer; max-width: 190px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.filetable td.path-cell:hover { color: var(--secondary); text-decoration: underline; }
+.mcard-path { cursor: pointer; color: var(--secondary); }
+
+/* 파일명 기반 폴더 추천 (이동/복사 모달) */
+.rec-box:empty { display: none; }
+.rec-box { margin-bottom: 10px; }
+.rec-title { font-size: 12px; color: var(--text-muted); margin-bottom: 6px; }
+.rec-row { display: flex; align-items: center; gap: 7px; width: 100%; text-align: left; padding: 8px 10px; margin-bottom: 5px; border: 1px solid var(--accent); border-radius: 8px; background: rgba(6, 214, 160, 0.08); cursor: pointer; }
+.rec-row:hover { background: rgba(6, 214, 160, 0.18); }
+.rec-path { font-size: 13px; }
+
 /* 바코드 다건 촬영 상태 표시 */
 .bl-status { margin: 0 0 10px; padding: 8px 12px; border-radius: 8px; font-size: 13px; background: var(--bg); color: var(--text-muted); }
 .bl-status-ok { background: rgba(6, 214, 160, 0.14); color: #06845f; }
