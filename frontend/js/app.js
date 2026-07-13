@@ -996,14 +996,14 @@ const App = (() => {
       <div class="upload-sheet">
         <button class="btn btn-primary" id="us-file">📁 파일 선택</button>
         <button class="btn btn-accent" id="us-cam">📷 사진 촬영</button>
-        ${window.ISBN ? `<button class="btn btn-secondary" id="us-scan">📚 바코드 연속 촬영</button>` : ''}
-        ${window.ISBN ? `<button class="btn btn-secondary" id="us-books">📖 도서 목록 만들기</button>` : ''}
+        ${window.ISBN ? `<button class="btn btn-secondary" id="us-scan">📷 바코드 단건 연속 촬영</button>` : ''}
+        ${window.ISBN ? `<button class="btn btn-secondary" id="us-books">📷 바코드 다건 촬영</button>` : ''}
       </div>
       <div class="modal-actions"><button class="btn btn-ghost" id="us-cancel">취소</button></div>`);
     m.q('#us-file').addEventListener('click', () => { m.close(); document.getElementById('file-input')?.click(); });
     m.q('#us-cam').addEventListener('click', () => { m.close(); document.getElementById('cam-input')?.click(); });
     m.q('#us-scan')?.addEventListener('click', () => { m.close(); continuousBarcodeCapture(); });
-    m.q('#us-books')?.addEventListener('click', () => { m.close(); bookListScan(); });
+    m.q('#us-books')?.addEventListener('click', () => { m.close(); multiBarcodeCapture(); });
     m.q('#us-cancel').addEventListener('click', m.close);
   }
 
@@ -1016,7 +1016,7 @@ const App = (() => {
     const cam = document.createElement('input');
     cam.type = 'file'; cam.accept = 'image/*'; cam.capture = 'environment'; cam.style.display = 'none';
     document.body.appendChild(cam);
-    const m = UI.modal(`<h3>📚 바코드 연속 촬영 <span class="muted" style="font-size:13px;font-weight:400">· 찍으면 자동 저장</span></h3>
+    const m = UI.modal(`<h3>📷 바코드 단건 연속 촬영 <span class="muted" style="font-size:13px;font-weight:400">· 한 장에 한 권씩 자동 저장</span></h3>
       <div id="cap-pick" class="cap-pick" hidden></div>
       <button type="button" class="btn btn-primary cap-shoot" id="cap-shoot">📷 촬영</button>
       <div class="scan-list" id="cap-list"></div>
@@ -1091,209 +1091,121 @@ const App = (() => {
   // ── 책장/도서 스캔 → 도서 목록 테이블 (바코드 우선 · 제목검색 폴백 · CSV 내보내기) ──────────
   //  · 바코드가 보이면 scanMulti로 읽어 ISBN→교보 상세로 자동 채움
   //  · 바코드가 없으면(책등 사진 등) 제목으로 검색 → 후보 중 선택해 추가
-  function bookListScan() {
-    const rows = [];            // {isbn,title,subtitle,author,publisher,category,price,stock,img}
-    const seen = new Set();
+  // ── 바코드 다건 촬영: 한 장에 여러 바코드면 각각 파일 생성(ISBN명 저장), 바코드 없으면 책등 OCR→검색→선택→저장 ──
+  function multiBarcodeCapture() {
+    if (!window.ISBN) return UI.toast('바코드 모듈을 사용할 수 없습니다', 'error');
+    const shots = []; let seq = 0;
     const esc = UI.escapeHtml;
-    const cover = (isbn, size) => (isbn ? `https://contents.kyobobook.co.kr/sih/fit-in/${size}/pdt/${isbn}.jpg` : '');
+    const cover = (isbn) => (isbn ? `https://contents.kyobobook.co.kr/sih/fit-in/80x0/pdt/${isbn}.jpg` : '');
     const cam = document.createElement('input');
     cam.type = 'file'; cam.accept = 'image/*'; cam.capture = 'environment'; cam.multiple = true; cam.style.display = 'none';
     document.body.appendChild(cam);
-    const m = UI.modal(`<h3>📖 도서 목록 만들기 <span class="muted" style="font-size:13px;font-weight:400">· 바코드 우선, 안 되면 제목 검색</span></h3>
-      <div class="bl-tools">
-        <button type="button" class="btn btn-secondary btn-sm" id="bl-shoot">📷 촬영·사진 <span class="muted" style="font-weight:400">(바코드→책등)</span></button>
-        <div class="bl-search"><input class="input" id="bl-q" placeholder="제목으로 추가 (예: 사려 깊은 수다)"><button type="button" class="btn btn-primary btn-sm" id="bl-add">검색</button></div>
-      </div>
-      <div class="bl-status" id="bl-status" hidden></div>
-      <div class="bl-wrap"><table class="bl-table"><thead><tr><th></th><th>제목</th><th>저자</th><th>출판사</th><th>ISBN</th><th>재고</th><th></th></tr></thead><tbody id="bl-body"></tbody></table></div>
-      <p class="bl-empty muted" id="bl-empty">아직 추가된 책이 없습니다. 촬영하거나 제목으로 검색해 추가하세요.</p>
-      <div class="modal-actions">
-        <span class="muted" id="bl-count" style="flex:1;font-size:13px"></span>
-        <button class="btn btn-ghost" id="bl-csv">⬇️ CSV</button>
-        <button class="btn btn-primary" id="bl-done">완료</button>
-      </div>`, { onClose: () => { try { cam.remove(); } catch (_) {} } });
+    const m = UI.modal(`<h3>📷 바코드 다건 촬영 <span class="muted" style="font-size:13px;font-weight:400">· 한 장에 여러 권 · ISBN 이름으로 저장</span></h3>
+      <button type="button" class="btn btn-primary cap-shoot" id="mb-shoot">📷 촬영·사진</button>
+      <div class="bl-status" id="mb-status" hidden></div>
+      <div class="scan-list" id="mb-list"></div>
+      <div class="modal-actions"><span style="flex:1"></span><button class="btn btn-primary" id="mb-done">완료</button></div>`,
+      { onClose: () => { try { cam.remove(); } catch (_) {} loadAll(); } });
     m.el.querySelector('.modal').classList.add('modal-wide');
 
-    function render() {
-      const body = m.q('#bl-body');
-      m.q('#bl-empty').style.display = rows.length ? 'none' : '';
-      body.innerHTML = rows.map((r, i) => `<tr>
-        <td>${r.img ? `<img class="bl-cover" src="${esc(r.img)}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">` : '<span class="bl-cover bl-cover-ph">📕</span>'}</td>
-        <td><div class="bl-title">${esc(r.title || '(제목 미상)')}</div>${r.subtitle ? `<div class="bl-sub muted">${esc(r.subtitle)}</div>` : ''}</td>
-        <td>${esc(r.author || '')}</td>
-        <td>${esc(r.publisher || '')}</td>
-        <td class="bl-isbn">${esc(r.isbn || '')}</td>
-        <td>${esc(r.stock || '')}</td>
-        <td><button type="button" class="bl-del" data-i="${i}" title="삭제">✕</button></td>
-      </tr>`).join('');
-      m.q('#bl-count').textContent = rows.length ? `${rows.length}권` : '';
-      body.querySelectorAll('.bl-del').forEach((b) => b.addEventListener('click', () => {
-        rows.splice(+b.dataset.i, 1); seen.clear(); rows.forEach((r) => r.isbn && seen.add(r.isbn)); render();
-      }));
+    function setStatus(msg, kind) { const el = m.q('#mb-status'); if (!el) return; if (!msg) { el.hidden = true; el.textContent = ''; return; } el.hidden = false; el.textContent = msg; el.className = 'bl-status' + (kind ? ' bl-status-' + kind : ''); }
+    function feedback() { try { const A = window.AudioContext || window.webkitAudioContext; if (A) { const ac = new A(); const o = ac.createOscillator(); const g = ac.createGain(); o.connect(g); g.connect(ac.destination); o.frequency.value = 880; g.gain.value = 0.06; o.start(); setTimeout(() => { o.stop(); ac.close(); }, 80); } } catch (_) {} if (navigator.vibrate) try { navigator.vibrate(40); } catch (_) {} }
+    const stLabel = (s) => ({ saving: '⏳ 저장중', done: '✓ 저장됨', dup: '· 중복', error: '✗ 실패' }[s] || s);
+    function renderList() {
+      m.q('#mb-list').innerHTML = shots.length
+        ? shots.slice().reverse().map((x) => `<div class="cap-row">${x.thumb ? `<img class="cap-thumb" src="${x.thumb}" alt="">` : '<span class="cap-thumb cap-thumb-ph">📕</span>'}<span class="cap-code">${esc(x.name || '…')}</span><span class="cap-status cap-${x.status}">${stLabel(x.status)}</span></div>`).join('')
+        : '<p class="muted" style="text-align:center;padding:14px">📷 촬영해서 책을 담으세요 (한 장에 여러 권도 OK)</p>';
+    }
+    function thumbData(img) { const s = Math.min(1, 90 / Math.max(img.naturalWidth, img.naturalHeight)); const c = document.createElement('canvas'); c.width = Math.max(1, Math.round(img.naturalWidth * s)); c.height = Math.max(1, Math.round(img.naturalHeight * s)); c.getContext('2d').drawImage(img, 0, 0, c.width, c.height); return c.toDataURL('image/jpeg', 0.6); }
+    function resizeToDataUrl(file, maxDim, q) { return new Promise((res, rej) => { const url = URL.createObjectURL(file); const im = new Image(); im.onload = () => { const s = Math.min(1, maxDim / Math.max(im.naturalWidth, im.naturalHeight)); const w = Math.max(1, Math.round(im.naturalWidth * s)), h = Math.max(1, Math.round(im.naturalHeight * s)); const c = document.createElement('canvas'); c.width = w; c.height = h; c.getContext('2d').drawImage(im, 0, 0, w, h); try { URL.revokeObjectURL(url); } catch (_) {} res(c.toDataURL('image/jpeg', q)); }; im.onerror = () => { try { URL.revokeObjectURL(url); } catch (_) {} rej(new Error('load fail')); }; im.src = url; }); }
+
+    const savedIsbns = new Set();
+    async function saveFile(file, isbn, thumb) {
+      if (savedIsbns.has(isbn)) { shots.push({ id: ++seq, name: isbn, status: 'dup', thumb }); renderList(); return; }
+      savedIsbns.add(isbn);
+      const ext = ((file.name.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '')) || 'jpg';
+      const shot = { id: ++seq, name: `${isbn}.${ext}`, status: 'saving', thumb };
+      shots.push(shot); renderList(); feedback();
+      const fd = new FormData(); fd.append('folder', state.folder);
+      fd.append('file', new File([file], `${isbn}.${ext}`, { type: file.type || 'image/jpeg' }));
+      try { const r = await API.upload(fd, state.ownerId); shot.status = (r && r.rejected && r.rejected.length) ? 'error' : 'done'; }
+      catch (_) { shot.status = 'error'; }
+      renderList();
     }
 
-    function addRow(r) {
-      if (r.isbn && seen.has(r.isbn)) { UI.toast('이미 추가된 책입니다', 'info'); return false; }
-      if (r.isbn) seen.add(r.isbn);
-      rows.push(r); render(); return true;
-    }
-    const rowFrom = (d, isbn) => ({
-      isbn: isbn || d.isbn || '', title: d.title || '', subtitle: d.subtitle || '',
-      author: d.author || '', publisher: d.publisher || '', category: d.category || d.class_nm || '',
-      price: d.price || '', stock: d.stock || '', img: cover(isbn || d.isbn, '120x0'),
-    });
-
-    async function resolveIsbn(isbn) {
-      try {
-        const d = await API.bookDetail(isbn);
-        if (d && d.status === 'success') return addRow(rowFrom(d, isbn));
-      } catch (_) {}
-      return addRow({ isbn, title: '', subtitle: '', author: '', publisher: '', category: '', price: '', stock: '', img: cover(isbn, '120x0') });
-    }
-
-    async function searchAdd(keyword) {
-      keyword = (keyword || '').trim(); if (!keyword) return;
-      let data; try { data = await API.bookSearch(keyword, 8); } catch (e) { return UI.toast('검색 실패: ' + e.message, 'error'); }
-      const items = (data && data.items) || [];
-      if (!items.length) return UI.toast('검색 결과가 없습니다', 'info');
-      const caps = items.map((it, k) => `<button type="button" class="bl-cand" data-k="${k}">
-        <img class="bl-cover" src="${esc(cover(it.isbn, '80x0'))}" alt="" onerror="this.style.visibility='hidden'">
-        <span class="bl-cand-t"><b>${esc(it.title)}</b><span class="muted">${esc(it.author || '')}${it.publisher ? ' · ' + esc(it.publisher) : ''}</span></span></button>`).join('');
-      const pm = UI.modal(`<h3>📚 "${esc(keyword)}" 검색 결과</h3><p class="muted" style="font-size:13px">추가할 책을 선택하세요</p><div class="bl-cands">${caps}</div><div class="modal-actions"><button class="btn btn-ghost" id="bl-pc">취소</button></div>`);
-      pm.el.querySelector('.modal').classList.add('modal-wide');
-      pm.el.querySelectorAll('.bl-cand').forEach((b) => b.addEventListener('click', () => { const it = items[+b.dataset.k]; addRow(rowFrom(it, it.isbn)); pm.close(); }));
-      pm.q('#bl-pc').addEventListener('click', pm.close);
-    }
-
-    function setStatus(msg, kind) {
-      const el = m.q('#bl-status'); if (!el) return;
-      if (!msg) { el.hidden = true; el.textContent = ''; return; }
-      el.hidden = false; el.textContent = msg; el.className = 'bl-status' + (kind ? ' bl-status-' + kind : '');
-    }
-    function flashSearch() { const q = m.q('#bl-q'); if (!q) return; q.classList.add('bl-flash'); q.focus(); setTimeout(() => q.classList.remove('bl-flash'), 1400); }
-
-    async function handleImage(file, idx, total) {
-      const tag = total > 1 ? ` (${idx}/${total})` : '';
-      setStatus(`⏳ 사진 분석 중…${tag}`);
+    async function handleFile(file) {
       let img, url;
-      try { url = URL.createObjectURL(file); img = await loadImgEl(url); }
-      catch (_) { try { URL.revokeObjectURL(url); } catch (__) {} setStatus('⚠️ 이미지를 열 수 없습니다', 'bad'); return 0; }
-      let found = [];
-      try { found = await Promise.race([window.ISBN.scanMulti(img), new Promise((r) => setTimeout(() => r([]), 15000))]); } catch (_) {}
+      try { url = URL.createObjectURL(file); img = await loadImgEl(url); } catch (_) { setStatus('⚠️ 이미지를 열 수 없습니다', 'bad'); return; }
+      const thumb = thumbData(img);
+      setStatus('⏳ 바코드 인식 중…');
+      let found = []; try { found = await window.ISBN.scanMulti(img); } catch (_) {}
       URL.revokeObjectURL(url);
       const codes = [...new Set(found.map((f) => f.code).filter((c) => window.ISBN.isBookIsbn(c)))];
-      if (!codes.length) { await runOcr(file); return 0; }
-      setStatus(`⏳ 교보에서 도서정보 채우는 중… (바코드 ${codes.length}개)`);
-      let added = 0; for (const c of codes) { if (await resolveIsbn(c)) added++; }
-      return added;
+      if (codes.length) { setStatus(`✓ 바코드 ${codes.length}개 → 각각 저장`, 'ok'); for (const c of codes) await saveFile(file, c, thumb); return; }
+      setStatus('⏳ 바코드 없음 → 책등 제목 인식 중…');
+      await ocrFallback(file, thumb);
     }
 
-    // 이미지 다운스케일 → JPEG dataURL (OCR 전송용, 용량 절감)
-    function resizeToDataUrl(file, maxDim, q) {
-      return new Promise((resolve, reject) => {
-        const url = URL.createObjectURL(file); const im = new Image();
-        im.onload = () => {
-          const s = Math.min(1, maxDim / Math.max(im.naturalWidth, im.naturalHeight));
-          const w = Math.max(1, Math.round(im.naturalWidth * s)), h = Math.max(1, Math.round(im.naturalHeight * s));
-          const c = document.createElement('canvas'); c.width = w; c.height = h;
-          c.getContext('2d').drawImage(im, 0, 0, w, h);
-          try { URL.revokeObjectURL(url); } catch (_) {}
-          resolve(c.toDataURL('image/jpeg', q));
-        };
-        im.onerror = () => { try { URL.revokeObjectURL(url); } catch (_) {} reject(new Error('이미지 로드 실패')); };
-        im.src = url;
-      });
-    }
-
-    // 책등 사진 → Gemini OCR로 제목 인식 → 각 제목 교보 검색 → 확인 모달
-    async function runOcr(file) {
-      setStatus('⏳ 바코드가 없어 책등 제목을 인식하는 중…');
+    async function ocrFallback(file, thumb) {
       let dataUrl;
-      try { dataUrl = await resizeToDataUrl(file, 1600, 0.82); } catch (_) { return setStatus('⚠️ 이미지를 처리할 수 없습니다', 'bad'); }
-      let data;
-      try { data = await API.bookOcr(dataUrl); } catch (e) { return setStatus('⚠️ 인식 실패: ' + (e.data && e.data.message || e.message), 'bad'); }
+      try { dataUrl = await resizeToDataUrl(file, 1600, 0.82); } catch (_) { return setStatus('⚠️ 이미지 처리 실패', 'bad'); }
+      let data; try { data = await API.bookOcr(dataUrl); } catch (e) { return setStatus('⚠️ 인식 실패: ' + (e.data && e.data.message || e.message), 'bad'); }
       const books = (data && data.books) || [];
-      if (!books.length) return setStatus('⚠️ 제목을 인식하지 못했어요. 더 가까이·밝게 찍거나 “제목으로 추가”를 이용하세요.', 'bad');
-      setStatus(`⏳ 인식된 ${books.length}권 교보에서 대조 중…`);
+      if (!books.length) return setStatus('⚠️ 제목 인식 실패 — 더 가까이·밝게 찍어보세요', 'bad');
+      setStatus(`⏳ ${books.length}권 교보 대조 중…`);
       const matched = [];
       for (const b of books) {
         const items = []; const seen = new Set();
-        const tryQ = async (q) => {
-          if (!q) return;
-          try { const s = await API.bookSearch(q, 5); for (const it of ((s && s.items) || [])) if (!seen.has(it.isbn)) { seen.add(it.isbn); items.push(it); } } catch (_) {}
-        };
-        await tryQ(b.title);          // 제목(중간, 가장 큰 글자)
-        await tryQ(b.subtitle);       // 부제(위)도 각각 검색해 후보 합침
-        if (!items.length) await tryQ(b.text);
+        const tryQ = async (q) => { if (!q) return; try { const s = await API.bookSearch(q, 5); for (const it of ((s && s.items) || [])) if (!seen.has(it.isbn)) { seen.add(it.isbn); items.push(it); } } catch (_) {} };
+        await tryQ(b.title); await tryQ(b.subtitle); if (!items.length) await tryQ(b.text);
         matched.push({ detected: b, items, pick: items[0] || null });
       }
       setStatus('');
-      reviewOcr(matched);
+      reviewOcr(matched, file, thumb);
     }
 
-    function reviewOcr(matched) {
+    function reviewOcr(matched, file, thumb) {
       const st = matched.map((x) => ({ detected: x.detected, items: x.items, pick: x.pick, use: !!x.pick }));
-      const rm = UI.modal(`<h3>🔤 인식 결과 확인 <span class="muted" style="font-size:13px;font-weight:400">· ${st.length}권</span></h3>
-        <p class="muted" style="font-size:13px">교보에서 찾은 책을 확인하고 추가하세요. 틀리면 체크 해제하거나 “다른 후보”.</p>
-        <div class="bl-review" id="oc-list"></div>
-        <div class="modal-actions"><span style="flex:1"></span><button class="btn btn-ghost" id="oc-cancel">취소</button><button class="btn btn-primary" id="oc-add">선택 추가</button></div>`);
+      const rm = UI.modal(`<h3>🔤 인식 결과 — 저장할 책 선택 <span class="muted" style="font-size:13px;font-weight:400">· ${st.length}권</span></h3>
+        <p class="muted" style="font-size:13px">선택한 책은 이 사진을 <b>ISBN 이름</b>으로 저장합니다. 틀리면 체크 해제/“다른 후보”.</p>
+        <div class="bl-review" id="mo-list"></div>
+        <div class="modal-actions"><span style="flex:1"></span><button class="btn btn-ghost" id="mo-cancel">취소</button><button class="btn btn-primary" id="mo-save">선택 저장</button></div>`);
       rm.el.querySelector('.modal').classList.add('modal-wide');
-      function renderR() {
-        rm.q('#oc-list').innerHTML = st.map((s, i) => {
+      function rr() {
+        rm.q('#mo-list').innerHTML = st.map((s, i) => {
           const p = s.pick;
           return `<div class="oc-row${s.use && p ? ' oc-on' : ''}">
             <input type="checkbox" class="oc-ck" data-i="${i}" ${s.use && p ? 'checked' : ''} ${p ? '' : 'disabled'}>
-            ${p ? `<img class="bl-cover" src="${esc(cover(p.isbn, '80x0'))}" onerror="this.style.visibility='hidden'" alt="">` : '<span class="bl-cover bl-cover-ph">❓</span>'}
+            ${p ? `<img class="bl-cover" src="${esc(cover(p.isbn))}" onerror="this.style.visibility='hidden'" alt="">` : '<span class="bl-cover bl-cover-ph">❓</span>'}
             <div class="oc-info">
-              ${p ? `<div class="bl-title">${esc(p.title)}</div><div class="muted" style="font-size:12px">${esc(p.author || '')}${p.publisher ? ' · ' + esc(p.publisher) : ''} · ${esc(p.isbn)}</div>`
-                  : `<div class="bl-title">${esc(s.detected.title)}</div><div class="muted" style="font-size:12px">교보에서 못 찾음</div>`}
-              <div class="muted" style="font-size:11px">인식: ${esc(s.detected.title)}${s.detected.subtitle ? ' · 부제 ' + esc(s.detected.subtitle) : ''}${s.detected.author ? ' · ' + esc(s.detected.author) : ''}</div>
+              ${p ? `<div class="bl-title">${esc(p.title)}</div><div class="muted" style="font-size:12px">${esc(p.author || '')}${p.publisher ? ' · ' + esc(p.publisher) : ''} · ${esc(p.isbn)}</div>` : `<div class="bl-title">${esc(s.detected.title)}</div><div class="muted" style="font-size:12px">교보에서 못 찾음</div>`}
+              <div class="muted" style="font-size:11px">인식: ${esc(s.detected.title)}${s.detected.subtitle ? ' · 부제 ' + esc(s.detected.subtitle) : ''}</div>
             </div>
             <button type="button" class="btn btn-ghost btn-sm oc-alt" data-i="${i}">다른 후보</button>
           </div>`;
         }).join('');
-        rm.q('#oc-list').querySelectorAll('.oc-ck').forEach((c) => c.addEventListener('change', () => { st[+c.dataset.i].use = c.checked; renderR(); }));
-        rm.q('#oc-list').querySelectorAll('.oc-alt').forEach((b) => b.addEventListener('click', () => altPick(+b.dataset.i)));
+        rm.q('#mo-list').querySelectorAll('.oc-ck').forEach((c) => c.addEventListener('change', () => { st[+c.dataset.i].use = c.checked; rr(); }));
+        rm.q('#mo-list').querySelectorAll('.oc-alt').forEach((b) => b.addEventListener('click', () => altPick(+b.dataset.i)));
       }
       async function altPick(i) {
         const s = st[i]; let items = s.items;
         if (!items.length) { try { const r = await API.bookSearch(s.detected.title, 8); items = (r && r.items) || []; s.items = items; } catch (_) {} }
         if (!items.length) return UI.toast('후보가 없습니다', 'info');
-        const caps = items.map((it, k) => `<button type="button" class="bl-cand" data-k="${k}"><img class="bl-cover" src="${esc(cover(it.isbn, '80x0'))}" onerror="this.style.visibility='hidden'" alt=""><span class="bl-cand-t"><b>${esc(it.title)}</b><span class="muted">${esc(it.author || '')}${it.publisher ? ' · ' + esc(it.publisher) : ''}</span></span></button>`).join('');
-        const pm = UI.modal(`<h3>다른 후보 선택</h3><div class="bl-cands">${caps}</div><div class="modal-actions"><button class="btn btn-ghost" id="oc-pc">취소</button></div>`);
+        const caps = items.map((it, k) => `<button type="button" class="bl-cand" data-k="${k}"><img class="bl-cover" src="${esc(cover(it.isbn))}" onerror="this.style.visibility='hidden'" alt=""><span class="bl-cand-t"><b>${esc(it.title)}</b><span class="muted">${esc(it.author || '')}${it.publisher ? ' · ' + esc(it.publisher) : ''}</span></span></button>`).join('');
+        const pm = UI.modal(`<h3>다른 후보 선택</h3><div class="bl-cands">${caps}</div><div class="modal-actions"><button class="btn btn-ghost" id="mo-pc">취소</button></div>`);
         pm.el.querySelector('.modal').classList.add('modal-wide');
-        pm.el.querySelectorAll('.bl-cand').forEach((b) => b.addEventListener('click', () => { st[i].pick = items[+b.dataset.k]; st[i].use = true; pm.close(); renderR(); }));
-        pm.q('#oc-pc').addEventListener('click', pm.close);
+        pm.el.querySelectorAll('.bl-cand').forEach((b) => b.addEventListener('click', () => { st[i].pick = items[+b.dataset.k]; st[i].use = true; pm.close(); rr(); }));
+        pm.q('#mo-pc').addEventListener('click', pm.close);
       }
-      rm.q('#oc-add').addEventListener('click', () => { let n = 0; st.forEach((s) => { if (s.use && s.pick && addRow(rowFrom(s.pick, s.pick.isbn))) n++; }); rm.close(); if (n) setStatus(`✓ ${n}권 추가됨`, 'ok'); });
-      rm.q('#oc-cancel').addEventListener('click', rm.close);
-      renderR();
+      rm.q('#mo-save').addEventListener('click', async () => { const chosen = st.filter((s) => s.use && s.pick); rm.close(); for (const s of chosen) await saveFile(file, s.pick.isbn, thumb); });
+      rm.q('#mo-cancel').addEventListener('click', rm.close);
+      rr();
     }
 
-    function exportCsv() {
-      if (!rows.length) return UI.toast('내보낼 책이 없습니다', 'info');
-      const cell = (v) => `"${String(v == null ? '' : v).replace(/"/g, '""')}"`;
-      const lines = [['제목', '부제', '저자', '출판사', 'ISBN', '분류', '가격', '재고'].join(',')]
-        .concat(rows.map((r) => [r.title, r.subtitle, r.author, r.publisher, r.isbn, r.category, r.price, r.stock].map(cell).join(',')));
-      const blob = new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
-      const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
-      const d = new Date(); const p2 = (x) => String(x).padStart(2, '0');
-      a.download = `도서목록_${d.getFullYear()}${p2(d.getMonth() + 1)}${p2(d.getDate())}_${p2(d.getHours())}${p2(d.getMinutes())}.csv`;
-      a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-    }
-
-    cam.addEventListener('change', async () => {
-      const files = [...cam.files]; cam.value = ''; if (!files.length) return;
-      let added = 0;
-      for (let i = 0; i < files.length; i++) added += await handleImage(files[i], i + 1, files.length);
-      if (added) setStatus(`✓ ${added}권 추가됨`, 'ok');
-    });
-    m.q('#bl-shoot').addEventListener('click', () => { try { cam.click(); } catch (_) {} });
-    m.q('#bl-add').addEventListener('click', () => { const q = m.q('#bl-q'); searchAdd(q.value); q.value = ''; q.focus(); });
-    m.q('#bl-q').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); m.q('#bl-add').click(); } });
-    m.q('#bl-csv').addEventListener('click', exportCsv);
-    m.q('#bl-done').addEventListener('click', m.close);
-    render();
+    cam.addEventListener('change', async () => { const files = [...cam.files]; cam.value = ''; for (const f of files) await handleFile(f); });
+    m.q('#mb-shoot').addEventListener('click', () => { try { cam.click(); } catch (_) {} });
+    m.q('#mb-done').addEventListener('click', m.close);
+    renderList();
   }
 
   // ── 바코드 선택: 촬영 사진(참고용)과 함께 감지된 코드를 캡션 목록으로 탭 선택 → Promise<code|null> ──────────
