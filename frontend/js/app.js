@@ -526,6 +526,7 @@ const App = (() => {
       const dm = name.match(/(20\d{2})[-_. ]?(0[1-9]|1[0-2])[-_. ]?(0[1-9]|[12]\d|3[01])/);
       const ymd = dm ? dm[1] + dm[2] + dm[3] : null;   // 20251021
       const ym = dm ? dm[1] + dm[2] : null;            // 202510
+      const yr = dm ? dm[1] : null;                    // 2025
       if (!places.size && !ymd) continue;
       for (const p of folders) {
         const pc = core(p);
@@ -534,8 +535,12 @@ const App = (() => {
         const dateHit = ymd && pdates.includes(ymd);
         const monthHit = ym && pdates.some((d) => d.slice(0, 6) === ym);
         let s = 0;
-        if (placeHit) { s = 6; if (dateHit) s += 5; else if (monthHit) s += 2; }  // 지점 맞으면 날짜 안 맞아도 후보
-        else if (dateHit) { s = 6; }                     // 지점 못 맞춰도 '날짜 완전일치'면 후보
+        if (placeHit) {                                  // 지점 맞으면 후보. 날짜/월/연도로 우선순위(동점 방지)
+          s = 6;
+          if (dateHit) s += 5;
+          else if (monthHit) s += 3;
+          else if (yr && p.includes(yr)) s += 2;         // 같은 연도 폴더 우선 → 다른 연도(2021~) 폴더에 안 밀림
+        } else if (dateHit) { s = 6; }                   // 지점 못 맞춰도 '날짜 완전일치'면 후보
         // 지점도 없고 날짜 완전일치도 아니면(월만 일치 등) 추천 안 함 → 노이즈 차단
         if (s > 0) score.set(p, (score.get(p) || 0) + s);
       }
