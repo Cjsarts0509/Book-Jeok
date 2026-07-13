@@ -1092,11 +1092,11 @@ const App = (() => {
   //  · 바코드가 보이면 scanMulti로 읽어 ISBN→교보 상세로 자동 채움
   //  · 바코드가 없으면(책등 사진 등) 제목으로 검색 → 후보 중 선택해 추가
   // ── 바코드 다건 촬영: 한 장에 여러 바코드면 각각 파일 생성(ISBN명 저장), 바코드 없으면 책등 OCR→검색→선택→저장 ──
+  // ── 바코드 다건 촬영: 자동으로 여러 바코드면 각각 ISBN 파일로 저장. 0~1개만 잡히면 영역을 직접 지정 ──
   function multiBarcodeCapture() {
     if (!window.ISBN) return UI.toast('바코드 모듈을 사용할 수 없습니다', 'error');
     const shots = []; let seq = 0;
     const esc = UI.escapeHtml;
-    const cover = (isbn) => (isbn ? `https://contents.kyobobook.co.kr/sih/fit-in/80x0/pdt/${isbn}.jpg` : '');
     const cam = document.createElement('input');
     cam.type = 'file'; cam.accept = 'image/*'; cam.capture = 'environment'; cam.multiple = true; cam.style.display = 'none';
     document.body.appendChild(cam);
@@ -1117,7 +1117,6 @@ const App = (() => {
         : '<p class="muted" style="text-align:center;padding:14px">📷 촬영해서 책을 담으세요 (한 장에 여러 권도 OK)</p>';
     }
     function thumbData(img) { const s = Math.min(1, 90 / Math.max(img.naturalWidth, img.naturalHeight)); const c = document.createElement('canvas'); c.width = Math.max(1, Math.round(img.naturalWidth * s)); c.height = Math.max(1, Math.round(img.naturalHeight * s)); c.getContext('2d').drawImage(img, 0, 0, c.width, c.height); return c.toDataURL('image/jpeg', 0.6); }
-    function resizeToDataUrl(file, maxDim, q) { return new Promise((res, rej) => { const url = URL.createObjectURL(file); const im = new Image(); im.onload = () => { const s = Math.min(1, maxDim / Math.max(im.naturalWidth, im.naturalHeight)); const w = Math.max(1, Math.round(im.naturalWidth * s)), h = Math.max(1, Math.round(im.naturalHeight * s)); const c = document.createElement('canvas'); c.width = w; c.height = h; c.getContext('2d').drawImage(im, 0, 0, w, h); try { URL.revokeObjectURL(url); } catch (_) {} res(c.toDataURL('image/jpeg', q)); }; im.onerror = () => { try { URL.revokeObjectURL(url); } catch (_) {} rej(new Error('load fail')); }; im.src = url; }); }
 
     const savedIsbns = new Set();
     async function saveFile(file, isbn, thumb) {
@@ -1139,67 +1138,49 @@ const App = (() => {
       const thumb = thumbData(img);
       setStatus('⏳ 바코드 인식 중…');
       let found = []; try { found = await window.ISBN.scanMulti(img); } catch (_) {}
-      URL.revokeObjectURL(url);
+      try { URL.revokeObjectURL(url); } catch (_) {}
       const codes = [...new Set(found.map((f) => f.code).filter((c) => window.ISBN.isBookIsbn(c)))];
-      if (codes.length) { setStatus(`✓ 바코드 ${codes.length}개 → 각각 저장`, 'ok'); for (const c of codes) await saveFile(file, c, thumb); return; }
-      setStatus('⏳ 바코드 없음 → 책등 제목 인식 중…');
-      await ocrFallback(file, thumb);
+      if (codes.length >= 2) { setStatus(`✓ 바코드 ${codes.length}개 → 각각 저장`, 'ok'); for (const c of codes) await saveFile(file, c, thumb); return; }
+      setStatus(codes.length === 1 ? '바코드 1개만 자동 인식 — 영역을 지정해 여러 권을 저장하세요' : '자동 인식 실패 — 바코드 영역을 직접 지정하세요', 'bad');
+      regionPicker(file, img, thumb);
     }
 
-    async function ocrFallback(file, thumb) {
-      let dataUrl;
-      try { dataUrl = await resizeToDataUrl(file, 1600, 0.82); } catch (_) { return setStatus('⚠️ 이미지 처리 실패', 'bad'); }
-      let data; try { data = await API.bookOcr(dataUrl); } catch (e) { return setStatus('⚠️ 인식 실패: ' + (e.data && e.data.message || e.message), 'bad'); }
-      const books = (data && data.books) || [];
-      if (!books.length) return setStatus('⚠️ 제목 인식 실패 — 더 가까이·밝게 찍어보세요', 'bad');
-      setStatus(`⏳ ${books.length}권 교보 대조 중…`);
-      const matched = [];
-      for (const b of books) {
-        const items = []; const seen = new Set();
-        const tryQ = async (q) => { if (!q) return; try { const s = await API.bookSearch(q, 5); for (const it of ((s && s.items) || [])) if (!seen.has(it.isbn)) { seen.add(it.isbn); items.push(it); } } catch (_) {} };
-        await tryQ(b.title); await tryQ(b.subtitle); if (!items.length) await tryQ(b.text);
-        matched.push({ detected: b, items, pick: items[0] || null });
-      }
-      setStatus('');
-      reviewOcr(matched, file, thumb);
-    }
-
-    function reviewOcr(matched, file, thumb) {
-      const st = matched.map((x) => ({ detected: x.detected, items: x.items, pick: x.pick, use: !!x.pick }));
-      const rm = UI.modal(`<h3>🔤 인식 결과 — 저장할 책 선택 <span class="muted" style="font-size:13px;font-weight:400">· ${st.length}권</span></h3>
-        <p class="muted" style="font-size:13px">선택한 책은 이 사진을 <b>ISBN 이름</b>으로 저장합니다. 틀리면 체크 해제/“다른 후보”.</p>
-        <div class="bl-review" id="mo-list"></div>
-        <div class="modal-actions"><span style="flex:1"></span><button class="btn btn-ghost" id="mo-cancel">취소</button><button class="btn btn-primary" id="mo-save">선택 저장</button></div>`);
+    // 여러 바코드 영역을 드래그로 지정 → 각 영역 스캔 → ISBN마다 같은 사진 저장
+    function regionPicker(file, img, thumb) {
+      const url = URL.createObjectURL(file);
+      const boxes = []; let sx = 0, sy = 0, drawing = false, cur = null;
+      const rm = UI.modal(`<h3>🎯 바코드 영역 지정 <span class="muted" style="font-size:12px;font-weight:400">· 바코드마다 드래그</span></h3>
+        <div class="region-wrap" id="rpw"><img class="region-img" id="rpimg" src="${url}" alt=""><div class="rp-layer" id="rpboxes"></div></div>
+        <p class="muted" style="font-size:12px;margin:8px 0">바코드가 있는 부분마다 드래그로 사각형을 그리세요. 사각형을 탭하면 삭제됩니다.</p>
+        <div class="modal-actions"><button class="btn btn-ghost" id="rp-clear">전체 지우기</button><span style="flex:1"></span><button class="btn btn-ghost" id="rp-cancel">취소</button><button class="btn btn-primary" id="rp-go">인식·저장</button></div>`,
+        { onClose: () => { try { URL.revokeObjectURL(url); } catch (_) {} } });
       rm.el.querySelector('.modal').classList.add('modal-wide');
-      function rr() {
-        rm.q('#mo-list').innerHTML = st.map((s, i) => {
-          const p = s.pick;
-          return `<div class="oc-row${s.use && p ? ' oc-on' : ''}">
-            <input type="checkbox" class="oc-ck" data-i="${i}" ${s.use && p ? 'checked' : ''} ${p ? '' : 'disabled'}>
-            ${p ? `<img class="bl-cover" src="${esc(cover(p.isbn))}" onerror="this.style.visibility='hidden'" alt="">` : '<span class="bl-cover bl-cover-ph">❓</span>'}
-            <div class="oc-info">
-              ${p ? `<div class="bl-title">${esc(p.title)}</div><div class="muted" style="font-size:12px">${esc(p.author || '')}${p.publisher ? ' · ' + esc(p.publisher) : ''} · ${esc(p.isbn)}</div>` : `<div class="bl-title">${esc(s.detected.title)}</div><div class="muted" style="font-size:12px">교보에서 못 찾음</div>`}
-              <div class="muted" style="font-size:11px">인식: ${esc(s.detected.title)}${s.detected.subtitle ? ' · 부제 ' + esc(s.detected.subtitle) : ''}</div>
-            </div>
-            <button type="button" class="btn btn-ghost btn-sm oc-alt" data-i="${i}">다른 후보</button>
-          </div>`;
-        }).join('');
-        rm.q('#mo-list').querySelectorAll('.oc-ck').forEach((c) => c.addEventListener('change', () => { st[+c.dataset.i].use = c.checked; rr(); }));
-        rm.q('#mo-list').querySelectorAll('.oc-alt').forEach((b) => b.addEventListener('click', () => altPick(+b.dataset.i)));
+      const imgEl = rm.q('#rpimg'), layer = rm.q('#rpboxes');
+      function render() {
+        layer.innerHTML = boxes.map((b, i) => `<div class="region-box rp-box" data-i="${i}" style="left:${b.x}px;top:${b.y}px;width:${b.w}px;height:${b.h}px"><span class="rp-num">${i + 1}</span></div>`).join('')
+          + (cur ? `<div class="region-box" style="left:${cur.x}px;top:${cur.y}px;width:${cur.w}px;height:${cur.h}px"></div>` : '');
+        layer.querySelectorAll('.rp-box').forEach((el) => el.addEventListener('click', (e) => { e.stopPropagation(); boxes.splice(+el.dataset.i, 1); render(); }));
       }
-      async function altPick(i) {
-        const s = st[i]; let items = s.items;
-        if (!items.length) { try { const r = await API.bookSearch(s.detected.title, 8); items = (r && r.items) || []; s.items = items; } catch (_) {} }
-        if (!items.length) return UI.toast('후보가 없습니다', 'info');
-        const caps = items.map((it, k) => `<button type="button" class="bl-cand" data-k="${k}"><img class="bl-cover" src="${esc(cover(it.isbn))}" onerror="this.style.visibility='hidden'" alt=""><span class="bl-cand-t"><b>${esc(it.title)}</b><span class="muted">${esc(it.author || '')}${it.publisher ? ' · ' + esc(it.publisher) : ''}</span></span></button>`).join('');
-        const pm = UI.modal(`<h3>다른 후보 선택</h3><div class="bl-cands">${caps}</div><div class="modal-actions"><button class="btn btn-ghost" id="mo-pc">취소</button></div>`);
-        pm.el.querySelector('.modal').classList.add('modal-wide');
-        pm.el.querySelectorAll('.bl-cand').forEach((b) => b.addEventListener('click', () => { st[i].pick = items[+b.dataset.k]; st[i].use = true; pm.close(); rr(); }));
-        pm.q('#mo-pc').addEventListener('click', pm.close);
-      }
-      rm.q('#mo-save').addEventListener('click', async () => { const chosen = st.filter((s) => s.use && s.pick); rm.close(); for (const s of chosen) await saveFile(file, s.pick.isbn, thumb); });
-      rm.q('#mo-cancel').addEventListener('click', rm.close);
-      rr();
+      const pos = (e) => { const r = imgEl.getBoundingClientRect(); return { x: Math.max(0, Math.min(r.width, e.clientX - r.left)), y: Math.max(0, Math.min(r.height, e.clientY - r.top)) }; };
+      imgEl.addEventListener('pointerdown', (e) => { e.preventDefault(); drawing = true; const p = pos(e); sx = p.x; sy = p.y; cur = { x: sx, y: sy, w: 0, h: 0 }; try { imgEl.setPointerCapture(e.pointerId); } catch (_) {} render(); });
+      imgEl.addEventListener('pointermove', (e) => { if (!drawing) return; const p = pos(e); cur = { x: Math.min(sx, p.x), y: Math.min(sy, p.y), w: Math.abs(p.x - sx), h: Math.abs(p.y - sy) }; render(); });
+      imgEl.addEventListener('pointerup', () => { drawing = false; if (cur && cur.w > 8 && cur.h > 8) boxes.push(cur); cur = null; render(); });
+      rm.q('#rp-clear').addEventListener('click', () => { boxes.length = 0; render(); });
+      rm.q('#rp-cancel').addEventListener('click', rm.close);
+      rm.q('#rp-go').addEventListener('click', async () => {
+        if (!boxes.length) return UI.toast('바코드 영역을 하나 이상 그려주세요', 'info');
+        const scale = img.naturalWidth / (imgEl.clientWidth || img.naturalWidth);
+        const regions = boxes.map((b) => ({ x: Math.round(b.x * scale), y: Math.round(b.y * scale), w: Math.round(b.w * scale), h: Math.round(b.h * scale) }));
+        rm.close();
+        let n = 0, fail = 0;
+        for (const rg of regions) {
+          let code = null;
+          try { const r = await window.ISBN.scan(img, { region: rg, useOcr: true }); code = (r.candidates && r.candidates[0]) || null; } catch (_) {}
+          if (code && window.ISBN.isBookIsbn(code)) { await saveFile(file, code, thumb); n++; } else fail++;
+        }
+        setStatus(`${n ? '✓ ' + n + '개 저장' : ''}${fail ? (n ? ' · ' : '⚠️ ') + fail + '개 실패' : ''}`.trim(), fail && !n ? 'bad' : 'ok');
+      });
+      render();
     }
 
     cam.addEventListener('change', async () => { const files = [...cam.files]; cam.value = ''; for (const f of files) await handleFile(f); });
