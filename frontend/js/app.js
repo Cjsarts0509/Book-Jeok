@@ -1119,14 +1119,29 @@ const App = (() => {
     function thumbData(img) { const s = Math.min(1, 90 / Math.max(img.naturalWidth, img.naturalHeight)); const c = document.createElement('canvas'); c.width = Math.max(1, Math.round(img.naturalWidth * s)); c.height = Math.max(1, Math.round(img.naturalHeight * s)); c.getContext('2d').drawImage(img, 0, 0, c.width, c.height); return c.toDataURL('image/jpeg', 0.6); }
 
     const savedIsbns = new Set();
-    async function saveFile(file, isbn, thumb) {
+    // 업로드 전 다운스케일(속도·용량) — 이미 작으면 원본 그대로
+    function downscaleBlob(file, maxDim, q) {
+      return new Promise((resolve) => {
+        const url = URL.createObjectURL(file); const im = new Image();
+        im.onload = () => {
+          const s = Math.min(1, maxDim / Math.max(im.naturalWidth, im.naturalHeight));
+          if (s >= 1) { try { URL.revokeObjectURL(url); } catch (_) {} return resolve(file); }
+          const w = Math.round(im.naturalWidth * s), h = Math.round(im.naturalHeight * s);
+          const c = document.createElement('canvas'); c.width = w; c.height = h; c.getContext('2d').drawImage(im, 0, 0, w, h);
+          try { URL.revokeObjectURL(url); } catch (_) {}
+          c.toBlob((b) => resolve(b || file), 'image/jpeg', q);
+        };
+        im.onerror = () => { try { URL.revokeObjectURL(url); } catch (_) {} resolve(file); };
+        im.src = url;
+      });
+    }
+    async function saveFile(blob, isbn, thumb) {
       if (savedIsbns.has(isbn)) { shots.push({ id: ++seq, name: isbn, status: 'dup', thumb }); renderList(); return; }
       savedIsbns.add(isbn);
-      const ext = ((file.name.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '')) || 'jpg';
-      const shot = { id: ++seq, name: `${isbn}.${ext}`, status: 'saving', thumb };
+      const shot = { id: ++seq, name: `${isbn}.jpg`, status: 'saving', thumb };
       shots.push(shot); renderList(); feedback();
       const fd = new FormData(); fd.append('folder', state.folder);
-      fd.append('file', new File([file], `${isbn}.${ext}`, { type: file.type || 'image/jpeg' }));
+      fd.append('file', new File([blob], `${isbn}.jpg`, { type: 'image/jpeg' }));
       try { const r = await API.upload(fd, state.ownerId); shot.status = (r && r.rejected && r.rejected.length) ? 'error' : 'done'; }
       catch (_) { shot.status = 'error'; }
       renderList();
@@ -1139,14 +1154,15 @@ const App = (() => {
       setStatus('⏳ 바코드 인식 중…');
       let found = []; try { found = await window.ISBN.scanMulti(img); } catch (_) {}
       try { URL.revokeObjectURL(url); } catch (_) {}
+      const upBlob = await downscaleBlob(file, 1600, 0.85);
       const codes = [...new Set(found.map((f) => f.code).filter((c) => window.ISBN.isBookIsbn(c)))];
-      if (codes.length >= 2) { setStatus(`✓ 바코드 ${codes.length}개 → 각각 저장`, 'ok'); for (const c of codes) await saveFile(file, c, thumb); return; }
+      if (codes.length >= 2) { setStatus(`✓ 바코드 ${codes.length}개 → 각각 저장`, 'ok'); for (const c of codes) await saveFile(upBlob, c, thumb); return; }
       setStatus(codes.length === 1 ? '바코드 1개만 자동 인식 — 영역을 지정해 여러 권을 저장하세요' : '자동 인식 실패 — 바코드 영역을 직접 지정하세요', 'bad');
-      regionPicker(file, img, thumb);
+      regionPicker(file, img, upBlob, thumb);
     }
 
     // 여러 바코드 영역을 드래그로 지정 → 각 영역 스캔 → ISBN마다 같은 사진 저장
-    function regionPicker(file, img, thumb) {
+    function regionPicker(file, img, upBlob, thumb) {
       const url = URL.createObjectURL(file);
       const boxes = []; let sx = 0, sy = 0, drawing = false, cur = null;
       const rm = UI.modal(`<h3>🎯 바코드 영역 지정 <span class="muted" style="font-size:12px;font-weight:400">· 바코드마다 드래그</span></h3>
@@ -1170,15 +1186,23 @@ const App = (() => {
       rm.q('#rp-go').addEventListener('click', async () => {
         if (!boxes.length) return UI.toast('바코드 영역을 하나 이상 그려주세요', 'info');
         const scale = img.naturalWidth / (imgEl.clientWidth || img.naturalWidth);
-        const regions = boxes.map((b) => ({ x: Math.round(b.x * scale), y: Math.round(b.y * scale), w: Math.round(b.w * scale), h: Math.round(b.h * scale) }));
+        const W = img.naturalWidth, H = img.naturalHeight, PAD = 0.2; // 여백(quiet zone) 확보
+        const regions = boxes.map((b) => {
+          let x = b.x * scale, y = b.y * scale, w = b.w * scale, h = b.h * scale;
+          const px = w * PAD, py = h * PAD;
+          x = Math.max(0, x - px); y = Math.max(0, y - py);
+          w = Math.min(W - x, w + px * 2); h = Math.min(H - y, h + py * 2);
+          return { x: Math.round(x), y: Math.round(y), w: Math.round(w), h: Math.round(h) };
+        });
         rm.close();
+        setStatus('⏳ 지정 영역 인식 중…');
         let n = 0, fail = 0;
         for (const rg of regions) {
           let code = null;
           try { const r = await window.ISBN.scan(img, { region: rg, useOcr: true }); code = (r.candidates && r.candidates[0]) || null; } catch (_) {}
-          if (code && window.ISBN.isBookIsbn(code)) { await saveFile(file, code, thumb); n++; } else fail++;
+          if (code && window.ISBN.isBookIsbn(code)) { await saveFile(upBlob, code, thumb); n++; } else fail++;
         }
-        setStatus(`${n ? '✓ ' + n + '개 저장' : ''}${fail ? (n ? ' · ' : '⚠️ ') + fail + '개 실패' : ''}`.trim(), fail && !n ? 'bad' : 'ok');
+        setStatus(`${n ? '✓ ' + n + '개 저장' : ''}${fail ? (n ? ' · ' : '⚠️ ') + fail + '개 실패(영역을 더 넓게 그려보세요)' : ''}`.trim(), fail && !n ? 'bad' : 'ok');
       });
       render();
     }
