@@ -617,9 +617,10 @@ th { background: var(--bg); font-weight: 700; color: var(--text-muted); font-siz
 @media (max-width: 768px) { .modal.modal-wide { max-width: 100%; } }
 
 /* 경로 칼럼 (윈도우식 위치 표시) + 이름 칼럼 축소 */
-.filetable .path-col { width: 190px; }
-.filetable td.name-cell { max-width: 340px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.filetable td.path-cell { color: var(--text-muted); font-size: 12px; cursor: pointer; max-width: 190px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.filetable { table-layout: fixed; width: 100%; }
+.filetable .path-col { width: 38%; }
+.filetable td.name-cell, .filetable td.path-cell { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.filetable td.path-cell { color: var(--text-muted); font-size: 12px; cursor: pointer; }
 .filetable td.path-cell:hover { color: var(--secondary); text-decoration: underline; }
 .mcard-path { cursor: pointer; color: var(--secondary); }
 
