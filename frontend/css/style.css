@@ -145,6 +145,15 @@ textarea.input { resize: vertical; }
 .pp-sheet { border-collapse: collapse; font-size: 12.5px; }
 .pp-sheet td { border: 1px solid var(--border); padding: 4px 8px; white-space: nowrap; max-width: 280px; overflow: hidden; text-overflow: ellipsis; }
 .pp-sheet tr:first-child td { background: #F1F3F5; font-weight: 700; position: sticky; top: 0; }
+.pp-ppt { display: flex; flex-direction: column; gap: 12px; }
+.pp-slide { background: #fff; border: 1px solid var(--border); border-radius: var(--radius-sm); overflow: hidden; }
+.pp-slide-n { font-size: 12px; font-weight: 700; color: var(--text-muted); padding: 6px 10px; background: #F1F3F5; border-bottom: 1px solid var(--border); }
+.pp-slide-imgs { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px; justify-content: center; }
+.pp-slide-imgs img { max-width: 100%; max-height: 300px; border-radius: 4px; object-fit: contain; }
+.pp-slide-text { padding: 10px 12px; font-size: 13.5px; line-height: 1.5; }
+.pp-slide-text p { margin: 0 0 4px; word-break: break-word; }
+.pp-slide-text p:first-child { font-weight: 700; font-size: 15px; }
+.pp-slide-empty { padding: 10px 12px; font-size: 12px; color: var(--text-muted); }
 .preview-backdrop { display: none; }
 .file-card.previewing, tr.previewing { outline: 2px solid var(--secondary); outline-offset: -2px; }
 @media (max-width: 900px) {

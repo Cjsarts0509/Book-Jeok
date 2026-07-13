@@ -1396,8 +1396,10 @@ const App = (() => {
   const PV_IMG = new Set(['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg', 'ico']);
   const PV_TXT = new Set(['txt', 'md', 'log', 'json', 'xml', 'yml', 'yaml', 'html', 'css', 'js', 'ts', 'sql', 'ini', 'cfg', 'env']);
   const PV_OFFICE = new Set(['xlsx', 'xls', 'xlsm', 'csv']);   // 표 형식(엑셀/CSV)은 표로 렌더
-  const canPreview = (name) => { const e = (name.split('.').pop() || '').toLowerCase(); return PV_IMG.has(e) || PV_TXT.has(e) || PV_OFFICE.has(e) || e === 'pdf'; };
-  let pvObjUrl = null, pvCurrentId = null;
+  const PV_PPT = new Set(['pptx', 'ppsx']);                    // 프레젠테이션(슬라이드별 이미지·텍스트)
+  const canPreview = (name) => { const e = (name.split('.').pop() || '').toLowerCase(); return PV_IMG.has(e) || PV_TXT.has(e) || PV_OFFICE.has(e) || PV_PPT.has(e) || e === 'pdf'; };
+  let pvObjUrl = null, pvCurrentId = null, pvExtraUrls = [];
+  function revokeExtra() { pvExtraUrls.forEach((u) => { try { URL.revokeObjectURL(u); } catch (_) {} }); pvExtraUrls = []; }
   function closePreview() {
     const panel = document.getElementById('preview-panel'); if (!panel) return;
     panel.classList.add('hidden'); panel.setAttribute('aria-hidden', 'true');
@@ -1405,6 +1407,7 @@ const App = (() => {
     document.body.classList.remove('pv-open');
     const body = document.getElementById('pp-body'); if (body) body.innerHTML = '';
     if (pvObjUrl) { URL.revokeObjectURL(pvObjUrl); pvObjUrl = null; }
+    revokeExtra();
     pvCurrentId = null; applySelectionClasses();
   }
   function openPreview(id) {
@@ -1412,6 +1415,7 @@ const App = (() => {
     const f = state.files.find((x) => String(x.id) === String(id));
     const name = f ? f.name : '파일'; const ext = (name.split('.').pop() || '').toLowerCase();
     if (pvObjUrl) { URL.revokeObjectURL(pvObjUrl); pvObjUrl = null; }
+    revokeExtra();
     pvCurrentId = id;
     panel.classList.remove('hidden'); panel.setAttribute('aria-hidden', 'false');
     document.getElementById('preview-backdrop')?.classList.add('show');
@@ -1427,12 +1431,13 @@ const App = (() => {
         if (PV_IMG.has(ext)) { pvObjUrl = URL.createObjectURL(blob); body.innerHTML = `<img class="pp-img" alt="" src="${pvObjUrl}">`; }
         else if (ext === 'pdf') { pvObjUrl = URL.createObjectURL(blob); body.innerHTML = `<iframe class="pp-frame" src="${pvObjUrl}"></iframe>`; }
         else if (PV_OFFICE.has(ext)) { await renderSheetPreview(body, blob); }
+        else if (PV_PPT.has(ext)) { await renderPptPreview(body, blob, id); }
         else { let text = await blob.text(); if (text.length > 200000) text = text.slice(0, 200000) + '\n…(생략됨)'; const pre = document.createElement('pre'); pre.className = 'pp-text'; pre.textContent = text; body.innerHTML = ''; body.appendChild(pre); }
       })
       .catch((e) => { if (pvCurrentId === id) body.innerHTML = `<p class="muted pp-msg" style="color:var(--danger)">${UI.escapeHtml(e.message)}</p>`; });
   }
   // 엑셀/CSV 미리보기 — 표가 크면 앞 N행 × M열만 읽어 렌더(로딩 지연 방지)
-  const PV_MAX_ROWS = 200, PV_MAX_COLS = 40;
+  const PV_MAX_ROWS = 100, PV_MAX_COLS = 40;
   let xlsxLoading = null;
   function ensureXLSX() {
     if (window.XLSX) return Promise.resolve(window.XLSX);
@@ -1460,6 +1465,59 @@ const App = (() => {
       body.querySelectorAll('[data-sheet]').forEach((el) => el.addEventListener('click', () => renderSheet(el.dataset.sheet)));
     };
     renderSheet(names[0]);
+  }
+  // ── PPTX 미리보기 — 슬라이드별 이미지 + 텍스트 (pptx 는 XML 압축파일) ──────────
+  const PV_MAX_SLIDES = 40;
+  let jszipLoading = null;
+  function ensureJSZip() {
+    if (window.JSZip) return Promise.resolve(window.JSZip);
+    if (jszipLoading) return jszipLoading;
+    jszipLoading = new Promise((res, rej) => { const s = document.createElement('script'); s.src = 'vendor/jszip.min.js?v=96'; s.onload = () => res(window.JSZip); s.onerror = () => { jszipLoading = null; rej(new Error('슬라이드 뷰어를 불러오지 못했습니다.')); }; document.head.appendChild(s); });
+    return jszipLoading;
+  }
+  const decodeXml = (s) => String(s).replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&#(\d+);/g, (_, d) => String.fromCharCode(+d)).replace(/&#x([0-9a-f]+);/gi, (_, h) => String.fromCharCode(parseInt(h, 16))).replace(/&amp;/g, '&');
+  function resolveZipPath(base, target) {          // base='ppt/slides/slide1.xml', target='../media/x.png'
+    if (target.startsWith('/')) return target.slice(1);
+    const parts = (base.replace(/\/[^/]*$/, '') + '/' + target).split('/'), out = [];
+    for (const p of parts) { if (p === '..') out.pop(); else if (p !== '.' && p !== '') out.push(p); }
+    return out.join('/');
+  }
+  async function renderPptPreview(body, blob, id) {
+    let JSZip; try { JSZip = await ensureJSZip(); } catch (e) { body.innerHTML = `<p class="muted pp-msg">${UI.escapeHtml(e.message)}</p>`; return; }
+    let zip; try { zip = await JSZip.loadAsync(await blob.arrayBuffer()); } catch (_) { body.innerHTML = '<p class="muted pp-msg">슬라이드를 읽을 수 없습니다.</p>'; return; }
+    if (pvCurrentId !== id) return;
+    const slides = Object.keys(zip.files).filter((n) => /^ppt\/slides\/slide\d+\.xml$/.test(n))
+      .sort((a, b) => parseInt(a.match(/(\d+)/)[1], 10) - parseInt(b.match(/(\d+)/)[1], 10));
+    if (!slides.length) { body.innerHTML = '<p class="muted pp-msg">슬라이드가 없습니다.</p>'; return; }
+    const total = slides.length, shown = slides.slice(0, PV_MAX_SLIDES), esc = UI.escapeHtml;
+    const cards = [];
+    for (let i = 0; i < shown.length; i++) {
+      const sname = shown[i];
+      let xml = ''; try { xml = await zip.file(sname).async('string'); } catch (_) {}
+      if (pvCurrentId !== id) return;                // 그 사이 다른 파일 열림
+      const texts = [...xml.matchAll(/<a:t>([\s\S]*?)<\/a:t>/g)].map((m) => decodeXml(m[1])).filter((t) => t.trim());
+      const imgs = [];
+      const relFile = zip.file(sname.replace(/slides\/(slide\d+)\.xml$/, 'slides/_rels/$1.xml.rels'));
+      if (relFile) {
+        let rel = ''; try { rel = await relFile.async('string'); } catch (_) {}
+        const map = {};
+        for (const m of rel.matchAll(/<Relationship\b[^>]*>/g)) { const t = m[0], idm = t.match(/Id="([^"]+)"/), tg = t.match(/Target="([^"]+)"/), ty = t.match(/Type="([^"]+)"/); if (idm && tg && ty && /image/i.test(ty[1])) map[idm[1]] = tg[1]; }
+        for (const m of xml.matchAll(/r:embed="([^"]+)"/g)) {
+          const tgt = map[m[1]]; if (!tgt) continue;
+          const mf = zip.file(resolveZipPath(sname, tgt)); if (!mf) continue;
+          try { const u = URL.createObjectURL(await mf.async('blob')); pvExtraUrls.push(u); imgs.push(u); } catch (_) {}
+          if (imgs.length >= 6) break;
+        }
+      }
+      cards.push({ n: i + 1, texts, imgs });
+    }
+    if (pvCurrentId !== id) return;
+    const note = total > shown.length ? `<div class="pp-sheet-note">📏 슬라이드가 많아 앞 ${shown.length}장만 표시 · 전체 ${total}장 (전체는 다운로드)</div>` : '';
+    body.innerHTML = note + '<div class="pp-ppt">' + cards.map((c) => `
+      <div class="pp-slide"><div class="pp-slide-n">슬라이드 ${c.n} / ${total}</div>
+        ${c.imgs.length ? `<div class="pp-slide-imgs">${c.imgs.map((u) => `<img src="${u}" alt="">`).join('')}</div>` : ''}
+        ${c.texts.length ? `<div class="pp-slide-text">${c.texts.map((t) => `<p>${esc(t)}</p>`).join('')}</div>` : (c.imgs.length ? '' : '<p class="pp-slide-empty">(텍스트 없음)</p>')}
+      </div>`).join('') + '</div>';
   }
 
   function downloadFile(id) {
