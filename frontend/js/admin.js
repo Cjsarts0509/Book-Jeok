@@ -705,12 +705,29 @@ const Admin = (() => {
       capState.data = await API.usageTree();
       capState.ownerId = null; capState.path = '/';
       const s = capState.data;
+      const userFiles = s.accounts.reduce((a, x) => a + x.used, 0);
+      const sysB = s.systemBytes || 0, freeB = s.diskFree != null ? s.diskFree : Math.max(0, s.diskTotal - userFiles - sysB);
+      const pdfB = s.pdfCacheBytes || 0, bunB = s.bundleBytes || 0, otherSys = Math.max(0, sysB - pdfB - bunB);
+      const totForBar = s.diskTotal || (userFiles + sysB + freeB) || 1;
+      const seg = (bytes, cls, label) => bytes > 0 ? `<span class="cap-seg ${cls}" style="width:${(bytes / totForBar * 100).toFixed(2)}%" title="${label} ${UI.bytes(bytes)}"></span>` : '';
       view.innerHTML = `
         <div class="stat-grid">
           <div class="stat"><div class="k">디스크 전체</div><div class="v num">${UI.bytes(s.diskTotal)}</div></div>
-          <div class="stat"><div class="k">사용 중 (전 계정)</div><div class="v num">${UI.bytes(s.accounts.reduce((a, x) => a + x.used, 0))}</div></div>
+          <div class="stat"><div class="k">사용자 파일 (전 계정)</div><div class="v num">${UI.bytes(userFiles)}</div></div>
+          <div class="stat"><div class="k">시스템/기타</div><div class="v num">${UI.bytes(sysB)}</div><div class="k">변환캐시 ${UI.bytes(pdfB)} · 압축임시 ${UI.bytes(bunB)}</div></div>
+          <div class="stat"><div class="k">디스크 실사용</div><div class="v num">${UI.bytes(s.diskUsedActual || 0)}</div><div class="k">여유 ${UI.bytes(freeB)}</div></div>
           <div class="stat"><div class="k">할당 합계</div><div class="v num">${UI.bytes(s.allocated)}</div></div>
           <div class="stat"><div class="k">할당 가능 (남음)</div><div class="v num">${UI.bytes(s.available)}</div></div>
+        </div>
+        <div class="cap-compo">
+          <div class="cap-bar">${seg(userFiles, 'uf', '사용자 파일')}${seg(pdfB, 'pdf', '변환 캐시')}${seg(bunB, 'zip', '압축 임시')}${seg(otherSys, 'sys', '시스템·DB·기타')}${seg(freeB, 'free', '여유')}</div>
+          <div class="cap-legend">
+            <span><i class="uf"></i>사용자 파일 ${UI.bytes(userFiles)}</span>
+            <span><i class="pdf"></i>변환 캐시 ${UI.bytes(pdfB)}</span>
+            <span><i class="zip"></i>압축 임시 ${UI.bytes(bunB)}</span>
+            <span><i class="sys"></i>시스템·DB·기타 ${UI.bytes(otherSys)}</span>
+            <span><i class="free"></i>여유 ${UI.bytes(freeB)}</span>
+          </div>
         </div>
         <div class="tm-bar"><div id="tm-crumb"></div><div class="tm-legend"><span class="muted" style="font-size:12px">타일 크기 = 사용량 · 클릭하면 폴더별로 열림</span></div></div>
         <div id="treemap" class="treemap"></div>

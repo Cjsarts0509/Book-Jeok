@@ -154,6 +154,19 @@ textarea.input { resize: vertical; }
 .pp-slide-text p { margin: 0 0 4px; word-break: break-word; }
 .pp-slide-text p:first-child { font-weight: 700; font-size: 15px; }
 .pp-slide-empty { padding: 10px 12px; font-size: 12px; color: var(--text-muted); }
+/* 용량 리포트 — 디스크 구성 막대 */
+.cap-compo { margin: 6px 0 18px; }
+.cap-bar { display: flex; height: 22px; border-radius: 6px; overflow: hidden; border: 1px solid var(--border); background: #F1F3F5; }
+.cap-seg { display: block; height: 100%; }
+.cap-seg.uf, .cap-legend i.uf { background: #118AB2; }
+.cap-seg.pdf, .cap-legend i.pdf { background: #06D6A0; }
+.cap-seg.zip, .cap-legend i.zip { background: #FFD166; }
+.cap-seg.sys, .cap-legend i.sys { background: #9B8BD8; }
+.cap-seg.free, .cap-legend i.free { background: #E9ECEF; }
+.cap-legend { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 8px; font-size: 12px; color: var(--text-muted); }
+.cap-legend span { display: inline-flex; align-items: center; gap: 5px; }
+.cap-legend i { width: 11px; height: 11px; border-radius: 3px; display: inline-block; }
+.cap-legend i.free { border: 1px solid var(--border); }
 .preview-backdrop { display: none; }
 .file-card.previewing, tr.previewing { outline: 2px solid var(--secondary); outline-offset: -2px; }
 @media (max-width: 900px) {

@@ -511,8 +511,17 @@ router.get('/usage/tree', wrap(async (req, res) => {
     query(`SELECT owner_id, folder, COALESCE(SUM(size_bytes),0) AS used, COUNT(*)::int AS files
            FROM files WHERE deleted_at IS NULL GROUP BY owner_id, folder`),
   ]);
+  // 디스크 실사용/시스템(사용자 파일이 아닌 실사용분) + 앱 캐시 폴더
+  const userTotal = accR.rows.reduce((a, r) => a + Number(r.used), 0);
+  const [du, pdfCacheBytes, bundleBytes] = await Promise.all([
+    diskUsage(),
+    dirSize(path.join(config.storageRoot, '_pdfcache')),
+    dirSize(path.join(config.storageRoot, '_bundles')),
+  ]);
+  const systemBytes = Math.max(0, du.used - userTotal);
   res.json({
     diskTotal: total, allocated: alloc, available: Math.max(0, total - alloc),
+    diskUsedActual: du.used, diskFree: du.free, systemBytes, pdfCacheBytes, bundleBytes,
     accounts: accR.rows.map((r) => ({ id: r.id, username: r.username, displayName: r.display_name, role: r.role, quotaBytes: Number(r.quota_bytes), used: Number(r.used), files: r.files })),
     folders: folderR.rows.map((r) => ({ ownerId: r.owner_id, folder: r.folder, used: Number(r.used), files: r.files })),
   });
