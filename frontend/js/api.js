@@ -65,6 +65,7 @@ const API = (() => {
     share: (id, opts) => req('POST', `/files/${id}/share`, opts || {}),
     bulkDelete: (ids) => req('POST', '/files/bulk/delete', { ids }),
     bulkMove: (ids, folder) => req('POST', '/files/bulk/move', { ids, folder }),
+    bulkCopy: (ids, folder) => req('POST', '/files/bulk/copy', { ids, folder }),
     bulkZip: (ids, folders, folder, name, ownerId) => req('POST', '/files/bulk/zip', { ids, folders, folder, name, ownerId }),
     bundleShare: (bundleId, opts) => req('POST', `/files/bundle/${bundleId}/share`, opts || {}),
     bundleDownloadUrl: (bundleId) => `${BASE}/api/files/bundle/${bundleId}/download`,

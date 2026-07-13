@@ -420,6 +420,42 @@ router.post('/bulk/move', authenticate, wrap(async (req, res) => {
   res.json({ ok: true, moved: files.length });
 }));
 
+// ── 일괄 복사 (실물 파일 복제 + 새 레코드) ──────────
+router.post('/bulk/copy', authenticate, wrap(async (req, res) => {
+  const folder = normalizeFolder(req.body.folder);
+  const files = await loadAccessibleFiles(req.user, req.body.ids);
+  if (files.length === 0) return res.status(400).json({ error: '복사할 항목이 없습니다.' });
+  const owners = [...new Set(files.map((f) => f.owner_id))];
+  // 소유자별 용량(할당량) 검사 — 관리자는 무제한
+  for (const o of owners) {
+    const u = await query('SELECT quota_bytes, role FROM users WHERE id=$1', [o]);
+    if (!u.rows.length || u.rows[0].role === 'admin') continue;
+    const quota = Number(u.rows[0].quota_bytes);
+    const used = await query('SELECT COALESCE(SUM(size_bytes),0) AS s FROM files WHERE owner_id=$1 AND deleted_at IS NULL', [o]);
+    const incoming = files.filter((f) => f.owner_id === o).reduce((s, f) => s + Number(f.size_bytes), 0);
+    if (Number(used.rows[0].s) + incoming > quota) {
+      return res.status(413).json({ error: quota === 0 ? '디스크가 할당되지 않은 계정입니다. 관리자에게 문의하세요.' : '저장 용량 할당량을 초과했습니다.' });
+    }
+  }
+  await Promise.all(owners.map((o) => ensureFolder(o, folder)));
+  let copied = 0;
+  for (const f of files) {
+    const src = path.join(userDir(f.owner_id), f.stored_name);
+    const newStored = generateToken(24);
+    try { await fsp.copyFile(src, path.join(userDir(f.owner_id), newStored)); }
+    catch { continue; } // 원본 실물이 없으면 건너뜀
+    const name = await uniqueFileName(f.owner_id, folder, f.original_name);
+    await query(
+      `INSERT INTO files (owner_id, folder, original_name, stored_name, size_bytes, mime_type, note)
+       VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+      [f.owner_id, folder, name, newStored, f.size_bytes, f.mime_type, f.note || null]
+    );
+    copied++;
+  }
+  await audit(req, 'bulk_copy', `count=${copied} -> ${folder}`);
+  res.json({ ok: true, copied });
+}));
+
 // ── 압축(ZIP) 번들 ──────────
 const BUNDLE_DIR = path.join(config.storageRoot, '_bundles');
 

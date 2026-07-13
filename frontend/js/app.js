@@ -117,6 +117,15 @@ const App = (() => {
           </aside>
           <div class="tree-backdrop" id="tree-backdrop"></div>
           <main class="content" id="view"></main>
+          <aside class="preview-panel hidden" id="preview-panel" aria-hidden="true">
+            <div class="pp-head">
+              <span class="pp-name" id="pp-name" title=""></span>
+              <button class="icon-btn" id="pp-dl" title="다운로드">⬇️</button>
+              <button class="icon-btn" id="pp-close" title="닫기">✕</button>
+            </div>
+            <div class="pp-body" id="pp-body"></div>
+          </aside>
+          <div class="preview-backdrop" id="preview-backdrop"></div>
         </div>
       </div>
       <nav class="mobile-tabbar" id="mobile-tabbar">
@@ -149,6 +158,11 @@ const App = (() => {
     document.getElementById('menu-toggle').addEventListener('click', toggleTree);
     refreshNotifBadge(); startNotifPolling(); setupBackTrap();
     document.getElementById('tree-backdrop').addEventListener('click', toggleTree);
+    // 우측 미리보기 패널: 닫기·다운로드·배경탭·ESC
+    document.getElementById('pp-close')?.addEventListener('click', closePreview);
+    document.getElementById('preview-backdrop')?.addEventListener('click', closePreview);
+    document.getElementById('pp-dl')?.addEventListener('click', () => { if (pvCurrentId) downloadFile(pvCurrentId); });
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && document.body.classList.contains('pv-open')) closePreview(); });
     document.getElementById('brand-home').addEventListener('click', () => goTo('/'));
     document.getElementById('expand-all').addEventListener('click', expandAll);
     document.getElementById('collapse-all').addEventListener('click', collapseAll);
@@ -698,6 +712,7 @@ const App = (() => {
     document.querySelectorAll('#listing [data-row-key]').forEach((el) => {
       const on = state.selected.has(el.dataset.rowKey);
       el.classList.toggle('sel', on);
+      el.classList.toggle('previewing', pvCurrentId != null && el.dataset.file != null && String(el.dataset.file) === String(pvCurrentId));
       const cb = el.querySelector('.rowcheck'); if (cb) cb.checked = on;
     });
     const all = document.getElementById('check-all');
@@ -763,7 +778,7 @@ const App = (() => {
       el.addEventListener('drop', (e) => { if (!state.drag) return; e.preventDefault(); el.classList.remove('drop-target'); moveDraggedTo(el.dataset.dropFolder); });
     });
     // 파일 액션
-    box.querySelectorAll('[data-preview]').forEach((el) => el.addEventListener('click', (e) => { e.stopPropagation(); previewModal(el.dataset.preview); }));
+    box.querySelectorAll('[data-preview]').forEach((el) => el.addEventListener('click', (e) => { e.stopPropagation(); openPreview(el.dataset.preview); }));
     box.querySelectorAll('[data-dl]').forEach((el) => el.addEventListener('click', (e) => { e.stopPropagation(); downloadFile(el.dataset.dl); }));
     box.querySelectorAll('[data-del]').forEach((el) => el.addEventListener('click', (e) => { e.stopPropagation(); deleteFile(el.dataset.del); }));
     box.querySelectorAll('[data-share]').forEach((el) => el.addEventListener('click', (e) => { e.stopPropagation(); shareModal(el.dataset.share); }));
@@ -809,12 +824,14 @@ const App = (() => {
       ${window.ISBN ? `<button class="btn btn-sm btn-ghost" id="sel-barcode" ${nImg === 0 ? 'disabled' : ''} title="이미지에서 바코드/ISBN을 읽어 제목 변경">📕 바코드 제목변경</button>` : ''}
       <button class="btn btn-sm btn-primary" id="sel-dl" ${dis ? 'disabled' : ''}>⬇️ 다운로드(ZIP)</button>
       <button class="btn btn-sm btn-secondary" id="sel-move" ${dis ? 'disabled' : ''}>📂 폴더이동</button>
+      <button class="btn btn-sm btn-ghost" id="sel-copy" ${nFile === 0 ? 'disabled' : ''} title="선택 파일을 다른 폴더로 복사">📄 복사</button>
       <button class="btn btn-sm btn-danger" id="sel-del" ${dis ? 'disabled' : ''}>🗑️ 삭제</button>
       <button class="btn btn-sm btn-ghost" id="sel-clear" ${dis ? 'disabled' : ''}>선택해제</button>`;
     bar.querySelector('#sel-clear').addEventListener('click', () => { state.selected.clear(); applySelectionClasses(); });
     bar.querySelector('#sel-del').addEventListener('click', bulkDelete);
     bar.querySelector('#sel-dl').addEventListener('click', bulkDownload);
-    bar.querySelector('#sel-move').addEventListener('click', bulkMoveModal);
+    bar.querySelector('#sel-move').addEventListener('click', () => bulkMoveModal('move'));
+    const cp = bar.querySelector('#sel-copy'); if (cp && !cp.disabled) cp.addEventListener('click', () => bulkMoveModal('copy'));
     const bc = bar.querySelector('#sel-barcode');
     if (bc && !bc.disabled) bc.addEventListener('click', () => barcodeRename([...state.selected.values()]));
     const brn = bar.querySelector('#sel-bulkname');
@@ -906,19 +923,23 @@ const App = (() => {
     });
   }
 
-  function bulkMoveModal() {
+  function bulkMoveModal(mode) {
+    const isCopy = mode === 'copy';
     const items = [...state.selected.values()];
+    const nFolders = items.filter((i) => i.type === 'folder').length;
     const movingFolders = items.filter((i) => i.type === 'folder').map((i) => i.path);
     // 폴더 자신·하위로는 이동 불가
     const blocked = new Set();
     for (const mf of movingFolders) { blocked.add(mf); for (const p of state.treeFolders) if (p === mf || p.startsWith(mf + '/')) blocked.add(p); }
     let dest = state.folder;
     const picked = () => (dest === '/' ? '🏠 홈(최상위)' : dest);
-    const m = UI.modal(`<h3>선택 항목 이동</h3>
-      <p class="muted" style="font-size:13px;margin-bottom:8px">아래에서 이동할 폴더를 선택하세요.</p>
+    const verb = isCopy ? '복사' : '이동';
+    const note = isCopy && nFolders ? `<p class="muted" style="font-size:12px;margin-bottom:8px">※ 복사는 파일만 됩니다. 선택한 폴더 ${nFolders}개는 제외됩니다.</p>` : '';
+    const m = UI.modal(`<h3>선택 항목 ${verb}</h3>
+      <p class="muted" style="font-size:13px;margin-bottom:8px">아래에서 ${verb}할 폴더를 선택하세요.</p>${note}
       <div class="folder-picker" id="picker"></div>
-      <div class="picked-bar">이동 위치: <b id="picked">${UI.escapeHtml(picked())}</b></div>
-      <div class="modal-actions"><button class="btn btn-ghost" id="c">취소</button><button class="btn btn-primary" id="ok">여기로 이동</button></div>`);
+      <div class="picked-bar">${verb} 위치: <b id="picked">${UI.escapeHtml(picked())}</b></div>
+      <div class="modal-actions"><button class="btn btn-ghost" id="c">취소</button><button class="btn btn-primary" id="ok">여기로 ${verb}</button></div>`);
     m.el.querySelector('.modal').classList.add('modal-wide');
     // 펼침 상태(피커 전용) — 기본은 현재 경로까지 펼침
     const openSet = pathChain(state.folder);
@@ -944,9 +965,15 @@ const App = (() => {
     m.q('#ok').addEventListener('click', async () => {
       const files = items.filter((i) => i.type === 'file'), folders = items.filter((i) => i.type === 'folder');
       try {
-        if (files.length) await API.bulkMove(files.map((f) => f.id), dest);
-        for (const fo of folders) { const target = (dest === '/' ? '' : dest) + '/' + fo.name; if (target !== fo.path) await API.renameFolder(fo.path, target, state.ownerId); }
-        m.close(); UI.toast('이동 완료', 'success'); loadAll();
+        if (isCopy) {
+          if (!files.length) { UI.toast('복사할 파일이 없습니다.', 'info'); return; }
+          const r = await API.bulkCopy(files.map((f) => f.id), dest);
+          m.close(); state.selected.clear(); UI.toast(`${(r && r.copied) || files.length}개 복사 완료`, 'success'); loadAll();
+        } else {
+          if (files.length) await API.bulkMove(files.map((f) => f.id), dest);
+          for (const fo of folders) { const target = (dest === '/' ? '' : dest) + '/' + fo.name; if (target !== fo.path) await API.renameFolder(fo.path, target, state.ownerId); }
+          m.close(); UI.toast('이동 완료', 'success'); loadAll();
+        }
       } catch (err) { UI.toast(err.message, 'error'); }
     });
   }
@@ -1365,27 +1392,74 @@ const App = (() => {
   }
   function loadThumbs() { loadThumbsIn(document.getElementById('listing')); }
 
-  // ── 파일 미리보기 ──────────────────────────
+  // ── 파일 미리보기 (우측 패널) ──────────────────────────
   const PV_IMG = new Set(['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg', 'ico']);
-  const PV_TXT = new Set(['txt', 'md', 'csv', 'log', 'json', 'xml', 'yml', 'yaml', 'html', 'css', 'js', 'ts', 'sql', 'ini', 'cfg', 'env']);
-  const canPreview = (name) => { const e = (name.split('.').pop() || '').toLowerCase(); return PV_IMG.has(e) || PV_TXT.has(e) || e === 'pdf'; };
-  function previewModal(id) {
+  const PV_TXT = new Set(['txt', 'md', 'log', 'json', 'xml', 'yml', 'yaml', 'html', 'css', 'js', 'ts', 'sql', 'ini', 'cfg', 'env']);
+  const PV_OFFICE = new Set(['xlsx', 'xls', 'xlsm', 'csv']);   // 표 형식(엑셀/CSV)은 표로 렌더
+  const canPreview = (name) => { const e = (name.split('.').pop() || '').toLowerCase(); return PV_IMG.has(e) || PV_TXT.has(e) || PV_OFFICE.has(e) || e === 'pdf'; };
+  let pvObjUrl = null, pvCurrentId = null;
+  function closePreview() {
+    const panel = document.getElementById('preview-panel'); if (!panel) return;
+    panel.classList.add('hidden'); panel.setAttribute('aria-hidden', 'true');
+    document.getElementById('preview-backdrop')?.classList.remove('show');
+    document.body.classList.remove('pv-open');
+    const body = document.getElementById('pp-body'); if (body) body.innerHTML = '';
+    if (pvObjUrl) { URL.revokeObjectURL(pvObjUrl); pvObjUrl = null; }
+    pvCurrentId = null; applySelectionClasses();
+  }
+  function openPreview(id) {
+    const panel = document.getElementById('preview-panel'); if (!panel) return;
     const f = state.files.find((x) => String(x.id) === String(id));
     const name = f ? f.name : '파일'; const ext = (name.split('.').pop() || '').toLowerCase();
-    let objUrl = null;
-    const m = UI.modal(`<h3 class="pv-title">👁️ ${UI.escapeHtml(name)}</h3><div class="preview-body" id="pv"><p class="muted" style="text-align:center;padding:36px">불러오는 중…</p></div><div class="modal-actions"><button class="btn btn-secondary" id="pv-dl">⬇️ 다운로드</button><button class="btn btn-primary" id="pv-close">닫기</button></div>`, { onClose: () => { if (objUrl) URL.revokeObjectURL(objUrl); } });
-    m.el.querySelector('.modal').classList.add('modal-wide', 'modal-preview');
-    m.q('#pv-close').addEventListener('click', m.close);
-    m.q('#pv-dl').addEventListener('click', () => downloadFile(id));
+    if (pvObjUrl) { URL.revokeObjectURL(pvObjUrl); pvObjUrl = null; }
+    pvCurrentId = id;
+    panel.classList.remove('hidden'); panel.setAttribute('aria-hidden', 'false');
+    document.getElementById('preview-backdrop')?.classList.add('show');
+    document.body.classList.add('pv-open');
+    const nm = document.getElementById('pp-name'); nm.textContent = name; nm.title = name;
+    applySelectionClasses();
+    const body = document.getElementById('pp-body');
+    body.innerHTML = '<p class="muted pp-msg">불러오는 중…</p>';
     fetch(API.downloadUrl(id), { headers: { Authorization: 'Bearer ' + API.getToken() }, credentials: 'include' })
       .then((r) => { if (!r.ok) throw new Error('불러오기 실패'); return r.blob(); })
       .then(async (blob) => {
-        const pv = m.q('#pv'); if (!pv) return;
-        if (PV_IMG.has(ext)) { objUrl = URL.createObjectURL(blob); pv.innerHTML = `<img class="pv-img" alt="" src="${objUrl}">`; }
-        else if (ext === 'pdf') { objUrl = URL.createObjectURL(blob); pv.innerHTML = `<iframe class="pv-frame" src="${objUrl}"></iframe>`; }
-        else { let text = await blob.text(); if (text.length > 200000) text = text.slice(0, 200000) + '\n…(생략됨)'; const pre = document.createElement('pre'); pre.className = 'pv-text'; pre.textContent = text; pv.innerHTML = ''; pv.appendChild(pre); }
+        if (pvCurrentId !== id) return;                       // 그 사이 다른 파일을 열었으면 무시
+        if (PV_IMG.has(ext)) { pvObjUrl = URL.createObjectURL(blob); body.innerHTML = `<img class="pp-img" alt="" src="${pvObjUrl}">`; }
+        else if (ext === 'pdf') { pvObjUrl = URL.createObjectURL(blob); body.innerHTML = `<iframe class="pp-frame" src="${pvObjUrl}"></iframe>`; }
+        else if (PV_OFFICE.has(ext)) { await renderSheetPreview(body, blob); }
+        else { let text = await blob.text(); if (text.length > 200000) text = text.slice(0, 200000) + '\n…(생략됨)'; const pre = document.createElement('pre'); pre.className = 'pp-text'; pre.textContent = text; body.innerHTML = ''; body.appendChild(pre); }
       })
-      .catch((e) => { const pv = m.q('#pv'); if (pv) pv.innerHTML = `<p class="muted" style="text-align:center;color:var(--danger);padding:36px">${UI.escapeHtml(e.message)}</p>`; });
+      .catch((e) => { if (pvCurrentId === id) body.innerHTML = `<p class="muted pp-msg" style="color:var(--danger)">${UI.escapeHtml(e.message)}</p>`; });
+  }
+  // 엑셀/CSV 미리보기 — 표가 크면 앞 N행 × M열만 읽어 렌더(로딩 지연 방지)
+  const PV_MAX_ROWS = 200, PV_MAX_COLS = 40;
+  let xlsxLoading = null;
+  function ensureXLSX() {
+    if (window.XLSX) return Promise.resolve(window.XLSX);
+    if (xlsxLoading) return xlsxLoading;
+    xlsxLoading = new Promise((res, rej) => { const s = document.createElement('script'); s.src = 'vendor/xlsx.min.js?v=95'; s.onload = () => res(window.XLSX); s.onerror = () => { xlsxLoading = null; rej(new Error('엑셀 뷰어를 불러오지 못했습니다.')); }; document.head.appendChild(s); });
+    return xlsxLoading;
+  }
+  async function renderSheetPreview(body, blob) {
+    let XLSX; try { XLSX = await ensureXLSX(); } catch (e) { body.innerHTML = `<p class="muted pp-msg">${UI.escapeHtml(e.message)}</p>`; return; }
+    let wb; try { wb = XLSX.read(await blob.arrayBuffer(), { type: 'array' }); } catch (_) { body.innerHTML = '<p class="muted pp-msg">시트를 읽을 수 없습니다.</p>'; return; }
+    const names = wb.SheetNames || []; const esc = UI.escapeHtml;
+    const renderSheet = (sn) => {
+      const ws = wb.Sheets[sn]; if (!ws) return;
+      let truncated = false, totalRows = 0, totalCols = 0, range = null;
+      if (ws['!ref']) {
+        range = XLSX.utils.decode_range(ws['!ref']); totalRows = range.e.r - range.s.r + 1; totalCols = range.e.c - range.s.c + 1;
+        if (range.e.r > range.s.r + PV_MAX_ROWS - 1) { range.e.r = range.s.r + PV_MAX_ROWS - 1; truncated = true; }
+        if (range.e.c > range.s.c + PV_MAX_COLS - 1) { range.e.c = range.s.c + PV_MAX_COLS - 1; truncated = true; }
+      }
+      const rows = XLSX.utils.sheet_to_json(ws, { header: 1, range: range ? XLSX.utils.encode_range(range) : undefined, blankrows: false, defval: '' });
+      const tabs = names.length > 1 ? `<div class="pp-sheet-tabs">${names.map((n) => `<button type="button" class="pp-sheet-tab${n === sn ? ' on' : ''}" data-sheet="${esc(n)}">${esc(n)}</button>`).join('')}</div>` : '';
+      const note = truncated ? `<div class="pp-sheet-note">📏 표가 커서 앞 ${Math.min(PV_MAX_ROWS, totalRows)}행 × ${Math.min(PV_MAX_COLS, totalCols)}열만 표시 · 전체 ${totalRows}행 × ${totalCols}열 (전체는 다운로드)</div>` : '';
+      const table = `<div class="pp-sheet-scroll"><table class="pp-sheet"><tbody>${rows.map((r) => `<tr>${r.map((c) => `<td>${esc(c == null ? '' : String(c))}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
+      body.innerHTML = tabs + note + table;
+      body.querySelectorAll('[data-sheet]').forEach((el) => el.addEventListener('click', () => renderSheet(el.dataset.sheet)));
+    };
+    renderSheet(names[0]);
   }
 
   function downloadFile(id) {
@@ -1546,7 +1620,7 @@ const App = (() => {
       { icon: '🗑️', label: '삭제', danger: true, onClick: () => deleteFolder(item.path) },
     ] : [
       { icon: '⬇️', label: '다운로드', onClick: () => downloadFile(item.id) },
-      ...(canPreview(item.name) ? [{ icon: '👁️', label: '미리보기', onClick: () => previewModal(item.id) }] : []),
+      ...(canPreview(item.name) ? [{ icon: '👁️', label: '미리보기', onClick: () => openPreview(item.id) }] : []),
       { icon: '🔗', label: '공유 링크', onClick: () => shareModal(item.id) },
       { icon: '🏷️', label: '태그', onClick: () => tagPickerModal(item.id) },
       { icon: '📝', label: '비고', onClick: () => noteModal(item.id) },

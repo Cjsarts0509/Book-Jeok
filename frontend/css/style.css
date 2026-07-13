@@ -127,6 +127,31 @@ textarea.input { resize: vertical; }
 
 .content { padding: 20px 24px; overflow-y: auto; min-width: 0; scrollbar-gutter: stable; }
 
+/* ── 우측 미리보기 패널 ── */
+.preview-panel { position: fixed; top: var(--appbar-h); right: 0; bottom: 0; width: 44vw; max-width: 660px; background: var(--surface); border-left: 1px solid var(--border); box-shadow: -8px 0 28px rgba(52,58,64,.10); z-index: 50; display: flex; flex-direction: column; transform: translateX(0); transition: transform .22s cubic-bezier(.2,.9,.25,1); }
+.preview-panel.hidden { transform: translateX(102%); pointer-events: none; }
+.pp-head { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--border); }
+.pp-name { flex: 1; font-weight: 700; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pp-body { flex: 1; overflow: auto; padding: 12px; background: var(--bg); display: flex; flex-direction: column; }
+.pp-msg { text-align: center; padding: 36px 12px; margin: auto; }
+.pp-img { max-width: 100%; max-height: 100%; margin: auto; object-fit: contain; border-radius: var(--radius-sm); }
+.pp-frame { width: 100%; flex: 1; border: none; background: #fff; border-radius: var(--radius-sm); min-height: 60vh; }
+.pp-text { flex: 1; margin: 0; padding: 12px; background: #fff; border: 1px solid var(--border); border-radius: var(--radius-sm); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; line-height: 1.55; white-space: pre-wrap; word-break: break-word; overflow: auto; }
+.pp-sheet-tabs { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 8px; }
+.pp-sheet-tab { padding: 5px 10px; border: 1px solid var(--border); background: var(--surface); border-radius: 6px; font-size: 12px; font-weight: 600; color: var(--text-muted); cursor: pointer; }
+.pp-sheet-tab.on { border-color: var(--secondary); color: var(--secondary); background: #E7F5FB; }
+.pp-sheet-note { font-size: 12px; color: var(--text-muted); background: #FFF6E0; border: 1px solid #F5E1A8; border-radius: 6px; padding: 6px 10px; margin-bottom: 8px; }
+.pp-sheet-scroll { flex: 1; overflow: auto; background: #fff; border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.pp-sheet { border-collapse: collapse; font-size: 12.5px; }
+.pp-sheet td { border: 1px solid var(--border); padding: 4px 8px; white-space: nowrap; max-width: 280px; overflow: hidden; text-overflow: ellipsis; }
+.pp-sheet tr:first-child td { background: #F1F3F5; font-weight: 700; position: sticky; top: 0; }
+.preview-backdrop { display: none; }
+.file-card.previewing, tr.previewing { outline: 2px solid var(--secondary); outline-offset: -2px; }
+@media (max-width: 900px) {
+  .preview-panel { top: 0; width: 100%; max-width: none; z-index: 200; }
+  .preview-backdrop.show { display: block; position: fixed; inset: 0; z-index: 150; }
+}
+
 .impersonate-banner { display: flex; align-items: center; gap: 10px; padding: 10px 16px; margin-bottom: 16px; background: #E7F5FB; border: 1px solid #B6E3F4; border-radius: var(--radius-sm); color: var(--secondary); font-size: 14px; font-weight: 600; }
 
 /* 컨텐츠 헤더 (브레드크럼 + 도구) */
