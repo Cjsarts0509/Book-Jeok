@@ -9,7 +9,7 @@ const { hashPassword, encryptSecret, decryptSecret, generatePassword } = require
 const { authenticate, requireAdmin } = require('../middleware/auth');
 const { audit, wrap } = require('../util');
 const { getAllowedExtensions, setAllowedExtensions, trashRetentionDays, shareQrEnabled, setSetting } = require('../settings');
-const { diskTotalBytes, allocatedBytes, validateAllocation } = require('../disk');
+const { diskTotalBytes, allocatedBytes, validateAllocation, diskUsage, dirSize } = require('../disk');
 
 function gb(bytes) { return (bytes / 1073741824).toFixed(2) + 'GB'; }
 
@@ -328,10 +328,22 @@ router.get('/dashboard', wrap(async (req, res) => {
     days.push({ date: key, logins: lm.get(key) || 0, uploads: up ? up.c : 0, uploadBytes: up ? Number(up.b) : 0 });
   }
   const used = Number(fStat.rows[0].b);
+  // 시스템 실사용(파일시스템 전체) + 앱이 쓰는 캐시 폴더 측정
+  const [du, pdfCacheBytes, bundleBytes] = await Promise.all([
+    diskUsage(),
+    dirSize(path.join(config.storageRoot, '_pdfcache')),
+    dirSize(path.join(config.storageRoot, '_bundles')),
+  ]);
+  const systemBytes = Math.max(0, du.used - used); // 실사용 - 사용자 파일 = DB·OS·변환캐시·압축임시 등
   res.json({
     users: uStat.rows[0],
     fileCount: fStat.rows[0].c,
-    storage: { diskTotal: total, diskUsed: used, allocated, available: Math.max(0, total - allocated), usedPct: total ? Math.round(used / total * 100) : 0, allocPct: total ? Math.round(allocated / total * 100) : 0 },
+    storage: {
+      diskTotal: total, diskUsed: used, allocated, available: Math.max(0, total - allocated),
+      usedPct: total ? Math.round(used / total * 100) : 0, allocPct: total ? Math.round(allocated / total * 100) : 0,
+      diskUsedActual: du.used, diskFree: du.free, usedActualPct: du.total ? Math.round(du.used / du.total * 100) : 0,
+      systemBytes, pdfCacheBytes, bundleBytes,
+    },
     quotaWarnings: quotaR.rows.map((r) => ({ username: r.username, displayName: r.display_name, usedBytes: Number(r.used), quotaBytes: Number(r.quota_bytes), pct: Math.round(Number(r.used) / Number(r.quota_bytes) * 100) })),
     daily: days,
     topAccounts: topR.rows.map((r) => ({ username: r.username, displayName: r.display_name, fileCount: r.c, usedBytes: Number(r.b) })),

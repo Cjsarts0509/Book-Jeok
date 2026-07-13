@@ -96,7 +96,9 @@ const Admin = (() => {
         <div class="stat-grid">
           <div class="stat"><div class="k">계정</div><div class="v num">${d.users.active}<span style="font-size:14px;color:var(--text-muted)"> / ${d.users.total}</span></div></div>
           <div class="stat"><div class="k">전체 파일</div><div class="v num">${d.fileCount.toLocaleString()}</div></div>
-          <div class="stat"><div class="k">사용 중</div><div class="v num">${UI.bytes(s.diskUsed)}</div><div class="k">디스크 ${UI.bytes(s.diskTotal)} · ${s.usedPct}%</div></div>
+          <div class="stat"><div class="k">사용자 파일</div><div class="v num">${UI.bytes(s.diskUsed)}</div><div class="k">디스크 ${UI.bytes(s.diskTotal)} · ${s.usedPct}%</div></div>
+          <div class="stat"><div class="k">시스템/기타</div><div class="v num">${UI.bytes(s.systemBytes || 0)}</div><div class="k">변환캐시 ${UI.bytes(s.pdfCacheBytes || 0)} · 압축임시 ${UI.bytes(s.bundleBytes || 0)}</div></div>
+          <div class="stat"><div class="k">디스크 실사용</div><div class="v num">${UI.bytes(s.diskUsedActual || 0)}</div><div class="k">여유 ${UI.bytes(s.diskFree || 0)} · ${s.usedActualPct || 0}%</div></div>
           <div class="stat"><div class="k">할당 / 남음</div><div class="v num">${UI.bytes(s.allocated)}</div><div class="k">남음 ${UI.bytes(s.available)}</div></div>
           <div class="stat"><div class="k">파일 보안 검사</div><div class="v num" style="font-size:16px">🛡️ 형식검증 ON</div><div class="k">악성패턴(YARA): ${d.yara ? '켜짐' : '꺼짐'}</div></div>
         </div>
