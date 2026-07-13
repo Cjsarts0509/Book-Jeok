@@ -74,7 +74,7 @@ window.ISBN = (() => {
     });
     return loaded[src];
   }
-  const ensureZXing = () => loadScript('vendor/zxing.min.js?v=92', 'ZXing');
+  const ensureZXing = () => loadScript('vendor/zxing.min.js?v=93', 'ZXing');
   const TESS_CDN = 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js';
   const ensureTesseract = () => loadScript(TESS_CDN, 'Tesseract');
 
@@ -329,8 +329,9 @@ window.ISBN = (() => {
     }
     const out = [];
     for (const c of comps) {
-      const rbw = c.x1 - c.x0 + 1, rbh = c.y1 - c.y0 + 1, area = rbw * rbh;
-      if (c.cnt < 4 || c.cnt / area < 0.45) continue;         // 너무 작거나 성긴 덩어리 제외
+      const rbw = c.x1 - c.x0 + 1, rbh = c.y1 - c.y0 + 1, area = rbw * rbh, aspect = rbw / rbh;
+      if (c.cnt < 6 || c.cnt / area < 0.45) continue;         // 너무 작거나 성긴 덩어리 제외
+      if (aspect > 6 || aspect < 1 / 6) continue;             // 극단적으로 가느다란 띠(바코드 아님) 제외
       out.push({ x: (c.x0 * B) / scale, y: (c.y0 * B) / scale, w: (rbw * B) / scale, h: (rbh * B) / scale, cnt: c.cnt });
     }
     out.sort((a, b) => b.cnt - a.cnt);
@@ -351,16 +352,16 @@ window.ISBN = (() => {
     const votes = {};
     const tally = (c) => { if (c) votes[c] = (votes[c] || 0) + 1; };
     const pick = () => { let b = null, n = 0; for (const c in votes) if (votes[c] > n) { b = c; n = votes[c]; } return { best: b, n }; };
-    // 1) 0° 여러 배율 + 흐림 보정(가로 바코드는 대부분 여기서 2표 확정 → 빠름)
+    // 1) 0° 여러 배율 + 흐림 보정(가로 바코드는 대부분 여기서 확정 → 빠름)
     for (const tl of scales) tally(await zxDecode(cropCanvas(source, x, y, w, h, tl)));
     tally(await zxDecode(enhance(cropCanvas(source, x, y, w, h, cap(base * 1.5)))));
     let p = pick();
-    if (p.n >= 2) return { code: p.best, votes: p.n };
+    if (p.n >= 2) return { code: p.best, votes: p.n, rotated: false };
     // 2) 확실하지 않으면 세로용 90°(+흐림 보정) 투표를 더한다
     for (const tl of scales) tally(await zxDecode(rotate90(cropCanvas(source, x, y, w, h, tl))));
     tally(await zxDecode(rotate90(enhance(cropCanvas(source, x, y, w, h, cap(base * 1.5))))));
     p = pick();
-    return { code: p.n >= 2 ? p.best : null, votes: p.n };
+    return { code: p.n >= 2 ? p.best : null, votes: p.n, rotated: true };
   }
   // 검출 완전성 보강: 통짜+2x2 를 마스킹 디코드해 코드만 수집(영역 검출/디코드가 놓친 것 대비). 폴백 전용.
   async function zxingAllCodes(source) {
@@ -435,18 +436,25 @@ window.ISBN = (() => {
       const hits = [];
       for (const reg of regions) {
         const v = await decodeRegionVotes(source, reg);
-        if (v.code) hits.push({ reg, code: v.code, votes: v.votes });
+        if (v.code) hits.push({ reg, code: v.code, votes: v.votes, rotated: v.rotated });
       }
-      hits.sort((a, b) => b.votes - a.votes);                 // 확실한 것부터
+      // 유령 바코드 방지: 표가 많으면(4↑) 확실히 채택. 애매하면(2~3표) 통짜/격자 디코드로 '독립 확인'된
+      //    코드만 채택(유령은 한 영역 크롭에서만 나오고 통짜 디코드엔 안 잡힘). 회전(90°로 읽음)은 통짜 0°로
+      //    확인이 안 되므로 3표 이상이면 채택.
+      const needConfirm = hits.some((h) => h.votes < 4 && !(h.rotated && h.votes >= 3));
+      const confirmed = needConfirm ? new Set(await zxingAllCodes(source)) : null;
+      const ok = (h) => h.votes >= 4 || (h.rotated && h.votes >= 3) || (confirmed && confirmed.has(h.code));
+      const accepted = hits.filter(ok);
+      accepted.sort((a, b) => b.votes - a.votes);             // 확실한 것부터 1:1 배정
       const usedReg = new Set(), boxed = new Set();
-      for (const h of hits) {
-        if (boxed.has(h.code) || usedReg.has(h.reg)) continue; // 이미 배정된 코드/영역은 건너뜀(1:1)
+      for (const h of accepted) {
+        if (boxed.has(h.code) || usedReg.has(h.reg)) continue;
         if (!result.has(h.code) || !result.get(h.code).box) result.set(h.code, { code: h.code, box: { x: h.reg.x, y: h.reg.y, w: h.reg.w, h: h.reg.h } });
         boxed.add(h.code); usedReg.add(h.reg);
       }
+      // confirmed 는 '유령 걸러내는 대조용'으로만 씀 → 여기서 새 코드를 칩으로 추가하지 않음(대조셋 오독이 3번째로 새는 것 방지)
     }
-    // 3) 코드가 2개 미만이면(영역 디코드가 놓쳤을 수 있음) 통짜·격자 폴백으로 코드만 보강(위치 불명 칩).
-    //    영역 디코드가 실패한 바코드는 '엉뚱한 박스' 대신 정직하게 칩으로 → 오배치 없음. 단건 사진은 폴백 생략.
+    // 3) 그래도 2개 미만이고 영역이 여럿이면(놓친 바코드) 통짜·격자 폴백으로 코드만 보강(위치 불명 칩)
     if (result.size < 2 && regionCount >= 2) {
       for (const c of await zxingAllCodes(source)) if (!result.has(c)) result.set(c, { code: c, box: null });
     }
