@@ -276,12 +276,17 @@ textarea.input { resize: vertical; }
 .cap-pick { border: 1px solid var(--border); border-radius: var(--radius-sm); background: rgba(255,209,102,.10); padding: 10px; margin-bottom: 12px; text-align: center; }
 .cap-pick-title { font-size: 14px; font-weight: 700; margin-bottom: 10px; }
 .cap-pick-img { position: relative; display: inline-block; max-width: 100%; line-height: 0; }
-.cap-pick-img img { max-width: 100%; max-height: 62vh; border-radius: var(--radius-sm); display: block; }
+.cap-pick-img img { max-width: 100%; max-height: 38vh; border-radius: var(--radius-sm); display: block; }
 .cap-bbox { position: absolute; border: 3px solid #EF476F; border-radius: 5px; background: rgba(239,71,111,.22); padding: 0; cursor: pointer; min-width: 26px; min-height: 26px; box-shadow: 0 0 0 2px rgba(255,255,255,.55); }
 .cap-bbox:active { background: rgba(239,71,111,.42); }
 .cap-bnum { position: absolute; top: -13px; left: -13px; width: 26px; height: 26px; border-radius: 50%; background: #EF476F; color: #fff; font-size: 13px; font-weight: 800; display: flex; align-items: center; justify-content: center; box-shadow: 0 1px 4px rgba(0,0,0,.35); }
 .cap-bcode { position: absolute; left: 50%; bottom: -22px; transform: translateX(-50%); background: #EF476F; color: #fff; font-size: 11px; font-weight: 700; letter-spacing: .3px; padding: 1px 6px; border-radius: 8px; white-space: nowrap; line-height: 1.5; }
 .cap-pick-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; justify-content: center; align-items: center; }
+.cap-pick-hint { font-size: 13px; color: var(--text-muted); margin: 10px 0 8px; }
+/* 바코드 캡션(코드) 선택 목록 — 한 줄에 하나씩(둘째 줄부터), 탭해서 선택 */
+.cap-caps { display: flex; flex-direction: column; gap: 8px; align-items: stretch; }
+.cap-cap { display: block; width: 100%; padding: 13px 14px; border: 2px solid var(--secondary); border-radius: var(--radius-sm); background: #fff; color: var(--secondary); font-size: 17px; font-weight: 800; letter-spacing: .6px; cursor: pointer; transition: background .12s, transform .1s; }
+.cap-cap:active { background: rgba(17,138,178,.12); transform: scale(.99); }
 .cap-pick-actions { margin-top: 12px; }
 /* 스캔 구역 지정 */
 .region-wrap { position: relative; display: inline-block; max-width: 100%; line-height: 0; }

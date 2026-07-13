@@ -1016,16 +1016,15 @@ const App = (() => {
       renderList();
     }
 
-    // 여러 개일 때: 촬영 사진을 크게 띄우고 이미지 위 박스를 탭해서 선택(칩 없음)
+    // 여러 개일 때: 촬영 사진을 크게 띄우고, 감지된 바코드를 캡션(번호) 목록으로 탭 선택
     function showPicker(url, nw, nh, items, onPick, onSkip) {
       const box = m.q('#cap-pick'); box.hidden = false;
       m.q('#cap-shoot').style.display = 'none'; m.q('#cap-list').style.display = 'none';
-      const withBox = items.filter((b) => b.box && b.box.w > 0 && b.box.h > 0);
-      const noBox = items.filter((b) => !(b.box && b.box.w > 0 && b.box.h > 0));
-      const bhtml = withBox.map((b, i) => `<button type="button" class="cap-bbox" data-code="${b.code}" style="left:${(b.box.x / nw * 100).toFixed(2)}%;top:${(b.box.y / nh * 100).toFixed(2)}%;width:${(b.box.w / nw * 100).toFixed(2)}%;height:${(b.box.h / nh * 100).toFixed(2)}%"><span class="cap-bnum">${i + 1}</span><span class="cap-bcode">${b.code}</span></button>`).join('');
-      box.innerHTML = `<p class="cap-pick-title">저장할 바코드를 사진에서 탭하세요</p>
-        <div class="cap-pick-img"><img src="${url}" alt="">${bhtml}</div>
-        ${noBox.length ? `<div class="cap-pick-chips"><span class="muted" style="font-size:12px">위치 불명:</span>${noBox.map((b) => `<button type="button" class="isbn-chip" data-code="${b.code}">${b.code}</button>`).join('')}</div>` : ''}
+      const caps = items.map((b) => `<button type="button" class="cap-cap" data-code="${b.code}">${b.code}</button>`).join('');
+      box.innerHTML = `<p class="cap-pick-title">저장할 바코드 선택</p>
+        <div class="cap-pick-img"><img src="${url}" alt=""></div>
+        <p class="cap-pick-hint">저장할 바코드를 탭하세요</p>
+        <div class="cap-caps">${caps}</div>
         <div class="cap-pick-actions"><button type="button" class="btn btn-ghost btn-sm" id="cap-skip">이 사진 건너뛰기</button></div>`;
       const finish = (fn, arg) => { box.hidden = true; box.innerHTML = ''; m.q('#cap-shoot').style.display = ''; m.q('#cap-list').style.display = ''; setShoot(true); fn(arg); };
       box.querySelectorAll('[data-code]').forEach((el) => el.addEventListener('click', () => finish(onPick, el.dataset.code)));
@@ -1060,16 +1059,15 @@ const App = (() => {
     renderList();
   }
 
-  // ── 사진 위 바코드 탭 선택 오버레이 (여러 개 감지 시 재사용) → Promise<code|null> ──────────
+  // ── 바코드 선택: 촬영 사진(참고용)과 함께 감지된 코드를 캡션 목록으로 탭 선택 → Promise<code|null> ──────────
   function pickBarcodeFromImage(url, nw, nh, items) {
     return new Promise((resolve) => {
-      const withBox = items.filter((b) => b.box && b.box.w > 0 && b.box.h > 0);
-      const noBox = items.filter((b) => !(b.box && b.box.w > 0 && b.box.h > 0));
-      const bhtml = withBox.map((b, i) => `<button type="button" class="cap-bbox" data-code="${b.code}" style="left:${(b.box.x / nw * 100).toFixed(2)}%;top:${(b.box.y / nh * 100).toFixed(2)}%;width:${(b.box.w / nw * 100).toFixed(2)}%;height:${(b.box.h / nh * 100).toFixed(2)}%"><span class="cap-bnum">${i + 1}</span><span class="cap-bcode">${b.code}</span></button>`).join('');
-      const m = UI.modal(`<h3>📕 저장할 바코드 선택 <span class="muted" style="font-size:13px;font-weight:400">· 사진에서 탭</span></h3>
+      const caps = items.map((b) => `<button type="button" class="cap-cap" data-code="${b.code}">${b.code}</button>`).join('');
+      const m = UI.modal(`<h3>📕 저장할 바코드 선택</h3>
         <div class="cap-pick">
-          <div class="cap-pick-img"><img src="${url}" alt="">${bhtml}</div>
-          ${noBox.length ? `<div class="cap-pick-chips"><span class="muted" style="font-size:12px">위치 불명:</span>${noBox.map((b) => `<button type="button" class="isbn-chip" data-code="${b.code}">${b.code}</button>`).join('')}</div>` : ''}
+          <div class="cap-pick-img"><img src="${url}" alt=""></div>
+          <p class="cap-pick-hint">저장할 바코드를 탭하세요</p>
+          <div class="cap-caps">${caps}</div>
         </div>
         <div class="modal-actions"><button class="btn btn-ghost" id="pk-cancel">취소</button></div>`,
         { onClose: () => resolve(null) });
