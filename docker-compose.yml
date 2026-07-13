@@ -24,9 +24,6 @@ services:
     build: ./backend
     container_name: bookjeok-api
     restart: unless-stopped
-    # bookpulse python-api(교보 도서 검색/상세)가 호스트 8002에 있을 때 컨테이너에서 접근용
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     depends_on:
       db:
         condition: service_healthy
@@ -34,8 +31,6 @@ services:
       NODE_ENV: production
       PORT: 4000
       SERVE_FRONTEND: ${SERVE_FRONTEND:-1}
-      # 교보 키오스크 도서 검색/상세(bookpulse python-api). 미설정 시 도서목록 기능만 비활성.
-      BOOKPULSE_API: ${BOOKPULSE_API:-http://host.docker.internal:8002}
       DB_HOST: db
       DB_PORT: 5432
       DB_USER: ${DB_USER:-bookjeok}

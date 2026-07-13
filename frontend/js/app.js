@@ -1213,32 +1213,12 @@ const App = (() => {
     renderList();
   }
 
-  // ── 바코드 선택: 촬영 사진(참고용)과 함께 감지된 코드를 캡션 목록으로 탭 선택 → Promise<code|null> ──────────
-  function pickBarcodeFromImage(url, nw, nh, items) {
-    return new Promise((resolve) => {
-      const caps = items.map((b) => `<button type="button" class="cap-cap" data-code="${b.code}">${b.code}</button>`).join('');
-      const m = UI.modal(`<h3>📕 저장할 바코드 선택</h3>
-        <div class="cap-pick">
-          <div class="cap-pick-img"><img src="${url}" alt=""></div>
-          <p class="cap-pick-hint">저장할 바코드를 탭하세요</p>
-          <div class="cap-caps">${caps}</div>
-        </div>
-        <div class="modal-actions"><button class="btn btn-ghost" id="pk-cancel">취소</button></div>`,
-        { onClose: () => resolve(null) });
-      m.el.querySelector('.modal').classList.add('modal-wide');
-      m.el.querySelectorAll('[data-code]').forEach((el) => el.addEventListener('click', () => { resolve(el.dataset.code); m.close(); }));
-      m.q('#pk-cancel').addEventListener('click', () => m.close());
-    });
-  }
-
-  // ── 카메라(사진) 업로드: 촬영 → 각 사진 제목·비고 입력(+ISBN 인식) → 업로드 ──────────
+  // ── 카메라(사진) 업로드: 촬영 → 각 사진 제목·비고 입력 → 업로드 ──────────
   function cameraReviewModal(files) {
     const urls = files.map((f) => URL.createObjectURL(f));
-    const meta = files.map(() => ({ region: null, isbn: null, candidates: [], items: [], method: null, scanning: false, tried: false }));
-    const hasIsbn = !!window.ISBN;
     const rows = files.map((f, i) => `
       <div class="cam-item" data-i="${i}">
-        <img class="cam-thumb" src="${urls[i]}" alt="" data-img="${i}">
+        <img class="cam-thumb" src="${urls[i]}" alt="">
         <div class="cam-fields">
           <input class="input cam-title" placeholder="제목(선택)">
           <input class="input cam-note" placeholder="비고(선택)">
@@ -1247,67 +1227,13 @@ const App = (() => {
       </div>`).join('');
     const loc = state.folder === '/' ? '홈' : state.folder;
     const m = UI.modal(`<h3>📷 촬영 업로드 <span class="muted" style="font-size:13px;font-weight:400">· ${files.length}장 → ${UI.escapeHtml(loc)}</span></h3>
-      <p class="muted" style="font-size:12px;margin-bottom:10px">각 사진의 제목·비고를 입력하고 업로드하세요. (제목 비우면 자동 이름) · 바코드/책등으로 도서 목록을 만들려면 <b>📖 도서 목록 만들기</b>를 이용하세요.</p>
+      <p class="muted" style="font-size:12px;margin-bottom:10px">각 사진의 제목·비고를 입력하고 업로드하세요. (제목 비우면 자동 이름) · 바코드로 ISBN 파일을 만들려면 <b>📷 바코드 다건 촬영</b>을 이용하세요.</p>
       <div id="cam-list">${rows}</div>
       <div class="modal-actions"><button class="btn btn-ghost" id="cam-cancel">취소</button><button class="btn btn-primary" id="cam-go">⬆️ ${files.length}장 업로드</button></div>`);
     m.el.querySelector('.modal').classList.add('modal-wide');
     const cleanup = () => urls.forEach((u) => URL.revokeObjectURL(u));
     const kept = new Set(files.map((_, i) => i));
     const itemEl = (i) => m.el.querySelector(`.cam-item[data-i="${i}"]`);
-    const imgEl = (i) => m.el.querySelector(`[data-img="${i}"]`);
-    const isbnOn = () => false; // 일반 촬영 업로드에서는 바코드 인식 비활성(도서 목록 만들기로 이관)
-
-    function renderChips(i) {
-      const alt = m.el.querySelector(`[data-alt="${i}"]`); if (!alt) return;
-      const items = meta[i].items || [];
-      if (items.length < 2) { alt.innerHTML = ''; return; }
-      const cur = (itemEl(i)?.querySelector('.cam-isbn-input')?.value || '').replace(/[^0-9X]/gi, '').toUpperCase();
-      // 칩 대신 '사진에서 선택' — 사진 위 바코드를 탭해서 고른다
-      alt.innerHTML = `<button type="button" class="btn btn-ghost btn-sm cam-pickbtn" data-pickimg="${i}">🖼️ 사진에서 선택 · ${items.length}개</button>` +
-        (cur ? `<span class="cam-isbn-altlabel" style="margin-left:6px">선택: ${cur}</span>` : '');
-      alt.querySelector('[data-pickimg]').addEventListener('click', async () => {
-        const img = imgEl(i);
-        const code = await pickBarcodeFromImage(urls[i], img.naturalWidth, img.naturalHeight, items);
-        if (code) { meta[i].isbn = code; const inp = itemEl(i)?.querySelector('.cam-isbn-input'); if (inp) inp.value = code; renderChips(i); }
-      });
-    }
-    function renderIsbn(i) {
-      const row = m.el.querySelector(`[data-isbn-row="${i}"]`); if (!row) return;
-      row.hidden = !isbnOn();
-      const st = row.querySelector('.cam-isbn-status'); const inp = row.querySelector('.cam-isbn-input');
-      const n = (meta[i].candidates || []).length;
-      if (meta[i].scanning) { st.textContent = '⏳ 인식 중…'; st.className = 'cam-isbn-status muted'; }
-      else if (meta[i].isbn) { st.textContent = (meta[i].method === 'OCR' ? '📕 OCR' : '📕 바코드') + (n > 1 ? ` · ${n}개` : ''); st.className = 'cam-isbn-status ok'; if (document.activeElement !== inp) inp.value = meta[i].isbn; }
-      else if (meta[i].tried) { st.textContent = '❌ 못 찾음'; st.className = 'cam-isbn-status bad'; }
-      else { st.textContent = '⏳ 대기'; st.className = 'cam-isbn-status muted'; }
-      renderChips(i);
-    }
-    async function scanOne(i) {
-      if (!isbnOn() || !kept.has(i)) return;
-      const img = imgEl(i); if (!img || !img.complete || !img.naturalWidth) return;
-      meta[i].scanning = true; renderIsbn(i);
-      let items = [];
-      try {
-        if (meta[i].region) {
-          // 구역을 지정한 경우: 그 구역만 정밀 스캔(단건)
-          const r = await window.ISBN.scan(img, { region: meta[i].region, useOcr: true });
-          items = (r.candidates || []).map((c) => ({ code: c, box: null })); meta[i].method = r.method;
-        } else {
-          // 전체: 마스킹·샤픈·타일까지 동원해 여러 개를 위치와 함께 모두 수집
-          items = await window.ISBN.scanMulti(img);
-          if (!items.length) { // 0개면 OCR 포함 견고 단건 재시도
-            const r = await window.ISBN.scan(img, { useOcr: true });
-            items = (r.candidates || []).map((c) => ({ code: c, box: null })); meta[i].method = r.method;
-          } else meta[i].method = 'BARCODE';
-        }
-      } catch (_) { items = []; }
-      meta[i].scanning = false; meta[i].tried = true;
-      meta[i].items = items;
-      meta[i].candidates = items.map((x) => x.code);
-      meta[i].isbn = items.length ? items[0].code : null;
-      renderIsbn(i);
-    }
-    function scanAll() { [...kept].forEach((i) => { meta[i].isbn = null; meta[i].candidates = []; meta[i].items = []; meta[i].tried = false; renderIsbn(i); scanOne(i); }); }
 
     m.q('#cam-cancel').addEventListener('click', () => { cleanup(); m.close(); });
     m.el.querySelectorAll('[data-rm]').forEach((b) => b.addEventListener('click', () => {
@@ -1315,36 +1241,6 @@ const App = (() => {
       if (!kept.size) { cleanup(); m.close(); }
       else m.q('#cam-go').textContent = `⬆️ ${kept.size}장 업로드`;
     }));
-    // ISBN: 토글 · 재인식 · 구역지정 · 이미지 로드 시 자동 스캔
-    m.q('#isbn-on')?.addEventListener('change', () => { m.el.querySelectorAll('.cam-isbn').forEach((r) => { r.hidden = !isbnOn(); }); if (isbnOn()) scanAll(); });
-    m.el.querySelectorAll('[data-rescan]').forEach((b) => b.addEventListener('click', () => { const i = +b.dataset.rescan; meta[i].isbn = null; meta[i].candidates = []; meta[i].items = []; meta[i].tried = false; scanOne(i); }));
-    m.el.querySelectorAll('[data-region]').forEach((b) => b.addEventListener('click', () => regionModal(+b.dataset.region)));
-    m.el.querySelectorAll('[data-img]').forEach((img) => { const i = +img.dataset.img; if (img.complete && img.naturalWidth) scanOne(i); else img.addEventListener('load', () => scanOne(i)); });
-    m.el.querySelectorAll('.cam-isbn').forEach((r) => { r.hidden = !isbnOn(); });
-
-    // 구역 지정 모달 (드래그로 사각형 선택, 기본 전체)
-    function regionModal(i) {
-      const rm = UI.modal(`<h3>🎯 스캔 구역 지정 <span class="muted" style="font-size:12px;font-weight:400">· 바코드 부분을 드래그</span></h3>
-        <div class="region-wrap" id="rgnw"><img class="region-img" id="rgnimg" src="${urls[i]}" alt=""><div class="region-box" id="rgnbox" hidden></div></div>
-        <div class="modal-actions"><button class="btn btn-ghost" id="rgn-all">전체 사용</button><span style="flex:1"></span><button class="btn btn-ghost" id="rgn-cancel">취소</button><button class="btn btn-primary" id="rgn-ok">적용</button></div>`);
-      rm.el.querySelector('.modal').classList.add('modal-wide');
-      const img = rm.q('#rgnimg'), box = rm.q('#rgnbox');
-      let sx = 0, sy = 0, drawing = false, rect = null;
-      const pos = (e) => { const r = img.getBoundingClientRect(); return { x: Math.max(0, Math.min(r.width, e.clientX - r.left)), y: Math.max(0, Math.min(r.height, e.clientY - r.top)) }; };
-      const draw = () => { if (!rect) { box.hidden = true; return; } box.hidden = false; box.style.cssText = `left:${rect.x}px;top:${rect.y}px;width:${rect.w}px;height:${rect.h}px`; };
-      img.addEventListener('pointerdown', (e) => { e.preventDefault(); drawing = true; const p = pos(e); sx = p.x; sy = p.y; rect = { x: sx, y: sy, w: 0, h: 0 }; try { img.setPointerCapture(e.pointerId); } catch (_) {} draw(); });
-      img.addEventListener('pointermove', (e) => { if (!drawing) return; const p = pos(e); rect = { x: Math.min(sx, p.x), y: Math.min(sy, p.y), w: Math.abs(p.x - sx), h: Math.abs(p.y - sy) }; draw(); });
-      img.addEventListener('pointerup', () => { drawing = false; });
-      rm.q('#rgn-all').addEventListener('click', () => { meta[i].region = null; rm.close(); scanOne(i); });
-      rm.q('#rgn-cancel').addEventListener('click', rm.close);
-      rm.q('#rgn-ok').addEventListener('click', () => {
-        if (rect && rect.w > 6 && rect.h > 6 && img.clientWidth) {
-          const scale = img.naturalWidth / img.clientWidth;
-          meta[i].region = { x: Math.round(rect.x * scale), y: Math.round(rect.y * scale), w: Math.round(rect.w * scale), h: Math.round(rect.h * scale) };
-        } else meta[i].region = null;
-        rm.close(); scanOne(i);
-      });
-    }
 
     m.q('#cam-go').addEventListener('click', () => {
       const count = kept.size;
@@ -1352,18 +1248,10 @@ const App = (() => {
       const fd = new FormData(); fd.append('folder', state.folder);
       [...kept].forEach((i) => {
         const item = itemEl(i);
-        let title = item.querySelector('.cam-title').value.trim();
-        if (isbnOn()) {
-          const raw = item.querySelector('.cam-isbn-input')?.value || meta[i].isbn || '';
-          const code = window.ISBN.clean(raw);
-          const good = window.ISBN.isValidProduct(code) ? code : '';
-          if (good) title = title ? `${good}_${title}` : good;
-        }
         fd.append('file', files[i]);
-        fd.append('titles', title);
+        fd.append('titles', item.querySelector('.cam-title').value.trim());
         fd.append('notes', item.querySelector('.cam-note').value.trim());
       });
-      // 업로드는 백엔드에서 처리 → 창은 바로 닫고 백그라운드로 전송(다른 작업 가능)
       cleanup(); m.close();
       UI.toast(`${count}장 업로드 중… (백그라운드)`, 'info');
       API.upload(fd, targetOwner)

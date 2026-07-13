@@ -289,19 +289,6 @@ textarea.input { resize: vertical; }
 .cam-fields .input { height: 36px; }
 .cam-rm { flex: 0 0 auto; color: var(--danger); }
 /* ISBN 인식 (촬영 업로드) */
-.cam-isbn-toggle { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; font-size: 13px; margin-bottom: 10px; padding: 9px 11px; background: rgba(17,138,178,.08); border-radius: var(--radius-sm); cursor: pointer; }
-.cam-isbn-toggle input { width: 16px; height: 16px; flex: 0 0 auto; }
-.cam-isbn-toggle .ci-main { font-weight: 600; white-space: nowrap; }
-.cam-isbn-toggle .ci-hint { font-weight: 400; font-size: 12px; }
-.cam-isbn { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 2px; }
-.cam-isbn-status { font-size: 12px; font-weight: 600; white-space: nowrap; }
-.cam-isbn-status.ok { color: #0a8f6c; }
-.cam-isbn-status.bad { color: #c22d54; }
-.cam-isbn-input { height: 32px; max-width: 160px; font-size: 13px; }
-.cam-isbn .btn-sm { padding: 5px 8px; }
-.cam-isbn-alt { flex-basis: 100%; display: flex; flex-wrap: wrap; gap: 5px; align-items: center; }
-.cam-isbn-alt:empty { display: none; }
-.cam-isbn-altlabel { font-size: 11px; color: var(--text-muted); }
 .isbn-chip { padding: 4px 9px; border: 1px solid var(--border); border-radius: 13px; background: var(--surface); font-size: 12px; font-weight: 600; letter-spacing: .2px; cursor: pointer; }
 .isbn-chip.on { background: #06D6A0; color: #04372b; border-color: #06D6A0; }
 /* 바코드 연속 촬영 */
@@ -623,39 +610,10 @@ th { background: var(--bg); font-weight: 700; color: var(--text-muted); font-siz
 .modal.modal-wide { max-width: 720px; }
 @media (max-width: 768px) { .modal.modal-wide { max-width: 100%; } }
 
-/* 도서 목록 만들기 (책장 스캔) */
-.bl-tools { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; flex-wrap: wrap; }
-.bl-search { display: flex; gap: 6px; flex: 1; min-width: 200px; }
-.bl-search .input { flex: 1; }
+/* 바코드 다건 촬영 상태 표시 */
 .bl-status { margin: 0 0 10px; padding: 8px 12px; border-radius: 8px; font-size: 13px; background: var(--bg); color: var(--text-muted); }
 .bl-status-ok { background: rgba(6, 214, 160, 0.14); color: #06845f; }
 .bl-status-bad { background: rgba(255, 209, 102, 0.18); color: #8a6d1a; }
-.bl-flash { outline: 2px solid var(--secondary); outline-offset: 1px; transition: outline 0.2s; }
-.bl-wrap { max-height: 52vh; overflow: auto; border: 1px solid var(--border); border-radius: 10px; }
-.bl-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-.bl-table thead th { position: sticky; top: 0; background: var(--bg); z-index: 1; text-align: left; padding: 8px 10px; font-weight: 600; color: var(--text-muted); border-bottom: 1px solid var(--border); white-space: nowrap; }
-.bl-table td { padding: 8px 10px; border-bottom: 1px solid var(--border); vertical-align: middle; }
-.bl-table tr:last-child td { border-bottom: none; }
-.bl-cover { width: 34px; height: 48px; object-fit: cover; border-radius: 3px; background: #f1f3f5; display: inline-block; }
-.bl-cover-ph { display: inline-flex; align-items: center; justify-content: center; font-size: 20px; }
-.bl-title { font-weight: 600; color: var(--text); }
-.bl-sub { font-size: 11px; margin-top: 2px; }
-.bl-isbn { font-variant-numeric: tabular-nums; color: var(--text-muted); white-space: nowrap; }
-.bl-del { background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 15px; padding: 2px 6px; border-radius: 6px; }
-.bl-del:hover { background: var(--bg); color: #ef476f; }
-.bl-empty { text-align: center; padding: 24px 12px; }
-.bl-cands { display: flex; flex-direction: column; gap: 6px; max-height: 60vh; overflow: auto; }
-.bl-cand { display: flex; gap: 10px; align-items: center; text-align: left; padding: 8px; border: 1px solid var(--border); border-radius: 10px; background: var(--card); cursor: pointer; }
-.bl-cand:hover { border-color: var(--secondary); background: var(--bg); }
-.bl-cand-t { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.bl-cand-t b { font-size: 14px; }
-.bl-cand-t .muted { font-size: 12px; }
-.bl-review { display: flex; flex-direction: column; gap: 6px; max-height: 60vh; overflow: auto; }
-.oc-row { display: flex; gap: 10px; align-items: center; padding: 8px; border: 1px solid var(--border); border-radius: 10px; }
-.oc-row.oc-on { border-color: var(--accent); background: rgba(6, 214, 160, 0.06); }
-.oc-info { flex: 1; min-width: 0; }
-.oc-ck { width: 18px; height: 18px; flex-shrink: 0; }
-.oc-alt { flex-shrink: 0; }
 
 /* 비밀번호 일치 표시 */
 .pw-match { font-size: 12px; font-weight: 600; margin-top: 4px; display: inline-block; }

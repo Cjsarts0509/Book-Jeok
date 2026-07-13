@@ -102,9 +102,6 @@ const API = (() => {
     deleteFolderShare: (id, ownerId) => req('DELETE', `/files/folder-shares/${id}${ownerId ? '?ownerId=' + ownerId : ''}`),
     downloadUrl: (id) => `${BASE}/api/files/${id}/download`,
     pdfUrl: (id) => `${BASE}/api/files/${id}/pdf`,
-    // 도서 조회 (교보 키오스크 · bookpulse 프록시)
-    bookSearch: (keyword, limit = 8) => req('GET', `/books/search?keyword=${encodeURIComponent(keyword)}&limit=${limit}`),
-    bookDetail: (isbn) => req('GET', `/books/detail?isbn=${encodeURIComponent(isbn)}`),
     // admin
     adminUsers: () => req('GET', '/admin/users'),
     createUser: (data) => req('POST', '/admin/users', data),

@@ -30,10 +30,6 @@ const config = {
   // 공유 링크 생성 시 사용할 공개 API 주소 (미지정 시 요청 헤더에서 유추)
   publicApiUrl: (process.env.PUBLIC_API_URL || '').replace(/\/$/, ''),
 
-  // bookpulse python-api 주소 (교보 키오스크 도서 검색/상세 재사용).
-  // 예: http://host.docker.internal:8002  또는  http://<호스트IP>:8002
-  bookpulseApi: (process.env.BOOKPULSE_API || '').replace(/\/$/, ''),
-
   // 계정별 기본 할당량 (bytes). 0 = 무제한
   defaultQuota: parseInt(process.env.DEFAULT_QUOTA || '0', 10),
 
