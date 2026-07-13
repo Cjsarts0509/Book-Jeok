@@ -553,34 +553,52 @@ const App = (() => {
   }
   function smartUpload(files) {
     const esc = UI.escapeHtml;
-    const rows = files.map((f) => ({ file: f, target: recommendFolders([{ name: f.name }])[0] || state.folder }));
-    const allFolders = ['/'].concat((state.treeFolders || []).slice().sort((a, b) => a.localeCompare(b, 'ko')));
-    const optHtml = (sel) => allFolders.map((p) => `<option value="${esc(p)}"${p === sel ? ' selected' : ''}>${esc(prettyPath(p))}</option>`).join('');
-    const recN = rows.filter((r) => r.target !== state.folder).length;
-    const list = rows.map((r, i) => `<div class="su-row">
-        <span class="ic">${UI.fileIcon(r.file.name)}</span>
-        <span class="su-name" title="${esc(r.file.name)}">${esc(r.file.name)}</span>
-        <select class="input su-sel" data-i="${i}">${optHtml(r.target)}</select>
-      </div>`).join('');
-    const m = UI.modal(`<h3>🧭 추천 업로드</h3><p class="muted" style="font-size:12px;margin:-8px 0 12px">파일명(지점·날짜)으로 폴더를 추천했습니다${recN ? ` · ${recN}개 추천됨` : ''}. 확인/수정 후 업로드하세요.</p>
-      <div class="su-list">${list}</div>
-      <div class="modal-actions"><button class="btn btn-ghost" id="su-c">취소</button><button class="btn btn-primary" id="su-go">⬆️ ${files.length}개 업로드</button></div>`);
+    const recs = recommendFolders(files.map((f) => ({ name: f.name })));
+    let dest = recs[0] || state.folder;
+    const picked = () => (dest === '/' ? '🏠 홈(최상위)' : dest);
+    const label = files.length === 1 ? esc(files[0].name) : `${files.length}개 파일`;
+    const m = UI.modal(`<h3>🧭 추천 업로드</h3>
+      <p class="muted" style="font-size:13px;margin-bottom:8px">${label} → 올릴 폴더를 선택하세요. (파일명으로 추천)</p>
+      <div class="rec-box" id="rec-box"></div>
+      <div class="folder-picker" id="picker"></div>
+      <div class="picked-bar">업로드 위치: <b id="picked">${esc(picked())}</b></div>
+      <div class="modal-actions"><button class="btn btn-ghost" id="c">취소</button><button class="btn btn-primary" id="ok">여기로 업로드</button></div>`);
     m.el.querySelector('.modal').classList.add('modal-wide');
-    m.el.querySelectorAll('.su-sel').forEach((s) => s.addEventListener('change', () => { rows[+s.dataset.i].target = s.value; }));
-    m.q('#su-c').addEventListener('click', m.close);
-    m.q('#su-go').addEventListener('click', async () => {
+    const openSet = pathChain(dest);
+    function drawPicker() {
+      const rootNode = buildTreeNodes(state.treeFolders);
+      const render = (node, depth) => {
+        const kids = Object.values(node.children).sort((a, b) => a.name.localeCompare(b.name, 'ko'));
+        const hasKids = kids.length > 0;
+        const isOpen = openSet.has(node.path);
+        const sel = node.path === dest ? ' sel' : '';
+        const caret = hasKids ? `<span class="pk-caret ${isOpen ? 'open' : ''}" data-tog="${esc(node.path)}">▸</span>` : '<span class="pk-caret-empty"></span>';
+        let html = `<div class="pick-row${sel}" data-path="${esc(node.path)}" style="padding-left:${4 + depth * 16}px">${caret}<span class="pk-ic">${depth === 0 ? '🏠' : '📁'}</span><span class="pk-name">${esc(node.name)}</span></div>`;
+        if (hasKids && isOpen) for (const k of kids) html += render(k, depth + 1);
+        return html;
+      };
+      const box = m.q('#picker'); box.innerHTML = render(rootNode, 0);
+      box.querySelectorAll('.pk-caret[data-tog]').forEach((c) => c.addEventListener('click', (e) => { e.stopPropagation(); const p = c.dataset.tog; if (openSet.has(p)) openSet.delete(p); else openSet.add(p); drawPicker(); }));
+      box.querySelectorAll('.pick-row').forEach((r) => r.addEventListener('click', () => { dest = r.dataset.path; m.q('#picked').textContent = picked(); drawPicker(); }));
+    }
+    drawPicker();
+    if (recs.length) {
+      m.q('#rec-box').innerHTML = `<div class="rec-title">📂 파일명 기반 추천 위치 <span class="muted">(눌러서 선택)</span></div>`
+        + recs.map((p) => `<button type="button" class="rec-row" data-rec="${esc(p)}"><span class="pk-ic">📁</span><span class="rec-path">${esc(prettyPath(p))}</span></button>`).join('');
+      m.q('#rec-box').querySelectorAll('[data-rec]').forEach((b) => b.addEventListener('click', () => {
+        dest = b.dataset.rec; m.q('#picked').textContent = picked();
+        for (const seg of pathChain(dest)) openSet.add(seg);
+        drawPicker();
+      }));
+    }
+    m.q('#c').addEventListener('click', m.close);
+    m.q('#ok').addEventListener('click', async () => {
       m.close();
-      const groups = new Map();
-      for (const r of rows) { const k = r.target || '/'; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(r.file); }
+      const fd = new FormData(); fd.append('folder', dest);
+      for (const f of files) fd.append('file', f);
       UI.toast(`${files.length}개 업로드 중… (백그라운드)`, 'info');
-      let ok = 0, bad = 0;
-      for (const [folder, fs] of groups) {
-        const fd = new FormData(); fd.append('folder', folder);
-        for (const f of fs) fd.append('file', f);
-        try { const r = await API.upload(fd, state.ownerId); const rj = (r && r.rejected && r.rejected.length) || 0; ok += fs.length - rj; bad += rj; }
-        catch (_) { bad += fs.length; }
-      }
-      UI.toast(`추천 업로드 완료 ✅ ${ok}개${bad ? ` · ${bad}개 실패/차단` : ''}`, bad ? 'error' : 'success');
+      try { const r = await API.upload(fd, state.ownerId); const rj = (r && r.rejected && r.rejected.length) || 0; UI.toast(`업로드 완료 ✅ ${files.length - rj}개${rj ? ` · ${rj}개 차단` : ''}`, rj ? 'error' : 'success'); }
+      catch (err) { UI.toast('업로드 실패: ' + err.message, 'error'); }
       loadAll();
     });
   }
