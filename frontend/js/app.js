@@ -1157,53 +1157,91 @@ const App = (() => {
       const upBlob = await downscaleBlob(file, 1600, 0.85);
       const codes = [...new Set(found.map((f) => f.code).filter((c) => window.ISBN.isBookIsbn(c)))];
       if (codes.length >= 2) { setStatus(`✓ 바코드 ${codes.length}개 → 각각 저장`, 'ok'); for (const c of codes) await saveFile(upBlob, c, thumb); return; }
-      setStatus(codes.length === 1 ? '바코드 1개만 자동 인식 — 영역을 지정해 여러 권을 저장하세요' : '자동 인식 실패 — 바코드 영역을 직접 지정하세요', 'bad');
-      regionPicker(file, img, upBlob, thumb);
+      setStatus(codes.length === 1 ? '바코드 1개만 자동 인식 — 영역 지정에서 나머지를 추가하세요' : '자동 인식 실패 — 바코드 영역을 지정하세요', 'bad');
+      regionPicker(file, img, upBlob, thumb, found);
     }
 
-    // 여러 바코드 영역을 드래그로 지정 → 각 영역 스캔 → ISBN마다 같은 사진 저장
-    function regionPicker(file, img, upBlob, thumb) {
+    // 영역 지정 v2: 자동 후보 제시(구조텐서) + 박스별 실시간 ✓/✗ + 자동 인식분 미리 표시
+    function regionPicker(file, img, upBlob, thumb, prefound) {
       const url = URL.createObjectURL(file);
       const boxes = []; let sx = 0, sy = 0, drawing = false, cur = null;
       const rm = UI.modal(`<h3>🎯 바코드 영역 지정 <span class="muted" style="font-size:12px;font-weight:400">· 바코드마다 드래그</span></h3>
         <div class="region-wrap" id="rpw"><img class="region-img" id="rpimg" src="${url}" alt=""><div class="rp-layer" id="rpboxes"></div></div>
-        <p class="muted" style="font-size:12px;margin:8px 0">바코드가 있는 부분마다 드래그로 사각형을 그리세요. 사각형을 탭하면 삭제됩니다.</p>
-        <div class="modal-actions"><button class="btn btn-ghost" id="rp-clear">전체 지우기</button><span style="flex:1"></span><button class="btn btn-ghost" id="rp-cancel">취소</button><button class="btn btn-primary" id="rp-go">인식·저장</button></div>`,
+        <p class="muted" id="rp-hint" style="font-size:12px;margin:8px 0">바코드 위를 드래그로 감싸면 즉시 인식됩니다. 초록 ✓ = 인식됨, 빨강 ✗ = 실패(더 넓게). 사각형을 탭하면 삭제.</p>
+        <div class="modal-actions"><button class="btn btn-ghost" id="rp-clear">전체 지우기</button><span style="flex:1"></span><button class="btn btn-ghost" id="rp-cancel">취소</button><button class="btn btn-primary" id="rp-go">저장</button></div>`,
         { onClose: () => { try { URL.revokeObjectURL(url); } catch (_) {} } });
       rm.el.querySelector('.modal').classList.add('modal-wide');
       const imgEl = rm.q('#rpimg'), layer = rm.q('#rpboxes');
+      const dispScale = () => (imgEl.clientWidth || img.naturalWidth) / img.naturalWidth;
+      const fromNat = (r) => { const s = dispScale(); return { x: r.x * s, y: r.y * s, w: r.w * s, h: r.h * s }; };
+      const toNat = (b, pad) => {
+        const s = img.naturalWidth / (imgEl.clientWidth || img.naturalWidth);
+        let x = b.x * s, y = b.y * s, w = b.w * s, h = b.h * s;
+        const px = w * (pad || 0), py = h * (pad || 0);
+        x = Math.max(0, x - px); y = Math.max(0, y - py);
+        w = Math.min(img.naturalWidth - x, w + px * 2); h = Math.min(img.naturalHeight - y, h + py * 2);
+        return { x: Math.round(x), y: Math.round(y), w: Math.round(w), h: Math.round(h) };
+      };
+      const overlap = (a, b) => {
+        const ix = Math.max(0, Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x));
+        const iy = Math.max(0, Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y));
+        return (ix * iy) / (Math.min(a.w * a.h, b.w * b.h) || 1) > 0.4;
+      };
+      function updateHint() {
+        const ok = boxes.filter((b) => b.status === 'ok').length, bad = boxes.filter((b) => b.status === 'fail').length;
+        const h = rm.q('#rp-hint'); if (h) h.textContent = `인식됨 ${ok}개${bad ? ` · 미인식 ${bad}개(더 넓게)` : ''} — 저장하면 각 ISBN 이름으로 저장됩니다.`;
+      }
       function render() {
-        layer.innerHTML = boxes.map((b, i) => `<div class="region-box rp-box" data-i="${i}" style="left:${b.x}px;top:${b.y}px;width:${b.w}px;height:${b.h}px"><span class="rp-num">${i + 1}</span></div>`).join('')
-          + (cur ? `<div class="region-box" style="left:${cur.x}px;top:${cur.y}px;width:${cur.w}px;height:${cur.h}px"></div>` : '');
-        layer.querySelectorAll('.rp-box').forEach((el) => el.addEventListener('click', (e) => { e.stopPropagation(); boxes.splice(+el.dataset.i, 1); render(); }));
+        layer.innerHTML = boxes.map((b, i) => {
+          const label = b.status === 'ok' ? '✓ ' + String(b.code).slice(-4) : b.status === 'scanning' ? '⏳' : b.status === 'fail' ? '✗' : (i + 1);
+          return `<div class="region-box rp-box rp-${b.status}" data-i="${i}" style="left:${b.x}px;top:${b.y}px;width:${b.w}px;height:${b.h}px"><span class="rp-num">${label}</span></div>`;
+        }).join('') + (cur ? `<div class="region-box" style="left:${cur.x}px;top:${cur.y}px;width:${cur.w}px;height:${cur.h}px"></div>` : '');
+        layer.querySelectorAll('.rp-box').forEach((el) => el.addEventListener('click', (e) => { e.stopPropagation(); boxes.splice(+el.dataset.i, 1); render(); updateHint(); }));
+      }
+      async function decodeBox(b) {
+        b.status = 'scanning'; render();
+        let code = null;
+        try { const r = await window.ISBN.scan(img, { region: toNat(b, 0.2), useOcr: false }); code = (r.candidates && r.candidates[0]) || null; } catch (_) {}
+        if (!code) { try { const r = await window.ISBN.scan(img, { region: toNat(b, 0.45), useOcr: true }); code = (r.candidates && r.candidates[0]) || null; } catch (_) {} }
+        b.code = (code && window.ISBN.isBookIsbn(code)) ? code : null;
+        b.status = b.code ? 'ok' : 'fail'; render(); updateHint();
       }
       const pos = (e) => { const r = imgEl.getBoundingClientRect(); return { x: Math.max(0, Math.min(r.width, e.clientX - r.left)), y: Math.max(0, Math.min(r.height, e.clientY - r.top)) }; };
       imgEl.addEventListener('pointerdown', (e) => { e.preventDefault(); drawing = true; const p = pos(e); sx = p.x; sy = p.y; cur = { x: sx, y: sy, w: 0, h: 0 }; try { imgEl.setPointerCapture(e.pointerId); } catch (_) {} render(); });
       imgEl.addEventListener('pointermove', (e) => { if (!drawing) return; const p = pos(e); cur = { x: Math.min(sx, p.x), y: Math.min(sy, p.y), w: Math.abs(p.x - sx), h: Math.abs(p.y - sy) }; render(); });
-      imgEl.addEventListener('pointerup', () => { drawing = false; if (cur && cur.w > 8 && cur.h > 8) boxes.push(cur); cur = null; render(); });
-      rm.q('#rp-clear').addEventListener('click', () => { boxes.length = 0; render(); });
+      imgEl.addEventListener('pointerup', () => {
+        drawing = false;
+        if (cur && cur.w > 8 && cur.h > 8) { const b = { x: cur.x, y: cur.y, w: cur.w, h: cur.h, code: null, status: 'pending' }; boxes.push(b); cur = null; render(); decodeBox(b); }
+        else { cur = null; render(); }
+      });
+      rm.q('#rp-clear').addEventListener('click', () => { boxes.length = 0; render(); updateHint(); });
       rm.q('#rp-cancel').addEventListener('click', rm.close);
       rm.q('#rp-go').addEventListener('click', async () => {
-        if (!boxes.length) return UI.toast('바코드 영역을 하나 이상 그려주세요', 'info');
-        const scale = img.naturalWidth / (imgEl.clientWidth || img.naturalWidth);
-        const W = img.naturalWidth, H = img.naturalHeight, PAD = 0.2; // 여백(quiet zone) 확보
-        const regions = boxes.map((b) => {
-          let x = b.x * scale, y = b.y * scale, w = b.w * scale, h = b.h * scale;
-          const px = w * PAD, py = h * PAD;
-          x = Math.max(0, x - px); y = Math.max(0, y - py);
-          w = Math.min(W - x, w + px * 2); h = Math.min(H - y, h + py * 2);
-          return { x: Math.round(x), y: Math.round(y), w: Math.round(w), h: Math.round(h) };
-        });
+        if (boxes.some((b) => b.status === 'scanning' || b.status === 'pending')) return UI.toast('인식 중인 영역이 있어요. 잠시 후 다시.', 'info');
+        const okBoxes = boxes.filter((b) => b.status === 'ok' && b.code);
+        if (!okBoxes.length) return UI.toast('인식된 바코드가 없어요. 영역을 넉넉히 그려보세요.', 'info');
         rm.close();
-        setStatus('⏳ 지정 영역 인식 중…');
-        let n = 0, fail = 0;
-        for (const rg of regions) {
-          let code = null;
-          try { const r = await window.ISBN.scan(img, { region: rg, useOcr: true }); code = (r.candidates && r.candidates[0]) || null; } catch (_) {}
-          if (code && window.ISBN.isBookIsbn(code)) { await saveFile(upBlob, code, thumb); n++; } else fail++;
-        }
-        setStatus(`${n ? '✓ ' + n + '개 저장' : ''}${fail ? (n ? ' · ' : '⚠️ ') + fail + '개 실패(영역을 더 넓게 그려보세요)' : ''}`.trim(), fail && !n ? 'bad' : 'ok');
+        let n = 0; const seen = new Set();
+        for (const b of okBoxes) { if (seen.has(b.code)) continue; seen.add(b.code); await saveFile(upBlob, b.code, thumb); n++; }
+        const failN = boxes.filter((b) => b.status === 'fail').length;
+        setStatus(`✓ ${n}개 저장${failN ? ` · ✗ ${failN}개 미인식` : ''}`, 'ok');
       });
+      // 초기화: 자동 인식분(6) 미리 ✓ + 구조텐서 후보(1) 자동 제시→디코드→✓만 유지
+      async function init() {
+        for (const f of (prefound || [])) {
+          if (f.box && f.code && window.ISBN.isBookIsbn(f.code)) boxes.push({ ...fromNat(f.box), code: f.code, status: 'ok' });
+        }
+        render(); updateHint();
+        let regions = []; try { regions = window.ISBN.findBarcodeRegions(img) || []; } catch (_) {}
+        for (const reg of regions.slice(0, 6)) {
+          const db = fromNat(reg);
+          if (boxes.some((b) => overlap(b, db))) continue;
+          const b = { ...db, code: null, status: 'pending' }; boxes.push(b); render();
+          await decodeBox(b);
+          if (b.status !== 'ok') { const i = boxes.indexOf(b); if (i >= 0) boxes.splice(i, 1); render(); updateHint(); }
+        }
+      }
+      if (imgEl.complete && imgEl.clientWidth) init(); else imgEl.addEventListener('load', init, { once: true });
       render();
     }
 

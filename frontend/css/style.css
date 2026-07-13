@@ -328,7 +328,13 @@ textarea.input { resize: vertical; }
 .region-box { position: absolute; border: 2px solid #06D6A0; background: rgba(6,214,160,.18); pointer-events: none; }
 .rp-layer { position: absolute; inset: 0; pointer-events: none; }
 .rp-box { pointer-events: auto; cursor: pointer; }
-.rp-num { position: absolute; top: -1px; left: 1px; background: var(--secondary); color: #fff; font-size: 11px; line-height: 1.5; padding: 0 5px; border-radius: 6px; }
+.rp-num { position: absolute; top: -1px; left: 1px; background: var(--secondary); color: #fff; font-size: 11px; line-height: 1.5; padding: 0 5px; border-radius: 6px; white-space: nowrap; }
+.rp-box.rp-ok { border-color: #06D6A0; background: rgba(6, 214, 160, 0.22); }
+.rp-box.rp-fail { border-color: #ef476f; background: rgba(239, 71, 111, 0.16); }
+.rp-box.rp-scanning { border-color: #FFD166; background: rgba(255, 209, 102, 0.16); }
+.rp-ok .rp-num { background: #06845f; }
+.rp-fail .rp-num { background: #c22d54; }
+.rp-scanning .rp-num { background: #b8860b; }
 /* 일괄 이름변경 (선택형 빌더) */
 .br-build { display: flex; flex-direction: column; gap: 4px; }
 .br-item { padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg); }

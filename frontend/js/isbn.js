@@ -74,7 +74,7 @@ window.ISBN = (() => {
     });
     return loaded[src];
   }
-  const ensureZXing = () => loadScript('vendor/zxing.min.js?v=111', 'ZXing');
+  const ensureZXing = () => loadScript('vendor/zxing.min.js?v=112', 'ZXing');
   const TESS_CDN = 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js';
   const ensureTesseract = () => loadScript(TESS_CDN, 'Tesseract');
 
@@ -369,7 +369,7 @@ window.ISBN = (() => {
     const nw = source.naturalWidth || source.videoWidth || source.width;
     const nh = source.naturalHeight || source.videoHeight || source.height;
     const codes = new Set();
-    for (const [cols, rows, ov] of [[1, 1, 0], [2, 2, 0.2]]) {
+    for (const [cols, rows, ov] of [[1, 1, 0], [2, 2, 0.2], [3, 3, 0.25]]) {
       const tw = nw / cols, th = nh / rows;
       for (let iy = 0; iy < rows; iy++) for (let ix = 0; ix < cols; ix++) {
         const x = Math.max(0, tw * ix - tw * ov), y = Math.max(0, th * iy - th * ov);
@@ -413,6 +413,11 @@ window.ISBN = (() => {
   const byPos = (a, b) => ((a.box ? a.box.y : 1e9) - (b.box ? b.box.y : 1e9)) || ((a.box ? a.box.x : 0) - (b.box ? b.box.x : 0));
   // 한 이미지의 바코드를 하나도 빠뜨리지 않고 모두 수집 → [{code, box|null}] (위→아래 정렬)
   // 네이티브(통짜+타일)로 2개 이상이면 즉시 반환, 아니면 ZXing 타일(마스킹+샤픈)로 보강. 다중 선택 UI 용.
+  // 다중 바코드 채택 강도(다이얼). vote↓ 이거나 twoVote=true 일수록 완성도↑
+  //  (팬텀 위험은 EAN 체크섬 + 영역 모양 필터 + 박스 겹침 제거로 억제).
+  //  A: vote 4→3, voteRot 3→2 / C: twoVote=true(유효 2표면 채택). 보수적으로 되돌리려면 {vote:4,voteRot:3,twoVote:false}.
+  const MULTI_ACCEPT = { vote: 3, voteRot: 2, twoVote: true };
+
   async function scanMulti(source) {
     const nw = source.naturalWidth || source.videoWidth || source.width;
     const nh = source.naturalHeight || source.videoHeight || source.height;
@@ -441,16 +446,23 @@ window.ISBN = (() => {
       // 유령 바코드 방지: 표가 많으면(4↑) 확실히 채택. 애매하면(2~3표) 통짜/격자 디코드로 '독립 확인'된
       //    코드만 채택(유령은 한 영역 크롭에서만 나오고 통짜 디코드엔 안 잡힘). 회전(90°로 읽음)은 통짜 0°로
       //    확인이 안 되므로 3표 이상이면 채택.
-      const needConfirm = hits.some((h) => h.votes < 4 && !(h.rotated && h.votes >= 3));
+      const strong = (h) => h.votes >= MULTI_ACCEPT.vote || (h.rotated && h.votes >= MULTI_ACCEPT.voteRot);
+      const needConfirm = !MULTI_ACCEPT.twoVote && hits.some((h) => !strong(h));
       const confirmed = needConfirm ? new Set(await zxingAllCodes(source)) : null;
-      const ok = (h) => h.votes >= 4 || (h.rotated && h.votes >= 3) || (confirmed && confirmed.has(h.code));
-      const accepted = hits.filter(ok);
-      accepted.sort((a, b) => b.votes - a.votes);             // 확실한 것부터 1:1 배정
-      const usedReg = new Set(), boxed = new Set();
+      const ok = (h) => strong(h) || (MULTI_ACCEPT.twoVote && h.votes >= 2) || (confirmed && confirmed.has(h.code));
+      const accepted = hits.filter(ok).sort((a, b) => b.votes - a.votes); // 확실한 것부터 1:1 배정
+      // 안전망: 이미 채택된 박스와 크게 겹치면(같은 바코드/팬텀) 스킵 → 3번째 유령 차단
+      const overlaps = (a, b) => {
+        const ix = Math.max(0, Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x));
+        const iy = Math.max(0, Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y));
+        return (ix * iy) / (Math.min(a.w * a.h, b.w * b.h) || 1) > 0.5;
+      };
+      const usedReg = new Set(), boxed = new Set(), takenBoxes = [];
       for (const h of accepted) {
         if (boxed.has(h.code) || usedReg.has(h.reg)) continue;
+        if (takenBoxes.some((b) => overlaps(b, h.reg))) continue;
         if (!result.has(h.code) || !result.get(h.code).box) result.set(h.code, { code: h.code, box: { x: h.reg.x, y: h.reg.y, w: h.reg.w, h: h.reg.h } });
-        boxed.add(h.code); usedReg.add(h.reg);
+        boxed.add(h.code); usedReg.add(h.reg); takenBoxes.push(h.reg);
       }
       // confirmed 는 '유령 걸러내는 대조용'으로만 씀 → 여기서 새 코드를 칩으로 추가하지 않음(대조셋 오독이 3번째로 새는 것 방지)
     }
@@ -462,5 +474,5 @@ window.ISBN = (() => {
   }
 
   // ISBN 을 파일명에 안전하게 넣기용 하이픈 표기(978-89-...)는 생략, 숫자 그대로 사용
-  return { scan, scanMulti, isValidBarcode, isBookIsbn, isValidProduct, extractCandidates, clean };
+  return { scan, scanMulti, findBarcodeRegions, isValidBarcode, isBookIsbn, isValidProduct, extractCandidates, clean };
 })();
