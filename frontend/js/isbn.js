@@ -74,7 +74,7 @@ window.ISBN = (() => {
     });
     return loaded[src];
   }
-  const ensureZXing = () => loadScript('vendor/zxing.min.js?v=115', 'ZXing');
+  const ensureZXing = () => loadScript('vendor/zxing.min.js?v=116', 'ZXing');
   const TESS_CDN = 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js';
   const ensureTesseract = () => loadScript(TESS_CDN, 'Tesseract');
 

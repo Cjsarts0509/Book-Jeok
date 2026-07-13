@@ -516,20 +516,29 @@ const App = (() => {
     const score = new Map();
     for (const it of fileItems) {
       const name = String(it.name || '');
-      const branch = branches.find((b) => name.includes(b));
-      const dm = name.match(/(20\d{2})[-_. ]?(0[1-9]|1[0-2])[-_. ]?(0[1-9]|[12]\d|3[01])/) || name.match(/(20\d{2})[-_. ]?(0[1-9]|1[0-2])/);
-      const y = dm ? dm[1] : null, mo = dm ? dm[2] : null;
-      if (!branch && !y) continue;
+      const branch = branches.find((b) => name.includes(b)) || null;
+      // 파일명 날짜: YYYYMMDD / YYYY-MM-DD / YYYY.MM.DD → 정규화
+      const dm = name.match(/(20\d{2})[-_. ]?(0[1-9]|1[0-2])[-_. ]?(0[1-9]|[12]\d|3[01])/);
+      const ymd = dm ? dm[1] + dm[2] + dm[3] : null;   // 20251021
+      const ym = dm ? dm[1] + dm[2] : null;            // 202510
+      if (!branch && !ymd) continue;                    // 지점·날짜 둘 다 없으면 추천 근거 없음
       for (const p of folders) {
+        if (branch && !p.includes(branch)) continue;    // 파일에 지점명 있으면 그 지점 폴더만
+        const pdates = p.match(/20\d{6}/g) || [];        // 폴더 속 8자리 날짜들
+        const dateHit = ymd && pdates.includes(ymd);
+        const monthHit = ym && pdates.some((d) => d.slice(0, 6) === ym);
         let s = 0;
-        if (branch && p.includes(branch)) s += 5;
-        if (y && p.includes(y)) s += 2;
-        if (y && mo && (p.includes(y + '-' + mo) || p.includes(y + mo) || p.includes(y + '.' + mo))) s += 2;
-        if (mo && p.includes(mo + '월')) s += 1;
+        if (!branch) { s = dateHit ? 6 : 0; }            // 지점 없으면 '날짜 완전일치'만 인정
+        else {
+          s = 6;                                         // 지점 일치
+          if (dateHit) s += 5; else if (monthHit) s += 2;
+          else if (ymd) s = 2;                           // 지점만 맞고 날짜 전혀 불일치 → 약한 후보
+        }
         if (s > 0) score.set(p, (score.get(p) || 0) + s);
       }
     }
-    return [...score.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5).map((e) => e[0]);
+    // 임계값 5 이상만 추천(연/월만 걸린 노이즈·다른 날짜 제거). 없으면 아무것도 안 뜸.
+    return [...score.entries()].filter(([, s]) => s >= 5).sort((a, b) => b[1] - a[1]).slice(0, 5).map((e) => e[0]);
   }
 
   function listHTML() {
