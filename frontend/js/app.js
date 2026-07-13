@@ -1222,7 +1222,10 @@ const App = (() => {
       const matched = [];
       for (const b of books) {
         let items = [];
-        try { const sres = await API.bookSearch(b.title, 5); items = (sres && sres.items) || []; } catch (_) {}
+        try {
+          let sres = await API.bookSearch(b.title, 5); items = (sres && sres.items) || [];
+          if (!items.length && b.text && b.text !== b.title) { sres = await API.bookSearch(b.text, 5); items = (sres && sres.items) || []; }
+        } catch (_) {}
         matched.push({ detected: b, items, pick: items[0] || null });
       }
       setStatus('');
