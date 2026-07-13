@@ -1099,13 +1099,9 @@ const App = (() => {
     const cam = document.createElement('input');
     cam.type = 'file'; cam.accept = 'image/*'; cam.capture = 'environment'; cam.multiple = true; cam.style.display = 'none';
     document.body.appendChild(cam);
-    const ocrCam = document.createElement('input');
-    ocrCam.type = 'file'; ocrCam.accept = 'image/*'; ocrCam.capture = 'environment'; ocrCam.style.display = 'none';
-    document.body.appendChild(ocrCam);
     const m = UI.modal(`<h3>📖 도서 목록 만들기 <span class="muted" style="font-size:13px;font-weight:400">· 바코드 우선, 안 되면 제목 검색</span></h3>
       <div class="bl-tools">
-        <button type="button" class="btn btn-secondary btn-sm" id="bl-shoot">📷 바코드 촬영</button>
-        <button type="button" class="btn btn-accent btn-sm" id="bl-ocr">🔤 책등 제목인식</button>
+        <button type="button" class="btn btn-secondary btn-sm" id="bl-shoot">📷 촬영·사진 <span class="muted" style="font-weight:400">(바코드→책등)</span></button>
         <div class="bl-search"><input class="input" id="bl-q" placeholder="제목으로 추가 (예: 사려 깊은 수다)"><button type="button" class="btn btn-primary btn-sm" id="bl-add">검색</button></div>
       </div>
       <div class="bl-status" id="bl-status" hidden></div>
@@ -1115,7 +1111,7 @@ const App = (() => {
         <span class="muted" id="bl-count" style="flex:1;font-size:13px"></span>
         <button class="btn btn-ghost" id="bl-csv">⬇️ CSV</button>
         <button class="btn btn-primary" id="bl-done">완료</button>
-      </div>`, { onClose: () => { try { cam.remove(); ocrCam.remove(); } catch (_) {} } });
+      </div>`, { onClose: () => { try { cam.remove(); } catch (_) {} } });
     m.el.querySelector('.modal').classList.add('modal-wide');
 
     function render() {
@@ -1186,7 +1182,7 @@ const App = (() => {
       try { found = await Promise.race([window.ISBN.scanMulti(img), new Promise((r) => setTimeout(() => r([]), 15000))]); } catch (_) {}
       URL.revokeObjectURL(url);
       const codes = [...new Set(found.map((f) => f.code).filter((c) => window.ISBN.isBookIsbn(c)))];
-      if (!codes.length) { setStatus('⚠️ 이 사진에서 바코드를 못 찾았어요. 책등만 보이면 아래 “제목으로 추가”로 검색해 넣으세요.', 'bad'); flashSearch(); return 0; }
+      if (!codes.length) { await runOcr(file); return 0; }
       setStatus(`⏳ 교보에서 도서정보 채우는 중… (바코드 ${codes.length}개)`);
       let added = 0; for (const c of codes) { if (await resolveIsbn(c)) added++; }
       return added;
@@ -1211,7 +1207,7 @@ const App = (() => {
 
     // 책등 사진 → Gemini OCR로 제목 인식 → 각 제목 교보 검색 → 확인 모달
     async function runOcr(file) {
-      setStatus('⏳ 책등에서 제목 인식 중… (Gemini)');
+      setStatus('⏳ 바코드가 없어 책등 제목을 인식하는 중…');
       let dataUrl;
       try { dataUrl = await resizeToDataUrl(file, 1600, 0.82); } catch (_) { return setStatus('⚠️ 이미지를 처리할 수 없습니다', 'bad'); }
       let data;
@@ -1289,9 +1285,7 @@ const App = (() => {
       for (let i = 0; i < files.length; i++) added += await handleImage(files[i], i + 1, files.length);
       if (added) setStatus(`✓ ${added}권 추가됨`, 'ok');
     });
-    ocrCam.addEventListener('change', async () => { const f = ocrCam.files[0]; ocrCam.value = ''; if (f) await runOcr(f); });
     m.q('#bl-shoot').addEventListener('click', () => { try { cam.click(); } catch (_) {} });
-    m.q('#bl-ocr').addEventListener('click', () => { try { ocrCam.click(); } catch (_) {} });
     m.q('#bl-add').addEventListener('click', () => { const q = m.q('#bl-q'); searchAdd(q.value); q.value = ''; q.focus(); });
     m.q('#bl-q').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); m.q('#bl-add').click(); } });
     m.q('#bl-csv').addEventListener('click', exportCsv);
