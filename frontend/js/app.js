@@ -1217,11 +1217,14 @@ const App = (() => {
       setStatus(`⏳ 인식된 ${books.length}권 교보에서 대조 중…`);
       const matched = [];
       for (const b of books) {
-        let items = [];
-        try {
-          let sres = await API.bookSearch(b.title, 5); items = (sres && sres.items) || [];
-          if (!items.length && b.text && b.text !== b.title) { sres = await API.bookSearch(b.text, 5); items = (sres && sres.items) || []; }
-        } catch (_) {}
+        const items = []; const seen = new Set();
+        const tryQ = async (q) => {
+          if (!q) return;
+          try { const s = await API.bookSearch(q, 5); for (const it of ((s && s.items) || [])) if (!seen.has(it.isbn)) { seen.add(it.isbn); items.push(it); } } catch (_) {}
+        };
+        await tryQ(b.title);          // 제목(중간, 가장 큰 글자)
+        await tryQ(b.subtitle);       // 부제(위)도 각각 검색해 후보 합침
+        if (!items.length) await tryQ(b.text);
         matched.push({ detected: b, items, pick: items[0] || null });
       }
       setStatus('');
@@ -1244,7 +1247,7 @@ const App = (() => {
             <div class="oc-info">
               ${p ? `<div class="bl-title">${esc(p.title)}</div><div class="muted" style="font-size:12px">${esc(p.author || '')}${p.publisher ? ' · ' + esc(p.publisher) : ''} · ${esc(p.isbn)}</div>`
                   : `<div class="bl-title">${esc(s.detected.title)}</div><div class="muted" style="font-size:12px">교보에서 못 찾음</div>`}
-              <div class="muted" style="font-size:11px">인식: ${esc(s.detected.title)}${s.detected.author ? ' / ' + esc(s.detected.author) : ''}</div>
+              <div class="muted" style="font-size:11px">인식: ${esc(s.detected.title)}${s.detected.subtitle ? ' · 부제 ' + esc(s.detected.subtitle) : ''}${s.detected.author ? ' · ' + esc(s.detected.author) : ''}</div>
             </div>
             <button type="button" class="btn btn-ghost btn-sm oc-alt" data-i="${i}">다른 후보</button>
           </div>`;
@@ -1322,20 +1325,12 @@ const App = (() => {
         <div class="cam-fields">
           <input class="input cam-title" placeholder="제목(선택)">
           <input class="input cam-note" placeholder="비고(선택)">
-          <div class="cam-isbn" data-isbn-row="${i}" hidden>
-            <span class="cam-isbn-status muted">⏳ 대기</span>
-            <input class="input cam-isbn-input" placeholder="바코드 번호" inputmode="numeric" maxlength="17">
-            <button type="button" class="btn btn-ghost btn-sm cam-region" data-region="${i}" title="스캔 구역 지정">🎯 구역</button>
-            <button type="button" class="btn btn-ghost btn-sm cam-rescan" data-rescan="${i}" title="다시 인식">🔍</button>
-            <div class="cam-isbn-alt" data-alt="${i}"></div>
-          </div>
         </div>
         <button class="icon-btn cam-rm" data-rm="${i}" title="제거">✕</button>
       </div>`).join('');
     const loc = state.folder === '/' ? '홈' : state.folder;
     const m = UI.modal(`<h3>📷 촬영 업로드 <span class="muted" style="font-size:13px;font-weight:400">· ${files.length}장 → ${UI.escapeHtml(loc)}</span></h3>
-      ${hasIsbn ? `<label class="cam-isbn-toggle"><input type="checkbox" id="isbn-on" checked><span class="ci-main">📕 바코드 자동 인식</span><span class="ci-hint muted">ISBN·상품 바코드를 읽어 파일명에 넣기</span></label>` : ''}
-      <p class="muted" style="font-size:12px;margin-bottom:10px">각 사진의 제목·비고를 입력하고 업로드하세요. (제목 비우면 자동 이름)</p>
+      <p class="muted" style="font-size:12px;margin-bottom:10px">각 사진의 제목·비고를 입력하고 업로드하세요. (제목 비우면 자동 이름) · 바코드/책등으로 도서 목록을 만들려면 <b>📖 도서 목록 만들기</b>를 이용하세요.</p>
       <div id="cam-list">${rows}</div>
       <div class="modal-actions"><button class="btn btn-ghost" id="cam-cancel">취소</button><button class="btn btn-primary" id="cam-go">⬆️ ${files.length}장 업로드</button></div>`);
     m.el.querySelector('.modal').classList.add('modal-wide');
@@ -1343,7 +1338,7 @@ const App = (() => {
     const kept = new Set(files.map((_, i) => i));
     const itemEl = (i) => m.el.querySelector(`.cam-item[data-i="${i}"]`);
     const imgEl = (i) => m.el.querySelector(`[data-img="${i}"]`);
-    const isbnOn = () => hasIsbn && !!m.q('#isbn-on')?.checked;
+    const isbnOn = () => false; // 일반 촬영 업로드에서는 바코드 인식 비활성(도서 목록 만들기로 이관)
 
     function renderChips(i) {
       const alt = m.el.querySelector(`[data-alt="${i}"]`); if (!alt) return;
