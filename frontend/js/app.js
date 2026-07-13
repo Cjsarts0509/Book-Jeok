@@ -103,7 +103,7 @@ const App = (() => {
             <div class="nav-item" data-nav="shares"><span class="ico">🔗</span><span class="t">공유</span></div>
             <div class="nav-item" data-nav="trash"><span class="ico">🗑️</span><span class="t">휴지통</span></div>
             <div class="nav-item nav-bell" data-nav="notif"><span class="ico">🔔</span><span class="t">알림</span><span class="notif-badge hidden" id="notif-badge">0</span></div>
-            ${admin ? '<a class="nav-item" href="admin.html"><span class="ico">⚙️</span><span class="t">관리자</span></a>' : ''}
+            ${admin ? '<a class="nav-item" href="admin.html"><span class="ico">🛡️</span><span class="t">관리자</span></a>' : ''}
             <div class="nav-item" data-nav="help"><span class="ico">❓</span><span class="t">도움말</span></div>
             <div class="nav-item" data-nav="settings"><span class="ico">⚙️</span><span class="t">설정</span></div>
             <div class="nav-item" data-nav="logout"><span class="ico">🚪</span><span class="t">로그아웃</span></div>
@@ -1016,7 +1016,7 @@ const App = (() => {
     const cam = document.createElement('input');
     cam.type = 'file'; cam.accept = 'image/*'; cam.capture = 'environment'; cam.style.display = 'none';
     document.body.appendChild(cam);
-    const m = UI.modal(`<h3>📷 바코드 단건 연속 촬영 <span class="muted" style="font-size:13px;font-weight:400">· 한 장에 한 권씩 자동 저장</span></h3>
+    const m = UI.modal(`<h3>📷 바코드 단건 연속 촬영</h3><p class="muted" style="font-size:12px;margin:-8px 0 12px">한 장에 한 권씩 자동 저장</p>
       <div id="cap-pick" class="cap-pick" hidden></div>
       <button type="button" class="btn btn-primary cap-shoot" id="cap-shoot">📷 촬영</button>
       <div class="scan-list" id="cap-list"></div>
@@ -1100,7 +1100,7 @@ const App = (() => {
     const cam = document.createElement('input');
     cam.type = 'file'; cam.accept = 'image/*'; cam.capture = 'environment'; cam.multiple = true; cam.style.display = 'none';
     document.body.appendChild(cam);
-    const m = UI.modal(`<h3>📷 바코드 다건 촬영 <span class="muted" style="font-size:13px;font-weight:400">· 한 장에 여러 권 · ISBN 이름으로 저장</span></h3>
+    const m = UI.modal(`<h3>📷 바코드 다건 촬영</h3><p class="muted" style="font-size:12px;margin:-8px 0 12px">한 장에 여러 권 · ISBN 이름으로 저장</p>
       <button type="button" class="btn btn-primary cap-shoot" id="mb-shoot">📷 촬영·사진</button>
       <div class="bl-status" id="mb-status" hidden></div>
       <div class="scan-list" id="mb-list"></div>
