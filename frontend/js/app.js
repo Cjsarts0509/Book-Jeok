@@ -1429,27 +1429,36 @@ const App = (() => {
       regionPicker(file, img, upBlob, thumb, found);
     }
 
-    // 인식된 바코드가 여러 개면 저장 전에 확인 — 위→아래 순서로 번호 매겨 보여주고,
-    // 같은 위치에 두 개면(한 바코드의 오독 가능성) 경고 표시. 잘못 인식된 것은 체크 해제 후 저장.
+    // 인식된 바코드가 여러 개면 저장 전에 확인 — 사진 위에 '인식된 위치'를 번호 박스로 표시.
+    // 위치를 잡은 것은 사진 위 번호로, 못 잡은 것은 '위치 미확인'으로 구분해 사용자가 눈으로 대조·선택.
     function confirmMulti(items, upBlob, thumb, file) {
       const url = URL.createObjectURL(file);
-      // 위치(박스 y) 오름차순 정렬 — 박스 없는 건 맨 뒤(위치 불명)
+      // 위치(박스 y) 오름차순 — 박스 있는 것 먼저(위→아래), 없는 것 뒤
       const ordered = items.map((it, i) => ({ code: it.code, box: it.box || null, _i: i }))
         .sort((a, b) => ((a.box ? a.box.y : Infinity) - (b.box ? b.box.y : Infinity)) || (a._i - b._i));
-      const overlapY = (a, b) => { if (!a || !b) return false; const inter = Math.max(0, Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y)); return inter / Math.max(1, Math.min(a.h, b.h)) > 0.5; };
       const rows = ordered.map((it, idx) => {
-        const dup = idx > 0 && it.box && ordered[idx - 1].box && overlapY(it.box, ordered[idx - 1].box);
-        const pos = it.box ? (idx + 1) : '?';
-        const warn = dup ? '<span class="mb-warn">⚠ 위와 같은 위치 — 한 권의 오독일 수 있어요</span>' : '';
-        return `<label class="mb-chk${dup ? ' mb-dup' : ''}"><input type="checkbox" checked data-code="${it.code}"><span class="mb-pos">${pos}</span><span class="mb-isbn">${it.code}</span>${warn}</label>`;
+        const badge = it.box ? `<span class="mb-pos">${idx + 1}</span>` : '<span class="mb-pos mb-pos-q" title="사진에서 위치를 못 잡음">?</span>';
+        const note = it.box ? '' : '<span class="mb-warn">위치 미확인 — 사진과 대조하세요</span>';
+        return `<label class="mb-chk"><input type="checkbox" checked data-code="${it.code}">${badge}<span class="mb-isbn">${it.code}</span>${note}</label>`;
       }).join('');
-      const cm = UI.modal(`<h3>✅ 인식된 바코드 확인 <span class="muted" style="font-size:12px;font-weight:400">· ${ordered.length}개 (위→아래 순)</span></h3>
-        <p class="muted" style="font-size:12px;margin:-6px 0 10px">책과 비교해 <b>저장할 바코드만 체크</b>하세요. <b>⚠ 표시</b>는 같은 위치에 두 개가 잡힌 것으로, 보통 한쪽이 오인식입니다.</p>
-        <div class="mb-confirm-img"><img src="${url}" alt=""></div>
+      const cm = UI.modal(`<h3>✅ 인식된 바코드 확인 <span class="muted" style="font-size:12px;font-weight:400">· ${ordered.length}개</span></h3>
+        <p class="muted" style="font-size:12px;margin:-6px 0 10px">사진 위 <b>번호</b>가 인식된 바코드 위치입니다. 책과 대조해 <b>저장할 것만 체크</b>하세요. (같은 바코드에 번호가 겹치면 한쪽이 오인식입니다.)</p>
+        <div class="region-wrap mb-imgwrap"><img class="region-img" id="mbimg" src="${url}" alt=""><div class="rp-layer" id="mblayer"></div></div>
         <div class="mb-chks">${rows}</div>
         <div class="modal-actions"><button class="btn btn-ghost" id="mbc-cancel">취소</button><span style="flex:1"></span><button class="btn btn-primary" id="mbc-save">선택 저장</button></div>`,
-        { onClose: () => { try { URL.revokeObjectURL(url); } catch (_) {} } });
+        { onClose: () => { try { URL.revokeObjectURL(url); } catch (_) {} window.removeEventListener('resize', draw); } });
       cm.el.querySelector('.modal').classList.add('modal-wide');
+      const imgEl = cm.q('#mbimg'), layer = cm.q('#mblayer');
+      function draw() {
+        const nw = imgEl.naturalWidth || 1; const s = (imgEl.clientWidth || nw) / nw;
+        layer.innerHTML = ordered.map((it, idx) => {
+          if (!it.box) return '';
+          const b = it.box;
+          return `<div class="mb-boxmark" style="left:${b.x * s}px;top:${b.y * s}px;width:${b.w * s}px;height:${b.h * s}px"><span class="mb-boxnum">${idx + 1}</span></div>`;
+        }).join('');
+      }
+      if (imgEl.complete && imgEl.naturalWidth) draw(); else imgEl.addEventListener('load', draw);
+      window.addEventListener('resize', draw);
       cm.q('#mbc-cancel').addEventListener('click', cm.close);
       cm.q('#mbc-save').addEventListener('click', async () => {
         const sel = [...cm.el.querySelectorAll('.mb-chks input:checked')].map((x) => x.dataset.code);
