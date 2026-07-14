@@ -2832,13 +2832,7 @@ const App = (() => {
         <div class="sa-resulthead">
           <div class="sa-summary">오차 항목 <b>${disc.length.toLocaleString()}건</b> · 서가 매칭 <b>${matched.toLocaleString()}건</b><span id="sa-photocount" class="muted" style="font-size:12px"></span><span id="sa-shown" class="muted" style="font-size:12px"></span> <span class="muted" style="font-size:12px">· 열 제목으로 정렬 · 행을 누르면 상세</span></div>
           <label class="sa-foldersel">📁 <select id="sa-folder">${folderOptions(saCurrentFolder)}</select></label>
-          <div class="sa-fielddd">
-            <button type="button" class="sa-fieldbtn" id="sa-ffield-btn">분야 <span id="sa-ffield-lbl">전체</span> <span class="sa-caret">▾</span></button>
-            <div class="sa-fieldpop" id="sa-ffield-pop" hidden>
-              <div class="sa-fieldpop-head"><button type="button" class="btn btn-ghost btn-sm" id="sa-ffield-all">전체선택</button><button type="button" class="btn btn-ghost btn-sm" id="sa-ffield-none">전체해제</button></div>
-              <div class="sa-fieldpop-list">${fields.map((f) => `<label class="sa-fieldopt"><input type="checkbox" value="${esc(f)}"> ${esc(f)}</label>`).join('')}</div>
-            </div>
-          </div>
+          <button type="button" class="sa-fieldbtn" id="sa-ffield-btn">분야 <span id="sa-ffield-lbl">전체</span> <span class="sa-caret">▾</span></button>
           <label class="sa-foldersel">사진 <select id="sa-fphoto"><option value="">전체</option><option value="has">있음</option><option value="no">없음</option></select></label>
           ${window.ISBN ? '<button class="btn btn-secondary btn-sm" id="sa-scan">📷 바코드로 찾기</button>' : ''}
           <button class="btn btn-secondary btn-sm" id="sa-save">💾 저장</button>
@@ -2855,29 +2849,29 @@ const App = (() => {
       refreshPhotos();   // 선택된 폴더에 이미 사진이 있는 항목 음영 표시(+사진 필터 시 반영)
     }
 
-    // 분야 다중선택 팝오버(전체선택/전체해제 포함)
+    // 분야 다중선택 — 별도 모달(전체선택/전체해제). 팝오버가 모달 스크롤 영역에 잘려서 모달로 띄움.
     function wireFieldFilter(fields) {
-      const btn = m.q('#sa-ffield-btn'), pop = m.q('#sa-ffield-pop'), lbl = m.q('#sa-ffield-lbl');
-      if (!btn || !pop) return;
-      const boxes = () => [...pop.querySelectorAll('.sa-fieldopt input')];
+      const btn = m.q('#sa-ffield-btn'), lbl = m.q('#sa-ffield-lbl');
+      if (!btn) return;
       const updateLabel = () => {
         const n = saFilterFields.size;
         lbl.textContent = (n === 0 || n === fields.length) ? '전체' : (n === 1 ? [...saFilterFields][0] : `${n}개`);
       };
-      const apply = () => { updateLabel(); renderTable(); };
-      const closePop = () => { pop.hidden = true; document.removeEventListener('click', onOutside, true); };
-      const onOutside = (e) => { if (!pop.contains(e.target) && e.target !== btn && !btn.contains(e.target)) closePop(); };
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        if (pop.hidden) { pop.hidden = false; setTimeout(() => document.addEventListener('click', onOutside, true)); }
-        else closePop();
+      updateLabel();
+      btn.addEventListener('click', () => {
+        const rows = fields.map((f) => `<label class="sa-fieldopt"><input type="checkbox" value="${esc(f)}"${saFilterFields.has(f) ? ' checked' : ''}> ${esc(f)}</label>`).join('');
+        const fm = UI.modal(`<h3>분야 선택 <span class="muted" style="font-size:12px;font-weight:400">· 여러 개 선택 가능</span></h3>
+          <div class="sa-fieldpop-head"><button type="button" class="btn btn-ghost btn-sm" id="ff-all">전체선택</button><button type="button" class="btn btn-ghost btn-sm" id="ff-none">전체해제</button></div>
+          <div class="sa-fieldpop-list sa-fieldpop-modal">${rows}</div>
+          <div class="modal-actions"><button class="btn btn-primary" id="ff-close">닫기</button></div>`);
+        fm.el.querySelector('.modal').classList.add('modal-wide');
+        const boxes = () => [...fm.el.querySelectorAll('.sa-fieldopt input')];
+        const sync = () => { updateLabel(); renderTable(); };
+        boxes().forEach((cb) => cb.addEventListener('change', () => { if (cb.checked) saFilterFields.add(cb.value); else saFilterFields.delete(cb.value); sync(); }));
+        fm.q('#ff-all').addEventListener('click', () => { saFilterFields = new Set(fields); boxes().forEach((cb) => { cb.checked = true; }); sync(); });
+        fm.q('#ff-none').addEventListener('click', () => { saFilterFields = new Set(); boxes().forEach((cb) => { cb.checked = false; }); sync(); });
+        fm.q('#ff-close').addEventListener('click', fm.close);
       });
-      boxes().forEach((cb) => cb.addEventListener('change', () => {
-        if (cb.checked) saFilterFields.add(cb.value); else saFilterFields.delete(cb.value);
-        apply();
-      }));
-      m.q('#sa-ffield-all')?.addEventListener('click', () => { saFilterFields = new Set(fields); boxes().forEach((cb) => { cb.checked = true; }); apply(); });
-      m.q('#sa-ffield-none')?.addEventListener('click', () => { saFilterFields = new Set(); boxes().forEach((cb) => { cb.checked = false; }); apply(); });
     }
 
     async function downloadXlsx() {
