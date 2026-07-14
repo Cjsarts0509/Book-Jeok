@@ -2547,8 +2547,8 @@ const App = (() => {
     function attachCover(coverEl, isbn) {
       const i = String(isbn || '').replace(/[^0-9Xx]/g, '');
       const urls = i.length >= 10 ? [
+        `https://contents.kyobobook.co.kr/sih/fit-in/400x0/pdt/${i}.jpg`,
         `https://contents.kyobobook.co.kr/sih/fit-in/458x0/pdt/${i}.jpg`,
-        `https://image.kyobobook.co.kr/images/book/xlarge/${i.slice(-3)}/x${i}.jpg`,
       ] : [];
       if (!urls.length) { coverEl.classList.add('sad-nocover'); return; }
       const img = document.createElement('img'); img.alt = '표지'; let idx = 0;
