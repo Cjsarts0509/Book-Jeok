@@ -5,6 +5,12 @@ services:
     image: postgres:16-alpine
     container_name: bookjeok-db
     restart: unless-stopped
+    # 로그가 OS 부팅 디스크를 채워 VM 전체가 다운되는 것을 방지(회전)
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "5" }
+    # OOM 시 호스트가 임의 프로세스를 죽이지 않도록 컨테이너 메모리 상한(12GB 중)
+    mem_limit: 3g
     environment:
       POSTGRES_USER: ${DB_USER:-bookjeok}
       POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD 를 .env 에 설정하세요}
@@ -19,11 +25,24 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 30s   # 최초 볼륨 initdb 시간이 길어도 db를 unhealthy로 오판하지 않도록
 
   api:
     build: ./backend
     container_name: bookjeok-api
     restart: unless-stopped
+    # 로그 회전(부팅 디스크 보호) + 메모리 상한(LibreOffice/zip이 튀어도 호스트/DB를 지킴)
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "5" }
+    mem_limit: 4g
+    # 프로세스는 살아있는데 이벤트 루프가 멎은 경우까지 감지(단순 재시작 정책으로는 못 잡음)
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"require('http').get('http://127.0.0.1:4000/api/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))\""]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
     depends_on:
       db:
         condition: service_healthy

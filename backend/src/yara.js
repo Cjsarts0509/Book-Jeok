@@ -16,6 +16,7 @@ const hasRules = () => { try { return fs.existsSync(RULES); } catch (_) { return
 
 // yara 바이너리 실행 가능 여부를 1회 확인하고 캐시(대시보드 상태를 정확히 표시).
 let binaryOk = null;
+let binaryMissing = false; // 스캔 중 바이너리가 사라진 경우 경고 1회만 출력하기 위한 플래그
 function binaryAvailable() {
   if (binaryOk === null) {
     try { execFileSync('yara', ['--version'], { timeout: 5000, stdio: 'ignore' }); binaryOk = true; }

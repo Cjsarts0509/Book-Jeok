@@ -78,7 +78,28 @@ fs.mkdirSync(config.storageRoot, { recursive: true });
 require('./settings').loadSettings(); // 허용 확장자 캐시 로드
 require('./purge').startPurgeScheduler(); // 휴지통 1년 경과분 자동 영구삭제
 require('./scheduler').start(); // 주간 리포트 자동 발송(SMTP 설정 시)
-app.listen(config.port, () => {
+const server = app.listen(config.port, () => {
   console.log(`북적북적 API 서버 실행 중 → http://localhost:${config.port}  (env: ${config.env})`);
   console.log(`파일 저장 경로: ${config.storageRoot}`);
 });
+
+// ── 프로세스 안전망 ──────────────────────────────────
+// 미들웨어 체인 밖(스트림 콜백·타이머 등)에서 터진 예외/거부가 서버를 조용히 죽이는 것을 방지.
+// 거부는 로깅만(가용성 우선), 미처리 예외는 상태 손상 가능성이 있어 정리 후 종료(컨테이너가 재시작).
+process.on('unhandledRejection', (reason) => {
+  console.error('[unhandledRejection]', (reason && (reason.stack || reason.message)) || reason);
+});
+process.on('uncaughtException', (err) => {
+  console.error('[uncaughtException]', (err && (err.stack || err.message)) || err);
+  server.close(() => process.exit(1));
+  setTimeout(() => process.exit(1), 5000).unref(); // 정상 종료가 지연되면 강제 종료
+});
+// 배포/재시작 시 진행 중 요청을 정리하고 DB 풀을 닫은 뒤 종료(무중단성·연결 누수 방지).
+const { pool } = require('./db');
+for (const sig of ['SIGTERM', 'SIGINT']) {
+  process.on(sig, () => {
+    console.log(`[${sig}] 종료 신호 수신 — 서버 정리 중…`);
+    server.close(() => { pool.end().catch(() => {}).finally(() => process.exit(0)); });
+    setTimeout(() => process.exit(0), 10000).unref();
+  });
+}

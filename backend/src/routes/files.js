@@ -7,7 +7,7 @@ const path = require('path');
 const fs = require('fs');
 const fsp = require('fs/promises');
 const config = require('../config');
-const { query } = require('../db');
+const { query, withTransaction } = require('../db');
 const { authenticate } = require('../middleware/auth');
 const { audit, wrap, canAccessOwner } = require('../util');
 const { generateToken, hashPassword } = require('../crypto');
@@ -209,14 +209,18 @@ router.patch('/folders', authenticate, wrap(resolveOwner), wrap(async (req, res)
   const oldLike = oldPath + '/%';
   const cut = String(oldPath.length + 1);
   await ensureFolder(req.targetOwnerId, newPath.slice(0, newPath.lastIndexOf('/')) || '/');
-  await query(
-    `UPDATE folders SET path = $4 || substring(path from $5::int) WHERE owner_id=$1 AND deleted_at IS NULL AND (path=$2 OR path LIKE $3)`,
-    [req.targetOwnerId, oldPath, oldLike, newPath, cut]
-  );
-  await query(
-    `UPDATE files SET folder = $4 || substring(folder from $5::int), updated_at=now() WHERE owner_id=$1 AND deleted_at IS NULL AND (folder=$2 OR folder LIKE $3)`,
-    [req.targetOwnerId, oldPath, oldLike, newPath, cut]
-  );
+  // folders·files 경로를 함께 갱신 — 둘 사이에서 실패하면 파일이 없어진 폴더를 가리켜 목록에서 사라짐.
+  // 트랜잭션으로 묶어 둘 다 반영되거나 둘 다 되돌려지도록 보장.
+  await withTransaction(async (client) => {
+    await client.query(
+      `UPDATE folders SET path = $4 || substring(path from $5::int) WHERE owner_id=$1 AND deleted_at IS NULL AND (path=$2 OR path LIKE $3)`,
+      [req.targetOwnerId, oldPath, oldLike, newPath, cut]
+    );
+    await client.query(
+      `UPDATE files SET folder = $4 || substring(folder from $5::int), updated_at=now() WHERE owner_id=$1 AND deleted_at IS NULL AND (folder=$2 OR folder LIKE $3)`,
+      [req.targetOwnerId, oldPath, oldLike, newPath, cut]
+    );
+  });
   await audit(req, 'rename_folder', `${oldPath} -> ${newPath}`);
   res.json({ ok: true, path: newPath });
 }));
@@ -226,8 +230,11 @@ router.delete('/folders', authenticate, wrap(resolveOwner), wrap(async (req, res
   const folder = normalizeFolder(req.query.path || req.body.path);
   if (folder === '/') return res.status(400).json({ error: '루트 폴더는 삭제할 수 없습니다.' });
   const like = folder + '/%';
-  await query('UPDATE folders SET deleted_at=now() WHERE owner_id=$1 AND deleted_at IS NULL AND (path=$2 OR path LIKE $3)', [req.targetOwnerId, folder, like]);
-  await query('UPDATE files SET deleted_at=now(), deleted_with_folder=$4 WHERE owner_id=$1 AND deleted_at IS NULL AND (folder=$2 OR folder LIKE $3)', [req.targetOwnerId, folder, like, folder]);
+  // 폴더·하위 파일을 함께 휴지통으로 — 중간 실패 시 정합성이 깨지므로 트랜잭션으로 묶음.
+  await withTransaction(async (client) => {
+    await client.query('UPDATE folders SET deleted_at=now() WHERE owner_id=$1 AND deleted_at IS NULL AND (path=$2 OR path LIKE $3)', [req.targetOwnerId, folder, like]);
+    await client.query('UPDATE files SET deleted_at=now(), deleted_with_folder=$4 WHERE owner_id=$1 AND deleted_at IS NULL AND (folder=$2 OR folder LIKE $3)', [req.targetOwnerId, folder, like, folder]);
+  });
   await audit(req, 'trash_folder', `${folder}`);
   res.json({ ok: true });
 }));
@@ -293,6 +300,8 @@ router.post('/upload', authenticate, wrap(resolveOwner), upload.array('file', 30
   const titles = req.body.titles !== undefined ? [].concat(req.body.titles) : [];
   const notes = req.body.notes !== undefined ? [].concat(req.body.notes) : [];
   const saved = []; const rejected = [];
+  const savedPaths = new Set(); // DB 저장까지 끝난 파일의 디스크 경로(정리 대상에서 제외)
+  try {
   for (let i = 0; i < req.files.length; i++) {
     const f = req.files[i];
     // 경로 구분자·제어문자 제거 (zip-slip/헤더 주입 방어)
@@ -325,6 +334,13 @@ router.post('/upload', authenticate, wrap(resolveOwner), upload.array('file', 30
       [req.targetOwnerId, folder, name, path.basename(f.path), f.size, f.mimetype, note]
     );
     saved.push({ id: row.rows[0].id, name, size: f.size, folder });
+    savedPaths.add(f.path);
+  }
+  } catch (err) {
+    // 루프 중 DB 오류 등으로 중단되면, 아직 DB에 기록되지 않은 업로드 파일이 디스크에 남아 누수됨.
+    // 저장 완료된 것만 남기고 나머지 임시 파일을 정리한 뒤 오류를 상위(에러 핸들러)로 전달.
+    await Promise.all(req.files.filter((f) => !savedPaths.has(f.path)).map((f) => fsp.unlink(f.path).catch(() => {})));
+    throw err;
   }
   await audit(req, 'upload', `owner=${req.targetOwnerId} count=${saved.length}`);
   // 다른 사람(담당자·관리자)이 내 계정에 올리면 소유자에게 인앱 알림
@@ -367,7 +383,14 @@ router.get('/:id(\\d+)/pdf', authenticate, wrap(async (req, res) => {
     const pdf = await officePdf.convert(disk, ext, file.stored_name);
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', 'inline; filename="preview.pdf"');
-    fs.createReadStream(pdf).pipe(res);
+    const rs = fs.createReadStream(pdf);
+    // 스트림 오류(캐시 삭제·권한·FD 고갈 등)에 리스너가 없으면 프로세스가 죽음 → 반드시 처리
+    rs.on('error', (e) => {
+      console.error('[pdf] 스트림 오류:', e.message);
+      if (!res.headersSent) res.status(500).json({ error: '문서를 전송하지 못했습니다.' });
+      else res.destroy();
+    });
+    rs.pipe(res);
   } catch (_) {
     res.status(500).json({ error: '문서를 변환하지 못했습니다.' });
   }
