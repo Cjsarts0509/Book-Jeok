@@ -1,13 +1,47 @@
 'use strict';
 
-// 로그인 사용자 공용: 영업점 목록, 활성 공지사항 조회
+// 로그인 사용자 공용: 영업점 목록, 활성 공지사항, 서버 상태
+const os = require('os');
+const fsp = require('fs/promises');
 const express = require('express');
 const { query } = require('../db');
+const { diskUsage } = require('../disk');
 const { authenticate } = require('../middleware/auth');
 const { wrap } = require('../util');
 
 const router = express.Router();
 router.use(authenticate);
+
+// 실제 가용 메모리(캐시 제외)를 /proc/meminfo 로 계산 — os.freemem()은 캐시를 사용중으로 봐 과다 표기됨
+async function memoryInfo() {
+  try {
+    const txt = await fsp.readFile('/proc/meminfo', 'utf8');
+    const val = (k) => { const m = txt.match(new RegExp('^' + k + ':\\s+(\\d+)', 'm')); return m ? Number(m[1]) * 1024 : null; };
+    const total = val('MemTotal'), avail = val('MemAvailable');
+    if (total && avail != null) return { total, free: avail, used: Math.max(0, total - avail) };
+  } catch { /* 컨테이너/OS에 따라 없을 수 있음 → os로 폴백 */ }
+  const total = os.totalmem(), free = os.freemem();
+  return { total, free, used: Math.max(0, total - free) };
+}
+
+// 서버(호스트 VM) 상태: CPU 부하·메모리·디스크·가동시간·DB 연결. 민감정보 없음 → 로그인 사용자 공용.
+router.get('/server-status', wrap(async (req, res) => {
+  const cores = os.cpus().length || 1;
+  const [l1, l5, l15] = os.loadavg();
+  const mem = await memoryInfo();
+  const disk = await diskUsage();
+  let dbOk = true;
+  try { await query('SELECT 1'); } catch { dbOk = false; }
+  const pct = (u, t) => (t > 0 ? Math.round((u / t) * 100) : 0);
+  res.json({
+    time: new Date().toISOString(),
+    cpu: { cores, load1: l1, load5: l5, load15: l15, loadPct: Math.min(100, Math.round((l1 / cores) * 100)) },
+    memory: { total: mem.total, used: mem.used, free: mem.free, usedPct: pct(mem.used, mem.total) },
+    disk: { total: disk.total, used: disk.used, free: disk.avail, usedPct: pct(disk.used, disk.total) },
+    uptime: { server: os.uptime(), process: process.uptime() },
+    db: { connected: dbOk },
+  });
+}));
 
 // 영업점 목록 (새 폴더 생성용)
 router.get('/branches', wrap(async (req, res) => {

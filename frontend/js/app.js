@@ -104,6 +104,7 @@ const App = (() => {
             <div class="nav-item" data-nav="trash"><span class="ico">🗑️</span><span class="t">휴지통</span></div>
             <div class="nav-item nav-bell" data-nav="notif"><span class="ico">🔔</span><span class="t">알림</span><span class="notif-badge hidden" id="notif-badge">0</span></div>
             ${admin ? '<a class="nav-item" href="admin.html"><span class="ico">🛡️</span><span class="t">관리자</span></a>' : ''}
+            <div class="nav-item" data-nav="serverstatus"><span class="ico">🖥️</span><span class="t">서버 상태</span></div>
             <div class="nav-item" data-nav="help"><span class="ico">❓</span><span class="t">도움말</span></div>
             <div class="nav-item" data-nav="settings"><span class="ico">⚙️</span><span class="t">설정</span></div>
             <div class="nav-item" data-nav="logout"><span class="ico">🚪</span><span class="t">로그아웃</span></div>
@@ -149,7 +150,7 @@ const App = (() => {
     root().querySelectorAll('.appbar-nav [data-nav]').forEach((el) => el.addEventListener('click', () => {
       const n = el.dataset.nav;
       closeNavMenu();
-      if (n === 'logout') doLogout(); else if (n === 'settings') settingsModal(); else if (n === 'files') resetToOwn(); else if (n === 'help') helpModal(); else if (n === 'trash') trashModal(); else if (n === 'shares') shareManageModal(); else if (n === 'notif') notifModal();
+      if (n === 'logout') doLogout(); else if (n === 'settings') settingsModal(); else if (n === 'files') resetToOwn(); else if (n === 'help') helpModal(); else if (n === 'trash') trashModal(); else if (n === 'shares') shareManageModal(); else if (n === 'notif') notifModal(); else if (n === 'serverstatus') serverStatusModal();
     }));
     // 모바일: 상단바 메뉴(햄버거) → 텍스트 리스트 드롭다운
     const navMenuBtn = document.getElementById('nav-menu-toggle');
@@ -2261,6 +2262,38 @@ const App = (() => {
       } catch (e) { m.q('#trash-body').innerHTML = `<p class="muted" style="color:var(--danger)">${UI.escapeHtml(e.message)}</p>`; }
     }
     load();
+  }
+
+  // 서버(호스트 VM) 실시간 상태 — 일반 사용자 포함 전원 열람 가능. 열려 있는 동안 4초 폴링.
+  function serverStatusModal() {
+    const m = UI.modal(`<h3>🖥️ 서버 상태 <span class="muted" id="ss-time" style="font-size:12px;font-weight:400"></span></h3><div id="ss-body"><p class="muted">불러오는 중…</p></div><div class="modal-actions"><button class="btn btn-primary" id="ss-close">닫기</button></div>`);
+    m.el.querySelector('.modal').classList.add('modal-wide');
+    const stop = () => clearInterval(timer);
+    m.q('#ss-close').addEventListener('click', () => { stop(); m.close(); });
+    const dur = (s) => { s = Math.floor(s); const d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600), mi = Math.floor((s % 3600) / 60); return d ? `${d}일 ${h}시간` : h ? `${h}시간 ${mi}분` : `${mi}분`; };
+    const bar = (label, pct, detail) => {
+      const p = Math.max(0, Math.min(100, Math.round(pct)));
+      const color = p >= 90 ? 'var(--danger)' : p >= 70 ? '#f0a500' : 'var(--accent)';
+      return `<div class="ss-row"><div class="ss-head"><span>${label}</span><span class="num">${detail}</span></div><div class="ss-bar"><span style="width:${p}%;background:${color}"></span></div></div>`;
+    };
+    async function load() {
+      if (!document.body.contains(m.el)) { stop(); return; } // 배경클릭·ESC 등으로 닫혔으면 폴링 종료
+      try {
+        const s = await API.serverStatus();
+        m.q('#ss-time').textContent = '· ' + new Date(s.time).toLocaleTimeString('ko-KR');
+        m.q('#ss-body').innerHTML =
+          bar('CPU 부하', s.cpu.loadPct, `${s.cpu.loadPct}% · load ${s.cpu.load1.toFixed(2)} / ${s.cpu.cores}코어`) +
+          bar('메모리', s.memory.usedPct, `${s.memory.usedPct}% · ${UI.bytes(s.memory.used)} / ${UI.bytes(s.memory.total)}`) +
+          bar('디스크', s.disk.usedPct, `${s.disk.usedPct}% · ${UI.bytes(s.disk.used)} / ${UI.bytes(s.disk.total)}`) +
+          `<div class="ss-meta">
+            <div><span class="muted">서버 가동</span><b>${dur(s.uptime.server)}</b></div>
+            <div><span class="muted">서비스 가동</span><b>${dur(s.uptime.process)}</b></div>
+            <div><span class="muted">데이터베이스</span><b style="color:${s.db.connected ? 'var(--accent)' : 'var(--danger)'}">${s.db.connected ? '정상' : '끊김'}</b></div>
+          </div>`;
+      } catch (e) { m.q('#ss-body').innerHTML = `<p class="muted" style="color:var(--danger)">${UI.escapeHtml(e.message)}</p>`; }
+    }
+    load();
+    const timer = setInterval(load, 4000);
   }
 
   function usageReportModal() {

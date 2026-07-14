@@ -826,6 +826,16 @@ th { background: var(--bg); font-weight: 700; color: var(--text-muted); font-siz
 @keyframes bjspin { to { transform: rotate(360deg); } }
 #refresh-btn.spinning { pointer-events: none; opacity: .6; }
 
+/* 서버 상태 모달 */
+.ss-row { margin-bottom: 15px; }
+.ss-head { display: flex; justify-content: space-between; align-items: baseline; font-size: 13px; font-weight: 600; margin-bottom: 6px; }
+.ss-head .num { color: var(--text-muted); font-weight: 500; font-variant-numeric: tabular-nums; }
+.ss-bar { height: 9px; background: var(--border); border-radius: 6px; overflow: hidden; }
+.ss-bar > span { display: block; height: 100%; border-radius: 6px; transition: width .5s ease; }
+.ss-meta { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 18px; padding-top: 15px; border-top: 1px solid var(--border); }
+.ss-meta > div { flex: 1 1 120px; display: flex; flex-direction: column; gap: 3px; font-size: 15px; }
+.ss-meta > div .muted { font-size: 12px; }
+
 /* 인라인 이름변경 */
 .inline-rename { height: 30px; padding: 3px 8px; font-size: 14px; font-weight: 600; width: 100%; max-width: 340px; }
 
