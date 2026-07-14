@@ -826,6 +826,9 @@ th { background: var(--bg); font-weight: 700; color: var(--text-muted); font-siz
 .btn.is-busy { cursor: progress; }
 @keyframes bjspin { to { transform: rotate(360deg); } }
 #refresh-btn.spinning { pointer-events: none; opacity: .6; }
+#refresh-btn.has-update { position: relative; }
+#refresh-btn.has-update::after { content: ""; position: absolute; top: 3px; right: 3px; width: 8px; height: 8px; border-radius: 50%; background: var(--danger); box-shadow: 0 0 0 2px var(--surface); animation: bjpulse 1.6s ease-in-out infinite; }
+@keyframes bjpulse { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
 
 /* 서버 상태 모달 */
 .ss-row { margin-bottom: 15px; }

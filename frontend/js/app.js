@@ -2,6 +2,7 @@
 const App = (() => {
   const state = {
     user: null, folder: '/', ownerId: null, ownerName: null,
+    rev: null, stale: false,
     files: [], folders: [], treeFolders: [], usage: null, accounts: [],
     view: localStorage.getItem('bj_view') || 'list',
     branches: [],
@@ -230,7 +231,27 @@ const App = (() => {
 
   async function doLogout() { try { await API.logout(); } catch {} API.setToken(null); state.user = null; renderLogin(); }
 
-  async function loadAll() { await Promise.all([loadTree(), loadFiles(), loadTags()]); }
+  async function loadAll() { await Promise.all([loadTree(), loadFiles(), loadTags()]); markFresh(); }
+
+  // 다른 세션(같은 계정을 함께 쓰는 사람)이 파일을 바꾸면 목록이 오래됨 → 새로고침 힌트 표시.
+  // loadAll 시 현재 리비전을 기억하고, 30초 폴링에서 더 최신이면 🔄 버튼에 표시 + 1회 안내.
+  async function markFresh() {
+    try { const r = await API.rev(state.ownerId); state.rev = r.rev || null; } catch {}
+    state.stale = false;
+    const b = document.getElementById('refresh-btn'); if (b) { b.classList.remove('has-update'); b.title = '목록 새로고침'; }
+  }
+  async function checkStale() {
+    if (!state.user || state.search.on || state.stale) return;
+    if (document.querySelector('.modal-backdrop')) return; // 모달 조작 중이면 방해 않기
+    try {
+      const r = await API.rev(state.ownerId);
+      if (state.rev && r.rev && r.rev > state.rev) {
+        state.stale = true;
+        const b = document.getElementById('refresh-btn'); if (b) { b.classList.add('has-update'); b.title = '다른 곳에서 변경됨 · 새로고침'; }
+        UI.toast('다른 곳에서 목록이 변경되었습니다 · 🔄 새로고침', 'info');
+      }
+    } catch {}
+  }
   async function loadTags() { try { state.tags = (await API.tags(state.ownerId)).tags || []; } catch { state.tags = []; } }
   async function loadTree() { try { const t = await API.tree(state.ownerId); state.treeFolders = t.folders; state.treeStyles = t.styles || {}; renderTree(); } catch {} }
   async function loadFiles(silent) {
@@ -1217,8 +1238,9 @@ const App = (() => {
 
   // 대용량(>80MB): 50MB 조각으로 순차 전송 후 서버에서 합침. 진행률은 전송 패널 항목 t에 반영. 취소 시 중단.
   async function chunkedUploadFile(file, folder, ownerId, t) {
-    const uid = (self.crypto && crypto.randomUUID) ? crypto.randomUUID()
-      : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => { const r = Math.floor(Math.random() * 16); return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16); });
+    // 시작 전 서버에 크기·형식·할당량 확인 → uploadId 발급(초과 시 조각 올리기 전에 즉시 실패)
+    const init = await API.uploadInit({ folder, filename: file.name, size: file.size }, ownerId);
+    const uid = init.uploadId;
     const total = Math.ceil(file.size / CHUNK_SIZE);
     for (let i = 0; i < total; i++) {
       if (t.canceled()) { const e = new Error('취소됨'); e.canceled = true; throw e; } // 조각 사이에서 취소 확인
@@ -2469,6 +2491,7 @@ const App = (() => {
       if (lastUnread >= 0 && d.unread > lastUnread) UI.toast(`🔔 새 알림 ${d.unread - lastUnread}건 · 🔄로 새로고침`, 'info');
       lastUnread = d.unread;
     } catch {}
+    checkStale(); // 같은 계정을 다른 곳에서 변경했는지 함께 확인
   }
   function startNotifPolling() {
     if (notifTimer) clearInterval(notifTimer);

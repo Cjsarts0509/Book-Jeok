@@ -2,7 +2,7 @@
 
 // DB 스키마 초기화 + 마이그레이션 스크립트. `npm run init-db` 또는 컨테이너 시작 시 실행.
 // 모든 구문은 idempotent 하여 기존 데이터를 보존한 채 반복 실행할 수 있습니다.
-const { pool, query } = require('./db');
+const { pool, query, withTransaction } = require('./db');
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS users (
@@ -89,7 +89,10 @@ CREATE TABLE IF NOT EXISTS notices (
 `;
 
 // ── 마이그레이션(기존 배포 대상) ──────────────────────────
-const MIGRATIONS = `
+// 아래 BASELINE_SQL 은 지금까지의 모든 스키마 변경을 모은 것(전부 idempotent).
+// 앞으로 새 스키마 변경은 MIGRATIONS 배열에 { id, sql } 로 "추가만" 하세요.
+// 각 마이그레이션은 한 번만, 트랜잭션 안에서 실행되고 schema_migrations 에 기록됩니다.
+const BASELINE_SQL = `
 -- files: 비고 및 수정시각
 ALTER TABLE files ADD COLUMN IF NOT EXISTS note TEXT NOT NULL DEFAULT '';
 ALTER TABLE files ADD COLUMN IF NOT EXISTS note_updated_at TIMESTAMPTZ;
@@ -248,6 +251,26 @@ INSERT INTO settings (key, value) VALUES ('trash_retention_days', '30') ON CONFL
 INSERT INTO settings (key, value) VALUES ('share_qr_enabled', '1') ON CONFLICT (key) DO NOTHING;
 `;
 
+// 버전 관리 마이그레이션 목록. id 는 절대 바꾸지 말고, 새 변경은 뒤에 추가만 하세요.
+const MIGRATIONS = [
+  { id: '0001_baseline', sql: BASELINE_SQL },
+  // 예) { id: '0002_add_xxx', sql: `ALTER TABLE ... ;` },
+];
+
+// 적용 안 된 마이그레이션만 트랜잭션으로 실행하고 schema_migrations 에 기록.
+async function runMigrations() {
+  await query('CREATE TABLE IF NOT EXISTS schema_migrations (id TEXT PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT now())');
+  const done = new Set((await query('SELECT id FROM schema_migrations')).rows.map((r) => r.id));
+  for (const m of MIGRATIONS) {
+    if (done.has(m.id)) continue;
+    await withTransaction(async (client) => {          // DDL도 트랜잭션(Postgres) → 실패 시 전체 롤백
+      await client.query(m.sql);
+      await client.query('INSERT INTO schema_migrations (id) VALUES ($1)', [m.id]);
+    });
+    console.log(`[init-db] 마이그레이션 적용: ${m.id}`);
+  }
+}
+
 const DEFAULT_EXT = 'csv,xls,xlsx,xlsm,xlsb,jpg,jpeg,png,gif,ppt,pptx,doc,docx,txt';
 const BRANCHES = [
   '광화문점', '이화여대점', '강남점', '서울대점', '대구점', '칠곡센터', '잠실점', '영등포점', '목동점', '천안점',
@@ -275,8 +298,8 @@ async function seed() {
 
 async function main() {
   console.log('[init-db] 스키마/마이그레이션 적용 중...');
-  await query(SCHEMA);
-  await query(MIGRATIONS);
+  await query(SCHEMA);        // 기본 테이블(CREATE IF NOT EXISTS, 항상 안전)
+  await runMigrations();      // 버전 관리 마이그레이션(미적용분만, 트랜잭션)
   await seed();
   console.log('[init-db] 완료.');
   await pool.end();

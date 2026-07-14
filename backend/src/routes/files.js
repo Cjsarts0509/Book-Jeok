@@ -364,6 +364,25 @@ router.post('/upload', authenticate, wrap(resolveOwner), upload.array('file', 30
   res.status(201).json({ uploaded: saved, rejected });
 }));
 
+// 청크 업로드 시작: 파일 크기로 할당량·형식·크기상한을 미리 확인 후 uploadId 발급.
+// (조각을 다 올린 뒤에야 거부되는 낭비를 방지 — 초과면 여기서 즉시 안내)
+router.post('/upload/init', authenticate, wrap(resolveOwner), wrap(async (req, res) => {
+  const size = Number(req.body.size) || 0;
+  const filename = String(req.body.filename || '');
+  if (!isAllowed(extOf(filename))) return res.status(415).json({ error: `허용되지 않는 파일 형식입니다. 가능: ${allowedLabel()}` });
+  if (size > CHUNK_ASSEMBLE_MAX) return res.status(413).json({ error: `허용 최대 크기(${Math.round(CHUNK_ASSEMBLE_MAX / 1048576)}MB)를 초과했습니다.` });
+  const owner = req.targetOwnerId;
+  const ownerRow = await query('SELECT quota_bytes, role FROM users WHERE id=$1', [owner]);
+  if (ownerRow.rows[0].role !== 'admin') {
+    const quota = Number(ownerRow.rows[0].quota_bytes);
+    const used = await query('SELECT COALESCE(SUM(size_bytes),0) AS s FROM files WHERE owner_id=$1 AND deleted_at IS NULL', [owner]);
+    if (size > 0 && Number(used.rows[0].s) + size > quota) {
+      return res.status(413).json({ error: quota === 0 ? '디스크가 할당되지 않은 계정입니다. 관리자에게 문의하세요.' : '저장 용량 할당량을 초과했습니다.' });
+    }
+  }
+  res.json({ uploadId: crypto.randomUUID() });
+}));
+
 // 청크 수신: 조각 하나를 임시폴더에 저장. 소유자·보안 검사는 완료(complete) 시점에 수행하므로 인증만.
 router.post('/upload/chunk', authenticate, chunkUpload.single('chunk'), wrap(async (req, res) => {
   const uploadId = String(req.body.uploadId || '');
@@ -460,6 +479,17 @@ router.post('/upload/complete', authenticate, wrap(resolveOwner), wrap(async (re
 // 허용 확장자 조회 (로그인 사용자)
 router.get('/allowed-extensions', authenticate, wrap(async (req, res) => {
   res.json({ extensions: getAllowedExtensions() });
+}));
+
+// 계정의 최신 변경 시각(리비전) — 다른 세션의 변경 감지용(가벼운 폴링). 값이 커지면 목록이 오래된 것.
+router.get('/rev', authenticate, wrap(resolveOwner), wrap(async (req, res) => {
+  const owner = req.targetOwnerId;
+  const r = await query(
+    `SELECT GREATEST(
+       (SELECT max(GREATEST(created_at, updated_at, note_updated_at, deleted_at)) FROM files   WHERE owner_id=$1),
+       (SELECT max(GREATEST(created_at, note_updated_at, deleted_at))             FROM folders WHERE owner_id=$1)
+     ) AS rev`, [owner]);
+  res.json({ rev: r.rows[0].rev }); // null 가능(빈 계정)
 }));
 
 // ── 다운로드 ──────────

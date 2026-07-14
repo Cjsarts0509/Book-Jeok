@@ -33,9 +33,9 @@ router.get('/server-status', wrap(async (req, res) => {
   const disk = await diskUsage();
   let dbOk = true;
   try { await query('SELECT 1'); } catch { dbOk = false; }
-  // CPU·메모리 상위 프로세스(무엇이 쓰고 있는지). /proc 접근 실패 시 생략.
+  // CPU·메모리 상위 프로세스(무엇이 쓰고 있는지) — 서버 전체 프로세스명 노출이므로 관리자만.
   let procs = null;
-  try { procs = await procstat.top(); } catch { procs = null; }
+  if (req.user.role === 'admin') { try { procs = await procstat.top(); } catch { procs = null; } }
   const pct = (u, t) => (t > 0 ? Math.round((u / t) * 100) : 0);
   res.json({
     time: new Date().toISOString(),
