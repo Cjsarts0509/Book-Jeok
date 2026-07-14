@@ -1436,7 +1436,7 @@ const App = (() => {
       const cy = (b) => (b ? b.y + b.h / 2 : Infinity);              // 박스 세로 중심으로 정렬(위→아래)
       const ordered = items.map((it, i) => ({ code: it.code, box: it.box || null, _i: i }))
         .sort((a, b) => (cy(a.box) - cy(b.box)) || (a._i - b._i));
-      const rows = ordered.map((it) => `<label class="mb-chk"><input type="checkbox" checked data-code="${it.code}"><span class="mb-isbn">${it.code}</span></label>`).join('');
+      const rows = ordered.map((it, idx) => `<label class="mb-chk"><input type="checkbox" checked data-code="${it.code}"><span class="mb-pos">${idx + 1}</span><span class="mb-isbn">${it.code}</span></label>`).join('');
       const cm = UI.modal(`<h3>✅ 인식된 바코드 확인 <span class="muted" style="font-size:12px;font-weight:400">· ${ordered.length}개 (위→아래)</span></h3>
         <p class="muted" style="font-size:12px;margin:-6px 0 10px">위에서 아래 순서로 정렬했습니다. 책과 비교해 <b>저장할 것만 체크</b>하세요.</p>
         <div class="mb-confirm-img"><img src="${url}" alt=""></div>

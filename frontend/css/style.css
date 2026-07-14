@@ -858,6 +858,7 @@ th { background: var(--bg); font-weight: 700; color: var(--text-muted); font-siz
 .mb-chk { display: flex; align-items: center; gap: 11px; padding: 11px 13px; border: 1.5px solid var(--border); border-radius: var(--radius-sm); cursor: pointer; }
 .mb-chk input { width: 18px; height: 18px; flex: none; }
 .mb-chk:has(input:checked) { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 9%, transparent); }
+.mb-pos { flex: none; width: 24px; height: 24px; border-radius: 50%; background: var(--bg); border: 1px solid var(--border); display: inline-grid; place-items: center; font-size: 12px; font-weight: 800; color: var(--text-muted); }
 .mb-isbn { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 15px; font-weight: 700; letter-spacing: .5px; }
 
 /* 전송(업로드/다운로드) 현황 패널 — 하단 고정 */
