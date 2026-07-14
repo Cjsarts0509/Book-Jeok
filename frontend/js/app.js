@@ -2520,13 +2520,16 @@ const App = (() => {
     let saPhotoStems = new Set();   // 현재 폴더에 이미 사진이 있는 ISBN
 
     // ── 목록 저장/불러오기(브라우저 보관 — 재업로드 없이 이어서 작업) ──
+    // 저장은 '작업 대상 영업점 계정'별로 분리 → 같은 기기에서 계정이 달라도 서로 섞이지 않음
+    const storeOwner = () => state.ownerId || (state.user && state.user.id) || 'anon';
+    const storeKey = () => `${SA_STORE_KEY}_${storeOwner()}`;
     function persist() {
       try {
-        localStorage.setItem(SA_STORE_KEY, JSON.stringify({ savedAt: Date.now(), ownerId: state.ownerId || null, disc }));
+        localStorage.setItem(storeKey(), JSON.stringify({ savedAt: Date.now(), ownerId: storeOwner(), disc }));
         UI.toast(`목록 저장됨 (${disc.length.toLocaleString()}건) — 다음에 이어서 볼 수 있어요`, 'success');
       } catch (_) { UI.toast('저장 실패(브라우저 저장 용량 초과일 수 있어요)', 'error'); }
     }
-    function loadStored() { try { return JSON.parse(localStorage.getItem(SA_STORE_KEY) || 'null'); } catch (_) { return null; } }
+    function loadStored() { try { return JSON.parse(localStorage.getItem(storeKey()) || 'null'); } catch (_) { return null; } }
 
     // ── 폴더 사진 유무 확인 → 표에 음영 표시 ──
     const stem = (name) => String(name || '').replace(/\.[^.]+$/, '');
@@ -2725,8 +2728,8 @@ const App = (() => {
 
     // 저장된 목록이 있으면(같은 계정) 재업로드 없이 이어서 볼 수 있게 안내
     (function showResume() {
-      const st = loadStored();
-      if (!st || !Array.isArray(st.disc) || !st.disc.length || (st.ownerId || null) !== (state.ownerId || null)) return;
+      const st = loadStored();   // storeKey()가 계정별로 분리돼 있어 다른 계정 목록은 애초에 안 불러옴
+      if (!st || !Array.isArray(st.disc) || !st.disc.length) return;
       const dt = new Date(st.savedAt || 0); const p2 = (x) => String(x).padStart(2, '0');
       const when = st.savedAt ? `${dt.getFullYear()}-${p2(dt.getMonth() + 1)}-${p2(dt.getDate())} ${p2(dt.getHours())}:${p2(dt.getMinutes())}` : '';
       const box = m.q('#sa-resume');
@@ -2736,7 +2739,7 @@ const App = (() => {
         isbnSet = new Set(disc.map((d) => d.isbn));
         box.innerHTML = ''; status(''); renderResult();
       });
-      m.q('#sa-resume-del').addEventListener('click', () => { try { localStorage.removeItem(SA_STORE_KEY); } catch (_) {} box.innerHTML = ''; });
+      m.q('#sa-resume-del').addEventListener('click', () => { try { localStorage.removeItem(storeKey()); } catch (_) {} box.innerHTML = ''; });
     })();
 
     m.q('#sa-run').addEventListener('click', async () => {
