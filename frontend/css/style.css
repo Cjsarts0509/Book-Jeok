@@ -878,6 +878,8 @@ th { background: var(--bg); font-weight: 700; color: var(--text-muted); font-siz
 .sa-table { border-collapse: collapse; font-size: 12.5px; white-space: nowrap; }
 .sa-table th, .sa-table td { border: 1px solid var(--border); padding: 6px 9px; text-align: left; }
 .sa-table thead th { position: sticky; top: 0; background: var(--bg); z-index: 1; font-weight: 700; }
+.sa-table th.sa-sortable { cursor: pointer; user-select: none; }
+.sa-table th.sa-sortable:hover { background: var(--hover); }
 .sa-table td.sa-shelf { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; color: var(--secondary); }
 .sa-table tbody tr { cursor: pointer; }
 .sa-table tbody tr:hover { background: var(--hover); }

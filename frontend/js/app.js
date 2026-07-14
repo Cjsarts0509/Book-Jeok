@@ -2517,6 +2517,14 @@ const App = (() => {
     let isbnSet = new Set();        // 리스트에 있는 ISBN 집합(빠른 조회)
     let saCurrentFolder = state.folder || '/';  // 사진 저장·확인 대상 폴더
     let saPhotoStems = new Set();   // 현재 폴더에 이미 사진이 있는 ISBN
+    let saSort = { col: null, dir: 1 };  // 정렬 열(0~9) · 방향(1 오름/-1 내림)
+    let saFilterField = '';         // 분야 필터('' = 전체)
+    let saFilterPhoto = '';         // 사진 필터('' 전체 · 'has' 있음 · 'no' 없음)
+    // 정렬용 열 정의(기본 10열) — key는 disc 필드, num이면 숫자 정렬
+    const SA_COLS = [
+      { k: 'field', num: false }, { k: 'isbn', num: false }, { k: 'name', num: false }, { k: 'pub', num: false },
+      { k: 'sys', num: true }, { k: 'real', num: true }, { k: 'miss', num: true }, { k: 'exc', num: false }, { k: 'scan', num: true }, { k: 'diff', num: true },
+    ];
 
     // ── 목록 저장/불러오기(서버 보관 · 계정별) — 같은 계정이면 어느 기기서든 이어서 작업 ──
     async function persist() {
@@ -2541,15 +2549,60 @@ const App = (() => {
         for (const f of (list.files || [])) { const st = stem(f.name); if (isbnSet.has(st)) s.add(st); }
         saPhotoStems = s;
       } catch (_) { saPhotoStems = new Set(); }
-      applyShade();
+      if (saFilterPhoto) renderTable(); else applyShade();   // 사진 필터 중이면 행 구성이 바뀌므로 다시 그림
     }
     function applyShade() {
-      let n = 0;
+      let n = 0;   // 현재 폴더 기준 사진있음 건수(전체 disc 기준)
+      for (const d of disc) if (saPhotoStems.has(d.isbn)) n++;
       m.el.querySelectorAll('.sa-table tbody tr').forEach((tr) => {
-        const d = disc[+tr.dataset.ri]; const has = !!(d && saPhotoStems.has(d.isbn));
-        tr.classList.toggle('sa-has', has); if (has) n++;
+        const d = disc[+tr.dataset.ri]; tr.classList.toggle('sa-has', !!(d && saPhotoStems.has(d.isbn)));
       });
       const c = m.q('#sa-photocount'); if (c) c.textContent = n ? ` · 📷 사진있음 ${n.toLocaleString()}건` : '';
+    }
+    // 필터+정렬을 적용한 표시 순서(disc 인덱스 배열)
+    function sortedIndices() {
+      let idx = disc.map((_, i) => i).filter((i) => {
+        const d = disc[i];
+        if (saFilterField && String(d.field == null ? '' : d.field) !== saFilterField) return false;
+        if (saFilterPhoto === 'has' && !saPhotoStems.has(d.isbn)) return false;
+        if (saFilterPhoto === 'no' && saPhotoStems.has(d.isbn)) return false;
+        return true;
+      });
+      if (saSort.col != null) {
+        const c = SA_COLS[saSort.col];
+        idx.sort((a, b) => {
+          const va = disc[a][c.k], vb = disc[b][c.k];
+          const r = c.num ? (num(va) - num(vb)) : String(va == null ? '' : va).localeCompare(String(vb == null ? '' : vb), 'ko');
+          return r * saSort.dir;
+        });
+      }
+      return idx;
+    }
+    // 표(thead+tbody)를 필터·정렬 반영해 다시 그림
+    function renderTable() {
+      const wrap = m.q('#sa-tablewrap'); if (!wrap) return;
+      const order = sortedIndices();
+      const arrow = (i) => (saSort.col === i ? (saSort.dir > 0 ? ' ▲' : ' ▼') : '');
+      const thBase = base.map((h, i) => `<th class="sa-sortable" data-col="${i}">${esc(h)}${arrow(i)}</th>`).join('');
+      const thShelf = shelfHead.map((h) => `<th>${esc(h)}</th>`).join('');
+      const thead = `<thead><tr>${thBase}${thShelf}</tr></thead>`;
+      const tbody = order.map((ri) => {
+        const d = disc[ri];
+        const cells = [d.field, d.isbn, d.name, d.pub, d.sys, d.real, d.miss, d.exc, d.scan, d.diff];
+        for (let i = 0; i < SA_MAX_SHELF; i++) { const s = d.shelves[i]; cells.push(s ? `${s[0]} (${s[1]})` : ''); }
+        return `<tr data-ri="${ri}">${cells.map((c, idx) => `<td class="${idx >= base.length ? 'sa-shelf' : (idx === 1 ? 'sa-isbn' : '')}">${esc(String(c == null ? '' : c))}</td>`).join('')}</tr>`;
+      }).join('');
+      wrap.innerHTML = order.length
+        ? `<table class="sa-table">${thead}<tbody>${tbody}</tbody></table>`
+        : '<p class="muted" style="padding:14px">조건에 맞는 항목이 없습니다.</p>';
+      wrap.querySelectorAll('.sa-sortable').forEach((th) => th.addEventListener('click', () => {
+        const c = +th.dataset.col;
+        if (saSort.col === c) saSort.dir = -saSort.dir; else { saSort.col = c; saSort.dir = 1; }
+        renderTable();
+      }));
+      wrap.querySelectorAll('tbody tr').forEach((tr) => tr.addEventListener('click', () => openDetail(disc[+tr.dataset.ri])));
+      applyShade();
+      const sh = m.q('#sa-shown'); if (sh) sh.textContent = order.length !== disc.length ? ` · 표시 ${order.length.toLocaleString()}건` : '';
     }
     async function setFolder(f) {
       saCurrentFolder = f || '/';
@@ -2649,7 +2702,7 @@ const App = (() => {
             const ok = await saveOne(blob, t, folder); row.status = ok ? 'done' : 'error'; renderSaved();
             if (ok && folder === saCurrentFolder) saPhotoStems.add(t);   // 뒤 목록 음영 즉시 반영
           }
-          applyShade();
+          if (saFilterPhoto) renderTable(); else applyShade();
           const extra = targets.size - 1;
           UI.toast(`${targets.size}건 저장${extra ? ` (추가 바코드 ${extra}건)` : ''}${skipped ? ` · 리스트에 없는 ${skipped}건 제외` : ''}`, 'success');
         } catch (_) { UI.toast('저장 실패', 'error'); }
@@ -2685,30 +2738,31 @@ const App = (() => {
     }
 
     function renderResult() {
+      if (!disc.length) { m.q('#sa-result').innerHTML = '<p class="muted" style="padding:14px">오차 항목이 없습니다.</p>'; return; }
+      // 필터 상태 초기화(새 목록/이어서 보기 시)
+      saSort = { col: null, dir: 1 }; saFilterField = ''; saFilterPhoto = '';
       const matched = disc.filter((d) => d.shelves && d.shelves.length).length;
-      const thead = `<thead><tr>${[...base, ...shelfHead].map((h) => `<th>${h}</th>`).join('')}</tr></thead>`;
-      const tbody = disc.map((d, ri) => {
-        const cells = [d.field, d.isbn, d.name, d.pub, d.sys, d.real, d.miss, d.exc, d.scan, d.diff];
-        for (let i = 0; i < SA_MAX_SHELF; i++) { const s = d.shelves[i]; cells.push(s ? `${s[0]} (${s[1]})` : ''); }
-        return `<tr data-ri="${ri}">${cells.map((c, idx) => `<td class="${idx >= base.length ? 'sa-shelf' : (idx === 1 ? 'sa-isbn' : '')}">${esc(String(c == null ? '' : c))}</td>`).join('')}</tr>`;
-      }).join('');
-      m.q('#sa-result').innerHTML = disc.length ? `
+      const fields = [...new Set(disc.map((d) => String(d.field == null ? '' : d.field)).filter((x) => x !== ''))].sort((a, b) => a.localeCompare(b, 'ko'));
+      const fieldOpts = `<option value="">전체</option>${fields.map((f) => `<option value="${esc(f)}">${esc(f)}</option>`).join('')}`;
+      m.q('#sa-result').innerHTML = `
         <div class="sa-resulthead">
-          <div class="sa-summary">오차 항목 <b>${disc.length.toLocaleString()}건</b> · 서가 매칭 <b>${matched.toLocaleString()}건</b><span id="sa-photocount" class="muted" style="font-size:12px"></span> <span class="muted" style="font-size:12px">· 행을 누르면 상세</span></div>
+          <div class="sa-summary">오차 항목 <b>${disc.length.toLocaleString()}건</b> · 서가 매칭 <b>${matched.toLocaleString()}건</b><span id="sa-photocount" class="muted" style="font-size:12px"></span><span id="sa-shown" class="muted" style="font-size:12px"></span> <span class="muted" style="font-size:12px">· 열 제목으로 정렬 · 행을 누르면 상세</span></div>
           <label class="sa-foldersel">📁 <select id="sa-folder">${folderOptions(saCurrentFolder)}</select></label>
+          <label class="sa-foldersel">분야 <select id="sa-ffield">${fieldOpts}</select></label>
+          <label class="sa-foldersel">사진 <select id="sa-fphoto"><option value="">전체</option><option value="has">있음</option><option value="no">없음</option></select></label>
           ${window.ISBN ? '<button class="btn btn-secondary btn-sm" id="sa-scan">📷 바코드로 찾기</button>' : ''}
           <button class="btn btn-secondary btn-sm" id="sa-save">💾 저장</button>
           <button class="btn btn-primary btn-sm" id="sa-dl">⬇ 엑셀 다운로드</button>
         </div>
-        <div class="table-wrap sa-tablewrap"><table class="sa-table">${thead}<tbody>${tbody}</tbody></table></div>`
-        : '<p class="muted" style="padding:14px">오차 항목이 없습니다.</p>';
-      if (!disc.length) return;
+        <div class="table-wrap sa-tablewrap" id="sa-tablewrap"></div>`;
       m.q('#sa-dl')?.addEventListener('click', downloadXlsx);
       m.q('#sa-scan')?.addEventListener('click', scanFind);
       m.q('#sa-save')?.addEventListener('click', persist);
       m.q('#sa-folder')?.addEventListener('change', (e) => setFolder(e.target.value));
-      m.el.querySelectorAll('.sa-table tbody tr').forEach((tr) => tr.addEventListener('click', () => openDetail(disc[+tr.dataset.ri])));
-      refreshPhotos();   // 선택된 폴더에 이미 사진이 있는 항목 음영 표시
+      m.q('#sa-ffield')?.addEventListener('change', (e) => { saFilterField = e.target.value; renderTable(); });
+      m.q('#sa-fphoto')?.addEventListener('change', (e) => { saFilterPhoto = e.target.value; renderTable(); });
+      renderTable();
+      refreshPhotos();   // 선택된 폴더에 이미 사진이 있는 항목 음영 표시(+사진 필터 시 반영)
     }
 
     async function downloadXlsx() {
