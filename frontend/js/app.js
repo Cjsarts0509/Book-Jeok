@@ -299,9 +299,9 @@ const App = (() => {
             <button class="vt ${state.view === 'list' ? 'on' : ''}" data-view="list" title="리스트">☰</button>
           </div>
           <button class="btn btn-primary btn-sm" id="upload-btn" title="허용: ${state.allowedExt.join(' · ')}">⬆️ <span class="label">업로드</span></button>
-          <button class="btn btn-accent btn-sm" id="camera-btn" title="사진 촬영해서 업로드">📷 <span class="label">촬영</span></button>
           <button class="btn btn-secondary btn-sm" id="smart-btn" title="파일명(지점·날짜)으로 폴더를 추천해 업로드">🧭 <span class="label">추천</span></button>
           <button class="btn btn-secondary btn-sm" id="new-folder">📂 <span class="label">새 폴더</span></button>
+          <button class="btn btn-ghost btn-sm" id="refresh-btn" title="목록 새로고침">🔄 <span class="label">새로고침</span></button>
           <input type="file" id="file-input" multiple hidden accept="${state.allowedExt.map((e) => '.' + e).join(',')}">
           <input type="file" id="cam-input" accept="image/*" capture="environment" multiple hidden>
           <div class="tools-break"></div>
@@ -654,11 +654,17 @@ const App = (() => {
     const input = document.getElementById('file-input');
     document.getElementById('upload-btn').addEventListener('click', () => input.click());
     input.addEventListener('change', () => { if (input.files.length) uploadFiles(input.files); input.value = ''; });
+    // 촬영은 모바일 하단 ⬆️ 시트에서만(PC에선 미사용). cam-input 자체는 시트가 재사용하므로 유지.
     const cam = document.getElementById('cam-input');
-    document.getElementById('camera-btn').addEventListener('click', () => cam.click());
     cam.addEventListener('change', () => { if (cam.files.length) cameraReviewModal([...cam.files]); cam.value = ''; });
     document.getElementById('smart-btn')?.addEventListener('click', pickForSmartUpload);
     document.getElementById('new-folder').addEventListener('click', newFolderModal);
+    document.getElementById('refresh-btn')?.addEventListener('click', async (e) => {
+      const b = e.currentTarget; b.disabled = true; b.classList.add('spinning');
+      try { await loadAll(); UI.toast('목록을 새로고침했습니다', 'success'); }
+      catch { UI.toast('새로고침 실패', 'error'); }
+      finally { b.disabled = false; b.classList.remove('spinning'); }
+    });
     document.getElementById('nav-back').addEventListener('click', navBack);
     document.getElementById('nav-fwd').addEventListener('click', navForward);
     document.getElementById('nav-up').addEventListener('click', navUp);
@@ -2279,7 +2285,7 @@ const App = (() => {
   }
 
   // ── 인앱 알림 ──────────
-  let notifTimer = null, refreshTimer = null, lastUnread = -1, visHooked = false, resizeHooked = false, lastMobile = null, backHooked = false;
+  let notifTimer = null, lastUnread = -1, visHooked = false, resizeHooked = false, lastMobile = null, backHooked = false;
   async function refreshNotifBadge() {
     try {
       const d = await API.notifications(1);
@@ -2289,25 +2295,15 @@ const App = (() => {
         if (d.unread > 0) { badge.textContent = d.unread > 99 ? '99+' : d.unread; badge.classList.remove('hidden'); }
         else badge.classList.add('hidden');
       });
-      // 새 알림이 늘었으면 토스트 + 현재 목록 자동 새로고침(최초 로드 때는 제외)
-      if (lastUnread >= 0 && d.unread > lastUnread) { UI.toast(`🔔 새 알림 ${d.unread - lastUnread}건`, 'info'); maybeAutoRefresh(); }
+      // 새 알림이 늘었으면 토스트로만 알림(목록 자동 새로고침 없음 → 상단 🔄 버튼으로 수동)
+      if (lastUnread >= 0 && d.unread > lastUnread) UI.toast(`🔔 새 알림 ${d.unread - lastUnread}건 · 🔄로 새로고침`, 'info');
       lastUnread = d.unread;
     } catch {}
   }
-  // 안전할 때만 조용히 현재 폴더를 다시 불러온다(선택/검색/모달/숨김 탭이면 건너뜀).
-  function maybeAutoRefresh() {
-    if (document.visibilityState !== 'visible') return;
-    if (!state.user || state.search.on) return;
-    if (state.selected.size > 0) return;
-    if (document.querySelector('.modal-backdrop')) return;
-    loadTree(); loadFiles(true);
-  }
   function startNotifPolling() {
     if (notifTimer) clearInterval(notifTimer);
-    if (refreshTimer) clearInterval(refreshTimer);
-    notifTimer = setInterval(refreshNotifBadge, 30000);      // 알림 30초 폴링
-    refreshTimer = setInterval(maybeAutoRefresh, 45000);     // 목록 45초 자동 새로고침
-    if (!visHooked) { visHooked = true; document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { refreshNotifBadge(); maybeAutoRefresh(); } }); }
+    notifTimer = setInterval(refreshNotifBadge, 30000);      // 알림 배지 30초 폴링(목록 자동 새로고침은 없음)
+    if (!visHooked) { visHooked = true; document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') refreshNotifBadge(); }); }
     if (!resizeHooked) {
       resizeHooked = true; lastMobile = isMobile();
       window.addEventListener('resize', () => {

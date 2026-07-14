@@ -713,8 +713,8 @@ th { background: var(--bg); font-weight: 700; color: var(--text-muted); font-siz
   .content { padding: 10px 12px 12px; }
   .content-head { gap: 6px; margin-bottom: 8px; }
   .selbar { margin-bottom: 8px; }
-  /* 업로드·촬영은 하단 탭바 ⬆️ 버튼(파일/촬영 선택)으로 대체 → 상단에선 숨김 */
-  #upload-btn, #camera-btn { display: none; }
+  /* 업로드는 하단 탭바 ⬆️ 버튼(파일/촬영 선택)으로 대체 → 상단에선 숨김 */
+  #upload-btn { display: none; }
   /* 업로드·새폴더·조회·필터는 텍스트 버튼으로 (라벨 노출), 네비/뷰토글만 아이콘 */
   .content-head .btn .label { display: inline; }
   .content-head .btn-sm { padding: 6px 9px; gap: 5px; }   /* 텍스트 버튼이 두 줄에 담기도록 여백 축소 */
@@ -824,6 +824,7 @@ th { background: var(--bg); font-weight: 700; color: var(--text-muted); font-siz
 .btn-spin { width: 14px; height: 14px; border: 2px solid currentColor; border-top-color: transparent; border-radius: 50%; display: inline-block; margin-right: 6px; vertical-align: -2px; animation: bjspin .7s linear infinite; }
 .btn.is-busy { cursor: progress; }
 @keyframes bjspin { to { transform: rotate(360deg); } }
+#refresh-btn.spinning { pointer-events: none; opacity: .6; }
 
 /* 인라인 이름변경 */
 .inline-rename { height: 30px; padding: 3px 8px; font-size: 14px; font-weight: 600; width: 100%; max-width: 340px; }
