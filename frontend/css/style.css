@@ -863,18 +863,46 @@ th { background: var(--bg); font-weight: 700; color: var(--text-muted); font-siz
 .mb-isbn { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 15px; font-weight: 700; letter-spacing: .5px; }
 
 /* 재고조사 오차체크 */
+.modal.sa-modal { max-width: 1120px; width: 96vw; height: 90vh; }
+.modal.sa-modal .modal-scroll { display: flex; flex-direction: column; overflow: hidden; }
 .sa-inputs { display: flex; flex-direction: column; gap: 10px; }
 .sa-file { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border: 1.5px dashed var(--border); border-radius: var(--radius-sm); cursor: pointer; }
 .sa-file:hover { border-color: var(--primary-dark); background: var(--hover); }
 .sa-file input { display: none; }
 .sa-lbl { font-weight: 700; font-size: 14px; flex: none; }
 .sa-name { color: var(--text-muted); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sa-summary { font-size: 14px; margin-bottom: 10px; padding: 10px 14px; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-sm); }
-.sa-tablewrap { max-height: 62vh; overflow: auto; border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.modal.sa-modal #sa-result { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.sa-resulthead { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+.sa-summary { flex: 1; min-width: 200px; font-size: 14px; padding: 10px 14px; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.sa-tablewrap { flex: 1; min-height: 0; overflow: auto; border: 1px solid var(--border); border-radius: var(--radius-sm); }
 .sa-table { border-collapse: collapse; font-size: 12.5px; white-space: nowrap; }
 .sa-table th, .sa-table td { border: 1px solid var(--border); padding: 6px 9px; text-align: left; }
 .sa-table thead th { position: sticky; top: 0; background: var(--bg); z-index: 1; font-weight: 700; }
 .sa-table td.sa-shelf { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; color: var(--secondary); }
+.sa-table tbody tr { cursor: pointer; }
+.sa-table tbody tr:hover { background: var(--hover); }
+.sa-table td.sa-isbn { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--primary-dark); font-weight: 700; }
+
+/* 재고조사 — 항목 상세(모바일) */
+.sad-top { display: flex; gap: 14px; margin-bottom: 12px; }
+.sad-cover { flex: none; width: 108px; height: 150px; border-radius: var(--radius-sm); overflow: hidden; background: var(--bg); border: 1px solid var(--border); display: grid; place-items: center; }
+.sad-cover img { width: 100%; height: 100%; object-fit: cover; }
+.sad-cover.sad-nocover::after { content: '📕 표지없음'; font-size: 12px; color: var(--text-muted); }
+.sad-meta { flex: 1; min-width: 0; }
+.sad-title { font-size: 16px; font-weight: 800; line-height: 1.35; word-break: keep-all; }
+.sad-sub { font-size: 13px; color: var(--text-muted); margin: 4px 0 12px; }
+.sad-isbn { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; color: var(--text-muted); margin-bottom: 10px; }
+.sad-stock { display: flex; gap: 8px; flex-wrap: wrap; }
+.sad-stock span { flex: 1; min-width: 66px; text-align: center; padding: 8px 6px; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-sm); font-size: 12px; color: var(--text-muted); }
+.sad-stock span b { display: block; font-size: 18px; color: var(--text); margin-top: 2px; }
+.sad-stock span.diff b { color: var(--danger); }
+.sad-shelves { margin: 4px 0 14px; }
+.sad-shelves .lbl { font-size: 13px; font-weight: 700; margin-bottom: 6px; }
+.sad-chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.sad-chip { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; padding: 5px 10px; background: var(--surface); border: 1px solid var(--border); border-radius: 999px; }
+.sad-chip b { color: var(--secondary); }
+.sad-folder { display: flex; align-items: center; gap: 8px; margin: 4px 0 4px; font-size: 13px; }
+.sad-folder select { flex: 1; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); font-size: 13px; }
 
 /* 전송(업로드/다운로드) 현황 패널 — 하단 고정 */
 #xfer-panel { position: fixed; right: 16px; bottom: 16px; width: 340px; max-width: calc(100vw - 24px); background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-lg); z-index: 60; overflow: hidden; }

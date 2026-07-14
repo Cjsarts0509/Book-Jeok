@@ -2495,9 +2495,10 @@ const App = (() => {
       </div>
       <div class="modal-actions"><span class="muted" id="sa-status" style="flex:1;font-size:12px"></span><button class="btn btn-ghost" id="sa-close">닫기</button><button class="btn btn-primary" id="sa-run">분석</button></div>
       <div id="sa-result" style="margin-top:12px"></div>`);
-    m.el.querySelector('.modal').classList.add('modal-help');
+    m.el.querySelector('.modal').classList.add('sa-modal');
     m.q('#sa-close').addEventListener('click', m.close);
     const status = (t) => { m.q('#sa-status').textContent = t || ''; };
+    let lastAoa = null; // 다운로드용(헤더+데이터)
     m.q('#sa-f1').addEventListener('change', (e) => { m.q('#sa-n1').textContent = e.target.files[0]?.name || '파일 선택…'; });
     m.q('#sa-f2').addEventListener('change', (e) => { m.q('#sa-n2').textContent = e.target.files[0]?.name || '파일 선택…'; });
 
@@ -2506,6 +2507,173 @@ const App = (() => {
       const wb = XLSX.read(await file.arrayBuffer(), { type: 'array' });
       const ws = wb.Sheets[wb.SheetNames[0]];
       return XLSX.utils.sheet_to_json(ws, { header: 1, blankrows: false, defval: '' });
+    }
+
+    const esc = UI.escapeHtml;
+    const base = ['분야', 'ISBN', '도서명', '출판사', '전산재고', '실재고', '누락재고', '예외여부', '스캔재고', '차이'];
+    const shelfHead = Array.from({ length: SA_MAX_SHELF }, (_, i) => `서가${i + 1}`);
+    let disc = [];                 // 오차 항목(상세·바코드검색·다운로드 공용)
+    let isbnSet = new Set();        // 리스트에 있는 ISBN 집합(빠른 조회)
+
+    // ── 저장 폴더 옵션 / 이미지 다운스케일 / 파일 저장 ──
+    function folderOptions(sel) {
+      const paths = ['/', ...(state.treeFolders || []).filter((p) => p && p !== '/')];
+      const uniq = [...new Set(paths)].sort((a, b) => (a === '/' ? -1 : b === '/' ? 1 : a.localeCompare(b)));
+      return uniq.map((p) => `<option value="${esc(p)}"${p === sel ? ' selected' : ''}>${esc(p === '/' ? '🏠 (최상위)' : p)}</option>`).join('');
+    }
+    function downscale(file, maxDim, q) {
+      return new Promise((resolve) => {
+        const url = URL.createObjectURL(file); const im = new Image();
+        im.onload = () => {
+          const s = Math.min(1, maxDim / Math.max(im.naturalWidth, im.naturalHeight));
+          if (s >= 1) { try { URL.revokeObjectURL(url); } catch (_) {} return resolve(file); }
+          const w = Math.round(im.naturalWidth * s), h = Math.round(im.naturalHeight * s);
+          const c = document.createElement('canvas'); c.width = w; c.height = h; c.getContext('2d').drawImage(im, 0, 0, w, h);
+          try { URL.revokeObjectURL(url); } catch (_) {}
+          c.toBlob((b) => resolve(b || file), 'image/jpeg', q);
+        };
+        im.onerror = () => { try { URL.revokeObjectURL(url); } catch (_) {} resolve(file); };
+        im.src = url;
+      });
+    }
+    async function saveOne(blob, isbn, folder) {
+      const fd = new FormData();
+      fd.append('folder', folder || '/');
+      fd.append('file', new File([blob], `${isbn}.jpg`, { type: 'image/jpeg' }));
+      try { const r = await API.upload(fd, state.ownerId); return !(r && r.rejected && r.rejected.length); }
+      catch (_) { return false; }
+    }
+    // 교보문고 표지(ISBN) — 클라이언트에서 직접 로드(실패 시 다음 후보→플레이스홀더)
+    function attachCover(coverEl, isbn) {
+      const i = String(isbn || '').replace(/[^0-9Xx]/g, '');
+      const urls = i.length >= 10 ? [
+        `https://contents.kyobobook.co.kr/sih/fit-in/458x0/pdt/${i}.jpg`,
+        `https://image.kyobobook.co.kr/images/book/xlarge/${i.slice(-3)}/x${i}.jpg`,
+      ] : [];
+      if (!urls.length) { coverEl.classList.add('sad-nocover'); return; }
+      const img = document.createElement('img'); img.alt = '표지'; let idx = 0;
+      img.addEventListener('error', () => { idx++; if (idx < urls.length) img.src = urls[idx]; else { img.remove(); coverEl.classList.add('sad-nocover'); } });
+      img.src = urls[0]; coverEl.appendChild(img);
+    }
+
+    // ── 오차 항목 상세(모바일): 표지 + 재고 + 서가 + 폴더지정 + 촬영저장 ──
+    function openDetail(d) {
+      const shelfChips = (d.shelves && d.shelves.length)
+        ? `<div class="sad-chips">${d.shelves.map((s) => `<span class="sad-chip">${esc(String(s[0]))} <b>(${esc(String(s[1]))})</b></span>`).join('')}</div>`
+        : '<p class="muted" style="font-size:13px">서가 스캔 데이터 없음</p>';
+      const dm = UI.modal(`<h3>📖 도서 상세</h3>
+        <div class="sad-top">
+          <div class="sad-cover" id="sad-cover"></div>
+          <div class="sad-meta">
+            <div class="sad-title">${esc(String(d.name == null ? '(제목없음)' : d.name))}</div>
+            <div class="sad-sub">${esc(String(d.pub == null ? '' : d.pub))}${d.field ? ' · ' + esc(String(d.field)) : ''}</div>
+            <div class="sad-isbn">ISBN ${esc(d.isbn)}</div>
+            <div class="sad-stock"><span>전산재고<b>${esc(String(d.sys == null ? '' : d.sys))}</b></span><span>스캔재고<b>${esc(String(d.scan == null ? '' : d.scan))}</b></span><span class="diff">차이<b>${esc(String(d.diff == null ? '' : d.diff))}</b></span></div>
+          </div>
+        </div>
+        <div class="sad-shelves"><div class="lbl">서가번호 (실사수량)</div>${shelfChips}</div>
+        <div class="sad-folder"><span>저장 폴더</span><select id="sad-folder">${folderOptions(state.folder)}</select></div>
+        <div class="modal-actions"><button class="btn btn-ghost" id="sad-close">닫기</button><span style="flex:1"></span><button class="btn btn-primary" id="sad-shoot">📷 사진 촬영·저장</button></div>
+        <div class="scan-list" id="sad-saved" style="margin-top:10px"></div>`);
+      dm.el.querySelector('.modal').classList.add('modal-wide');
+      attachCover(dm.q('#sad-cover'), d.isbn);
+      dm.q('#sad-close').addEventListener('click', dm.close);
+
+      const cam = document.createElement('input');
+      cam.type = 'file'; cam.accept = 'image/*'; cam.capture = 'environment'; cam.style.display = 'none';
+      dm.el.appendChild(cam);
+      const savedRows = [];
+      const renderSaved = () => {
+        dm.q('#sad-saved').innerHTML = savedRows.length
+          ? savedRows.slice().reverse().map((x) => `<div class="cap-row"><span class="cap-code">${esc(x.isbn)}.jpg</span><span class="cap-status cap-${x.status}">${x.status === 'done' ? '✓ 저장됨' : x.status === 'saving' ? '⏳ 저장중' : '✗ 실패'}</span></div>`).join('')
+          : '';
+      };
+      dm.q('#sad-shoot').addEventListener('click', () => { try { cam.click(); } catch (_) {} });
+      cam.addEventListener('change', async () => {
+        const file = cam.files[0]; cam.value = ''; if (!file) return;
+        const btn = dm.q('#sad-shoot'); btn.disabled = true;
+        const folder = dm.q('#sad-folder').value || '/';
+        try {
+          // 촬영 사진에서 바코드를 모두 인식 → 현재 항목 + (리스트에 있는) 다른 바코드에도 같은 사진 저장
+          let found = [];
+          try { const img = await loadImgEl(URL.createObjectURL(file)); found = await window.ISBN.scanMulti(img); } catch (_) {}
+          const targets = new Set([d.isbn]);
+          let skipped = 0;
+          for (const f of found) { const c = window.ISBN.clean(f.code); if (c === d.isbn) continue; if (isbnSet.has(c)) targets.add(c); else skipped++; }
+          const blob = await downscale(file, 1600, 0.85);
+          for (const t of targets) {
+            const row = { isbn: t, status: 'saving' }; savedRows.push(row); renderSaved();
+            row.status = (await saveOne(blob, t, folder)) ? 'done' : 'error'; renderSaved();
+          }
+          const extra = targets.size - 1;
+          UI.toast(`${targets.size}건 저장${extra ? ` (추가 바코드 ${extra}건)` : ''}${skipped ? ` · 리스트에 없는 ${skipped}건 제외` : ''}`, 'success');
+        } catch (_) { UI.toast('저장 실패', 'error'); }
+        finally { btn.disabled = false; }
+      });
+    }
+
+    // ── 바코드로 항목 찾기: 카메라 → 인식된 ISBN 중 리스트에 있는 것 열기 ──
+    function scanFind() {
+      const cam = document.createElement('input');
+      cam.type = 'file'; cam.accept = 'image/*'; cam.capture = 'environment'; cam.style.display = 'none';
+      document.body.appendChild(cam);
+      cam.addEventListener('change', async () => {
+        const file = cam.files[0];
+        try {
+          if (!file) return;
+          UI.toast('바코드 인식 중…');
+          let found = [];
+          try { const img = await loadImgEl(URL.createObjectURL(file)); found = await window.ISBN.scanMulti(img); } catch (_) {}
+          const hits = [];
+          const seen = new Set();
+          for (const f of found) { const c = window.ISBN.clean(f.code); if (seen.has(c)) continue; seen.add(c); const d = disc.find((x) => x.isbn === c); if (d) hits.push(d); }
+          if (!hits.length) return UI.toast(found.length ? '인식된 바코드가 오차 목록에 없습니다' : '바코드를 인식하지 못했습니다', 'error');
+          if (hits.length === 1) return openDetail(hits[0]);
+          // 여러 개 → 선택
+          const cm = UI.modal(`<h3>🔎 찾은 항목 ${hits.length}건</h3><div class="scan-list">${hits.map((d, i) => `<button type="button" class="btn btn-ghost sf-pick" data-i="${i}" style="width:100%;justify-content:flex-start;text-align:left;margin-bottom:6px">${esc(d.isbn)} · ${esc(String(d.name || ''))}</button>`).join('')}</div><div class="modal-actions"><button class="btn btn-primary" id="sf-close">닫기</button></div>`);
+          cm.el.querySelector('.modal').classList.add('modal-wide');
+          cm.q('#sf-close').addEventListener('click', cm.close);
+          cm.el.querySelectorAll('.sf-pick').forEach((el) => el.addEventListener('click', () => { cm.close(); openDetail(hits[+el.dataset.i]); }));
+        } finally { try { cam.remove(); } catch (_) {} }
+      });
+      try { cam.click(); } catch (_) {}
+    }
+
+    function renderResult(matched) {
+      const thead = `<thead><tr>${[...base, ...shelfHead].map((h) => `<th>${h}</th>`).join('')}</tr></thead>`;
+      const tbody = disc.map((d, ri) => {
+        const cells = [d.field, d.isbn, d.name, d.pub, d.sys, d.real, d.miss, d.exc, d.scan, d.diff];
+        for (let i = 0; i < SA_MAX_SHELF; i++) { const s = d.shelves[i]; cells.push(s ? `${s[0]} (${s[1]})` : ''); }
+        return `<tr data-ri="${ri}">${cells.map((c, idx) => `<td class="${idx >= base.length ? 'sa-shelf' : (idx === 1 ? 'sa-isbn' : '')}">${esc(String(c == null ? '' : c))}</td>`).join('')}</tr>`;
+      }).join('');
+      m.q('#sa-result').innerHTML = disc.length ? `
+        <div class="sa-resulthead">
+          <div class="sa-summary">오차 항목 <b>${disc.length.toLocaleString()}건</b> · 서가 데이터 매칭 <b>${matched.toLocaleString()}건</b> <span class="muted" style="font-size:12px">· 행을 누르면 상세</span></div>
+          ${window.ISBN ? '<button class="btn btn-secondary btn-sm" id="sa-scan">📷 바코드로 찾기</button>' : ''}
+          <button class="btn btn-primary btn-sm" id="sa-dl">⬇ 엑셀 다운로드</button>
+        </div>
+        <div class="table-wrap sa-tablewrap"><table class="sa-table">${thead}<tbody>${tbody}</tbody></table></div>`
+        : '<p class="muted" style="padding:14px">오차 항목이 없습니다.</p>';
+      if (!disc.length) return;
+      m.q('#sa-dl')?.addEventListener('click', downloadXlsx);
+      m.q('#sa-scan')?.addEventListener('click', scanFind);
+      m.el.querySelectorAll('.sa-table tbody tr').forEach((tr) => tr.addEventListener('click', () => openDetail(disc[+tr.dataset.ri])));
+    }
+
+    async function downloadXlsx() {
+      try {
+        const XLSX = await ensureXLSX();
+        const aoa = [[...base, ...shelfHead]];
+        for (const d of disc) {
+          const row = [d.field, d.isbn, d.name, d.pub, d.sys, d.real, d.miss, d.exc, d.scan, d.diff];
+          for (let i = 0; i < SA_MAX_SHELF; i++) { const s = d.shelves[i]; row.push(s ? `${s[0]} (${s[1]})` : ''); }
+          aoa.push(row);
+        }
+        const ws = XLSX.utils.aoa_to_sheet(aoa);
+        const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, '재고오차');
+        const dt = new Date(); const p2 = (x) => String(x).padStart(2, '0');
+        XLSX.writeFile(wb, `재고오차_${dt.getFullYear()}${p2(dt.getMonth() + 1)}${p2(dt.getDate())}_${p2(dt.getHours())}${p2(dt.getMinutes())}.xlsx`);
+      } catch (e) { UI.toast(e.message || '다운로드 실패', 'error'); }
     }
 
     m.q('#sa-run').addEventListener('click', async () => {
@@ -2522,13 +2690,15 @@ const App = (() => {
 
         // ① 오차 추출: 예외≠Y · 차이≠0 · (실재고-스캔재고)≠0
         // 칼럼: ISBN0 도서명1 분야2 출판사3 전산재고4 실재고5 누락재고6 예외여부7 스캔재고8 차이9
-        const disc = [];
+        disc = []; isbnSet = new Set();
         for (let i = 1; i < r1.length; i++) {
           const r = r1[i]; if (!r || r[0] == null || r[0] === '') continue;
           if (String(r[7] || '').trim().toUpperCase() === 'Y') continue;
           if (num(r[9]) === 0) continue;
           if (num(r[5]) - num(r[8]) === 0) continue;
-          disc.push({ isbn: String(r[0]).trim(), name: r[1], field: r[2], pub: r[3], sys: r[4], real: r[5], miss: r[6], exc: r[7], scan: r[8], diff: r[9] });
+          const isbn = String(r[0]).trim();
+          disc.push({ isbn, name: r[1], field: r[2], pub: r[3], sys: r[4], real: r[5], miss: r[6], exc: r[7], scan: r[8], diff: r[9] });
+          isbnSet.add(isbn);
         }
         // ② 서가별 실사수량 합산: ISBN0 … 서가번호4 실사수량5
         const shelfMap = new Map();
@@ -2547,21 +2717,10 @@ const App = (() => {
           d.shelves = mm ? [...mm.entries()].sort((a, b) => Number(a[0]) - Number(b[0])).slice(0, SA_MAX_SHELF) : [];
           if (d.shelves.length) matched++;
         }
-
-        const base = ['분야', 'ISBN', '도서명', '출판사', '전산재고', '실재고', '누락재고', '예외여부', '스캔재고', '차이'];
-        const shelfHead = Array.from({ length: SA_MAX_SHELF }, (_, i) => `서가${i + 1}`);
-        const thead = `<thead><tr>${[...base, ...shelfHead].map((h) => `<th>${h}</th>`).join('')}</tr></thead>`;
-        const tbody = disc.map((d) => {
-          const cells = [d.field, d.isbn, d.name, d.pub, d.sys, d.real, d.miss, d.exc, d.scan, d.diff];
-          for (let i = 0; i < SA_MAX_SHELF; i++) { const s = d.shelves[i]; cells.push(s ? `${s[0]} (${s[1]})` : ''); }
-          return `<tr>${cells.map((c, idx) => `<td class="${idx >= base.length ? 'sa-shelf' : ''}">${UI.escapeHtml(String(c == null ? '' : c))}</td>`).join('')}</tr>`;
-        }).join('');
         status('');
-        m.q('#sa-result').innerHTML = `
-          <div class="sa-summary">오차 항목 <b>${disc.length.toLocaleString()}건</b> · 서가 데이터 매칭 <b>${matched.toLocaleString()}건</b></div>
-          ${disc.length ? `<div class="table-wrap sa-tablewrap"><table class="sa-table">${thead}<tbody>${tbody}</tbody></table></div>` : '<p class="muted" style="padding:14px">오차 항목이 없습니다.</p>'}`;
+        renderResult(matched);
       } catch (err) {
-        status(''); m.q('#sa-result').innerHTML = `<p class="muted" style="color:var(--danger)">${UI.escapeHtml(err.message)}</p>`;
+        status(''); m.q('#sa-result').innerHTML = `<p class="muted" style="color:var(--danger)">${esc(err.message)}</p>`;
       } finally { btn.disabled = false; }
     });
   }
