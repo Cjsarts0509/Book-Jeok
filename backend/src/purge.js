@@ -22,8 +22,28 @@ async function purgeOldTrash() {
       console.log(`[purge] 휴지통 영구삭제: 파일 ${files.rowCount}건, 폴더 ${folders.rowCount}건`);
     }
     await purgeStaleBundles();
+    await purgeStaleChunks();
   } catch (err) {
     console.error('[purge] 실패:', err.message);
+  }
+}
+
+// 미완료(버려진) 청크 업로드 임시폴더 정리: 하루 이상 방치된 조각 디렉터리 삭제.
+async function purgeStaleChunks() {
+  try {
+    const chunkRoot = path.join(config.storageRoot, '_chunks');
+    let entries;
+    try { entries = await fsp.readdir(chunkRoot, { withFileTypes: true }); } catch { return; }
+    const cutoff = Date.now() - 86400000; // 1일
+    let removed = 0;
+    for (const e of entries) {
+      if (!e.isDirectory()) continue;
+      const p = path.join(chunkRoot, e.name);
+      try { const st = await fsp.stat(p); if (st.mtimeMs < cutoff) { await fsp.rm(p, { recursive: true, force: true }); removed++; } } catch { /* skip */ }
+    }
+    if (removed > 0) console.log(`[purge] 미완료 청크 정리: ${removed}건`);
+  } catch (err) {
+    console.error('[purge] 청크 정리 실패:', err.message);
   }
 }
 

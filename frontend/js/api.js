@@ -55,6 +55,8 @@ const API = (() => {
     allowedExtensions: () => req('GET', '/files/allowed-extensions'),
     usage: (ownerId) => req('GET', `/files/usage/summary${ownerId ? '?ownerId=' + ownerId : ''}`),
     upload: (formData, ownerId) => req('POST', `/files/upload${ownerId ? '?ownerId=' + ownerId : ''}`, formData, true),
+    uploadChunk: (formData) => req('POST', '/files/upload/chunk', formData, true),
+    uploadComplete: (data, ownerId) => req('POST', `/files/upload/complete${ownerId ? '?ownerId=' + ownerId : ''}`, data),
     createFolder: (path, ownerId, icon, color) => req('POST', '/files/folders', { path, ownerId, icon, color }),
     deleteFolder: (path, ownerId) => req('DELETE', `/files/folders?path=${encodeURIComponent(path)}${ownerId ? '&ownerId=' + ownerId : ''}`),
     renameFolder: (oldPath, newPath, ownerId) => req('PATCH', '/files/folders', { oldPath, newPath, ownerId }),

@@ -88,6 +88,19 @@ const upload = multer({
   },
 });
 
+// ── 대용량 청크 업로드(Cloudflare 100MB 본문 제한 우회) ──────────
+// 파일을 조각으로 나눠 여러 요청으로 받고 서버에서 합침. 조각은 임시폴더에 보관.
+const CHUNK_ROOT = path.join(config.storageRoot, '_chunks');
+const UPLOAD_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const CHUNK_ASSEMBLE_MAX = parseInt(process.env.CHUNK_MAX_BYTES || String(500 * 1024 * 1024), 10); // 합친 파일 상한(기본 500MB)
+const chunkUpload = multer({
+  storage: multer.diskStorage({
+    destination: (req, file, cb) => { const d = path.join(CHUNK_ROOT, '_staging'); fs.mkdirSync(d, { recursive: true }); cb(null, d); },
+    filename: (req, file, cb) => cb(null, crypto.randomUUID()),
+  }),
+  limits: { fileSize: 100 * 1024 * 1024 }, // 조각 하나 최대 100MB
+});
+
 async function resolveOwner(req, res, next) {
   const requested = req.query.ownerId || req.body.ownerId;
   if (requested && Number(requested) !== req.user.id) {
@@ -349,6 +362,99 @@ router.post('/upload', authenticate, wrap(resolveOwner), upload.array('file', 30
   }
   if (saved.length === 0 && rejected.length) return res.status(422).json({ error: `업로드가 차단되었습니다: ${rejected.map((r) => r.reason).join(', ')}`, rejected });
   res.status(201).json({ uploaded: saved, rejected });
+}));
+
+// 청크 수신: 조각 하나를 임시폴더에 저장. 소유자·보안 검사는 완료(complete) 시점에 수행하므로 인증만.
+router.post('/upload/chunk', authenticate, chunkUpload.single('chunk'), wrap(async (req, res) => {
+  const uploadId = String(req.body.uploadId || '');
+  const index = parseInt(req.body.index, 10);
+  if (!UPLOAD_ID_RE.test(uploadId) || !Number.isInteger(index) || index < 0 || index > 100000 || !req.file) {
+    if (req.file) await fsp.unlink(req.file.path).catch(() => {});
+    return res.status(400).json({ error: '잘못된 청크 요청입니다.' });
+  }
+  const dir = path.join(CHUNK_ROOT, uploadId); // uploadId는 UUID 형식만 허용(경로 조작 방지)
+  await fsp.mkdir(dir, { recursive: true });
+  await fsp.rename(req.file.path, path.join(dir, `${index}.part`));
+  res.json({ ok: true, index });
+}));
+
+// 완료: 조각을 순서대로 합쳐 최종 파일 생성 → 매직바이트·YARA·할당량 검사 후 저장. (단일 업로드와 동일 정책)
+router.post('/upload/complete', authenticate, wrap(resolveOwner), wrap(async (req, res) => {
+  const uploadId = String(req.body.uploadId || '');
+  const totalChunks = parseInt(req.body.totalChunks, 10);
+  const folder = normalizeFolder(req.body.folder);
+  if (!UPLOAD_ID_RE.test(uploadId) || !Number.isInteger(totalChunks) || totalChunks < 1 || totalChunks > 100000) {
+    return res.status(400).json({ error: '잘못된 완료 요청입니다.' });
+  }
+  const dir = path.join(CHUNK_ROOT, uploadId);
+  const cleanup = () => fsp.rm(dir, { recursive: true, force: true }).catch(() => {});
+  // 모든 조각 존재 확인
+  for (let i = 0; i < totalChunks; i++) {
+    if (!fs.existsSync(path.join(dir, `${i}.part`))) { await cleanup(); return res.status(400).json({ error: `일부 조각이 누락되어 업로드를 완료할 수 없습니다 (조각 ${i}).` }); }
+  }
+  // 파일명·제목·확장자
+  let originalName = String(req.body.filename || 'file').replace(/[/\\]/g, '_').replace(/[\x00-\x1f]/g, '').trim() || 'file';
+  const title = String(req.body.title || '').replace(/[/\\]/g, '_').replace(/[\x00-\x1f]/g, '').trim();
+  if (title) { const ext = originalName.includes('.') ? originalName.slice(originalName.lastIndexOf('.')) : ''; originalName = title.toLowerCase().endsWith(ext.toLowerCase()) ? title : title + ext; }
+  if (!isAllowed(extOf(originalName))) { await cleanup(); return res.status(415).json({ error: `허용되지 않는 파일 형식입니다. 가능: ${allowedLabel()}` }); }
+  const note = String(req.body.note || '').slice(0, 2000).trim();
+  const owner = req.targetOwnerId;
+
+  // 조각 합치기(순서대로 스트림 이어붙임)
+  const dest = userDir(owner);
+  await fsp.mkdir(dest, { recursive: true });
+  const storedName = crypto.randomUUID();
+  const finalPath = path.join(dest, storedName);
+  try {
+    const out = fs.createWriteStream(finalPath);
+    for (let i = 0; i < totalChunks; i++) {
+      await new Promise((resolve, reject) => {
+        const rs = fs.createReadStream(path.join(dir, `${i}.part`));
+        rs.on('error', reject); out.on('error', reject); rs.on('end', resolve);
+        rs.pipe(out, { end: false });
+      });
+    }
+    await new Promise((resolve, reject) => out.end((err) => (err ? reject(err) : resolve())));
+  } catch (err) {
+    await fsp.unlink(finalPath).catch(() => {}); await cleanup();
+    throw err;
+  }
+  await cleanup(); // 조각 정리
+
+  // 크기 상한·할당량
+  const size = (await fsp.stat(finalPath)).size;
+  if (size > CHUNK_ASSEMBLE_MAX) { await fsp.unlink(finalPath).catch(() => {}); return res.status(413).json({ error: `허용 최대 크기(${Math.round(CHUNK_ASSEMBLE_MAX / 1048576)}MB)를 초과했습니다.` }); }
+  const ownerRow = await query('SELECT quota_bytes, role, upload_conflict FROM users WHERE id=$1', [owner]);
+  const overwrite = ownerRow.rows[0].upload_conflict === 'overwrite';
+  if (ownerRow.rows[0].role !== 'admin') {
+    const quota = Number(ownerRow.rows[0].quota_bytes);
+    const used = await query('SELECT COALESCE(SUM(size_bytes),0) AS s FROM files WHERE owner_id=$1 AND deleted_at IS NULL', [owner]);
+    if (Number(used.rows[0].s) + size > quota) {
+      await fsp.unlink(finalPath).catch(() => {});
+      return res.status(413).json({ error: quota === 0 ? '디스크가 할당되지 않은 계정입니다. 관리자에게 문의하세요.' : '저장 용량 할당량을 초과했습니다.' });
+    }
+  }
+  // 보안 검사(합친 파일 기준, 단일 업로드와 동일)
+  const ft = await filetype.verify(finalPath, originalName);
+  if (!ft.ok) { await fsp.unlink(finalPath).catch(() => {}); await audit(req, 'file_blocked', `${originalName} (${ft.reason})`); return res.status(422).json({ error: `업로드가 차단되었습니다: ${ft.reason}` }); }
+  const mal = await yara.scanFile(finalPath);
+  if (!mal.ok) { await fsp.unlink(finalPath).catch(() => {}); await audit(req, 'malware_blocked', `${originalName} (${mal.rule})`); return res.status(422).json({ error: `악성 패턴 감지(${mal.rule})` }); }
+
+  await ensureFolder(owner, folder);
+  let name;
+  if (overwrite) { await query('UPDATE files SET deleted_at=now() WHERE owner_id=$1 AND folder=$2 AND original_name=$3 AND deleted_at IS NULL', [owner, folder, originalName]); name = originalName; }
+  else { name = await uniqueFileName(owner, folder, originalName); }
+  const mime = String(req.body.mime || '').slice(0, 100) || 'application/octet-stream';
+  const row = await query(
+    `INSERT INTO files (owner_id, folder, original_name, stored_name, size_bytes, mime_type, note, note_updated_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,${note ? 'now()' : 'NULL'}) RETURNING id`,
+    [owner, folder, name, storedName, size, mime, note]
+  );
+  await audit(req, 'upload', `owner=${owner} count=1 (chunked ${totalChunks}조각)`);
+  if (Number(req.user.id) !== Number(owner)) {
+    notify.push({ userId: owner, type: 'upload', title: '파일 1개가 업로드되었습니다', body: `${req.user.display_name || req.user.username}님이 '${folder}' 폴더에 파일을 올렸습니다.` }).catch(() => {});
+  }
+  res.status(201).json({ uploaded: [{ id: row.rows[0].id, name, size, folder }], rejected: [] });
 }));
 
 // 허용 확장자 조회 (로그인 사용자)

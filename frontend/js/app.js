@@ -1107,16 +1107,45 @@ const App = (() => {
     });
   }
 
+  // Cloudflare 무료플랜 본문 100MB 제한 → 80MB 초과 파일은 50MB 청크로 분할 업로드
+  const CHUNK_THRESHOLD = 80 * 1024 * 1024;
+  const CHUNK_SIZE = 50 * 1024 * 1024;
+
   async function uploadFiles(fileList) {
-    const fd = new FormData(); fd.append('folder', state.folder);
-    [...fileList].forEach((f) => fd.append('file', f));
-    UI.toast(`${fileList.length}개 업로드 중…`);
+    const files = [...fileList];
+    const small = files.filter((f) => f.size <= CHUNK_THRESHOLD);
+    const large = files.filter((f) => f.size > CHUNK_THRESHOLD);
     try {
-      const r = await API.upload(fd, state.ownerId);
-      if (r && r.rejected && r.rejected.length) UI.toast(`⚠️ ${r.rejected.length}개 차단됨 (${r.rejected.map((x) => x.reason || '보안 정책').join(' · ')})`, 'error');
-      if (!r || !r.rejected || r.rejected.length < fileList.length) UI.toast('업로드 완료 ✅', 'success');
+      if (small.length) {
+        const fd = new FormData(); fd.append('folder', state.folder);
+        small.forEach((f) => fd.append('file', f));
+        UI.toast(`${small.length}개 업로드 중…`);
+        const r = await API.upload(fd, state.ownerId);
+        if (r && r.rejected && r.rejected.length) UI.toast(`⚠️ ${r.rejected.length}개 차단됨 (${r.rejected.map((x) => x.reason || '보안 정책').join(' · ')})`, 'error');
+      }
+      for (const f of large) await chunkedUploadFile(f, state.folder, state.ownerId); // 대용량은 하나씩 분할 전송
+      UI.toast('업로드 완료 ✅', 'success');
       loadAll();
     } catch (err) { UI.toast(err.message, 'error'); }
+  }
+
+  // 대용량 파일(>80MB)을 50MB 조각으로 나눠 순차 전송 후 서버에서 합침. 진행률 토스트 표시.
+  async function chunkedUploadFile(file, folder, ownerId) {
+    const uid = (self.crypto && crypto.randomUUID) ? crypto.randomUUID()
+      : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => { const r = Math.floor(Math.random() * 16); return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16); });
+    const total = Math.ceil(file.size / CHUNK_SIZE);
+    try {
+      for (let i = 0; i < total; i++) {
+        const blob = file.slice(i * CHUNK_SIZE, Math.min(file.size, (i + 1) * CHUNK_SIZE));
+        const fd = new FormData();
+        fd.append('uploadId', uid); fd.append('index', String(i)); fd.append('chunk', blob, 'chunk');
+        UI.toast(`${file.name} 업로드 중… ${i + 1}/${total}`, 'info');
+        await API.uploadChunk(fd);
+      }
+      await API.uploadComplete({ uploadId: uid, filename: file.name, folder, totalChunks: total, mime: file.type || '' }, ownerId);
+    } catch (err) {
+      throw new Error(`'${file.name}' 업로드 실패: ${err.message}`);
+    }
   }
 
   // ── 모바일 하단 FAB(⬆️) → 파일/촬영/스캔 선택 시트 ──────────
