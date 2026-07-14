@@ -2631,10 +2631,11 @@ const App = (() => {
         im.src = url;
       });
     }
-    async function saveOne(blob, isbn, folder) {
+    async function saveOne(blob, isbn, folder, note) {
       const fd = new FormData();
       fd.append('folder', folder || '/');
       fd.append('file', new File([blob], `${isbn}.jpg`, { type: 'image/jpeg' }));
+      if (note) fd.append('notes', note);   // 백엔드 /upload 는 notes[index] 로 비고 저장
       try { const r = await API.upload(fd, state.ownerId); return !(r && r.rejected && r.rejected.length); }
       catch (_) { return false; }
     }
@@ -2668,13 +2669,16 @@ const App = (() => {
         </div>
         <div class="sad-shelves"><div class="lbl">서가번호 (실사수량)</div>${shelfChips}</div>
         <div class="sad-folder"><span>저장 폴더</span><select id="sad-folder">${folderOptions(saCurrentFolder)}</select></div>
-        <div class="modal-actions"><button class="btn btn-ghost" id="sad-close">닫기</button><span style="flex:1"></span><button class="btn btn-primary" id="sad-shoot">📷 사진 촬영·저장</button></div>
-        <div class="scan-list" id="sad-saved" style="margin-top:10px"></div>`);
+        <div id="sad-stage"></div>
+        <div class="modal-actions"><button class="btn btn-ghost" id="sad-close">닫기</button><span style="flex:1"></span><button class="btn btn-primary" id="sad-shoot">📷 사진 촬영</button></div>
+        <div class="scan-list" id="sad-saved" style="margin-top:10px"></div>`,
+        { onClose: () => { try { if (stageUrl) URL.revokeObjectURL(stageUrl); } catch (_) {} } });
       dm.el.querySelector('.modal').classList.add('modal-wide');
       attachCover(dm.q('#sad-cover'), d.isbn);
       dm.q('#sad-close').addEventListener('click', dm.close);
       dm.q('#sad-folder').addEventListener('change', (e) => setFolder(e.target.value));  // 폴더 바꾸면 목록 음영도 갱신
 
+      let stageUrl = null;   // 미리보기 objectURL (저장/취소/닫기 시 해제)
       const cam = document.createElement('input');
       cam.type = 'file'; cam.accept = 'image/*'; cam.capture = 'environment'; cam.style.display = 'none';
       dm.el.appendChild(cam);
@@ -2685,29 +2689,52 @@ const App = (() => {
           : '';
       };
       dm.q('#sad-shoot').addEventListener('click', () => { try { cam.click(); } catch (_) {} });
+
+      // 촬영: 바로 저장하지 않고 미리보기 + 비고 입력 단계로 → 저장 버튼을 눌러야 저장
       cam.addEventListener('change', async () => {
         const file = cam.files[0]; cam.value = ''; if (!file) return;
-        const btn = dm.q('#sad-shoot'); btn.disabled = true;
-        const folder = dm.q('#sad-folder').value || '/';
+        const shootBtn = dm.q('#sad-shoot'); shootBtn.disabled = true;
         try {
-          // 촬영 사진에서 바코드를 모두 인식 → 현재 항목 + (리스트에 있는) 다른 바코드에도 같은 사진 저장
+          // 사진 속 바코드를 모두 인식 → 현재 항목 + (리스트에 있는) 다른 바코드도 저장 대상
           let found = [];
           try { const img = await loadImgEl(URL.createObjectURL(file)); found = await window.ISBN.scanMulti(img); } catch (_) {}
-          const targets = new Set([d.isbn]);
-          let skipped = 0;
+          const targets = new Set([d.isbn]); let skipped = 0;
           for (const f of found) { const c = window.ISBN.clean(f.code); if (c === d.isbn) continue; if (isbnSet.has(c)) targets.add(c); else skipped++; }
           const blob = await downscale(file, 1600, 0.85);
+          showStage(blob, [...targets], skipped);
+        } catch (_) { UI.toast('사진 처리 실패', 'error'); }
+        finally { shootBtn.disabled = false; }
+      });
+
+      function clearStage() { try { if (stageUrl) URL.revokeObjectURL(stageUrl); } catch (_) {} stageUrl = null; const s = dm.q('#sad-stage'); if (s) s.innerHTML = ''; }
+      function showStage(blob, targets, skipped) {
+        clearStage();
+        stageUrl = URL.createObjectURL(blob);
+        const chips = targets.map((t) => `<span class="sad-chip${t === d.isbn ? ' cur' : ''}">${esc(t)}</span>`).join('');
+        dm.q('#sad-stage').innerHTML = `<div class="sad-stage">
+          <img class="sad-preview" src="${stageUrl}" alt="">
+          <div class="sad-stage-body">
+            <div class="sad-stage-tgt">저장 대상 <b>${targets.length}건</b> <span class="sad-chips inline">${chips}</span></div>
+            ${skipped ? `<div class="muted" style="font-size:12px">· 리스트에 없는 ${skipped}건은 저장하지 않음</div>` : ''}
+            <input type="text" id="sad-note" class="sad-note" placeholder="비고(선택) — 예: 파본·위치 등" maxlength="200">
+            <div class="sad-stage-actions"><button class="btn btn-ghost btn-sm" id="sad-cancel">취소</button><button class="btn btn-primary btn-sm" id="sad-save">💾 저장</button></div>
+          </div></div>`;
+        dm.q('#sad-cancel').addEventListener('click', clearStage);
+        dm.q('#sad-save').addEventListener('click', async () => {
+          const note = (dm.q('#sad-note').value || '').trim();
+          const folder = dm.q('#sad-folder').value || '/';
+          const sv = dm.q('#sad-save'), cx = dm.q('#sad-cancel'); sv.disabled = true; cx.disabled = true;
           for (const t of targets) {
             const row = { isbn: t, status: 'saving' }; savedRows.push(row); renderSaved();
-            const ok = await saveOne(blob, t, folder); row.status = ok ? 'done' : 'error'; renderSaved();
+            const ok = await saveOne(blob, t, folder, note); row.status = ok ? 'done' : 'error'; renderSaved();
             if (ok && folder === saCurrentFolder) saPhotoStems.add(t);   // 뒤 목록 음영 즉시 반영
           }
           if (saFilterPhoto) renderTable(); else applyShade();
-          const extra = targets.size - 1;
-          UI.toast(`${targets.size}건 저장${extra ? ` (추가 바코드 ${extra}건)` : ''}${skipped ? ` · 리스트에 없는 ${skipped}건 제외` : ''}`, 'success');
-        } catch (_) { UI.toast('저장 실패', 'error'); }
-        finally { btn.disabled = false; }
-      });
+          const extra = targets.length - 1;
+          UI.toast(`${targets.length}건 저장${extra ? ` (추가 바코드 ${extra}건)` : ''}`, 'success');
+          clearStage();
+        });
+      }
     }
 
     // ── 바코드로 항목 찾기: 카메라 → 인식된 ISBN 중 리스트에 있는 것 열기 ──

@@ -911,6 +911,14 @@ th { background: var(--bg); font-weight: 700; color: var(--text-muted); font-siz
 .sad-chip b { color: var(--secondary); }
 .sad-folder { display: flex; align-items: center; gap: 8px; margin: 4px 0 4px; font-size: 13px; }
 .sad-folder select { flex: 1; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); font-size: 13px; }
+.sad-stage { display: flex; gap: 12px; margin: 10px 0; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg); }
+.sad-preview { flex: none; width: 92px; height: 122px; object-fit: cover; border-radius: var(--radius-sm); border: 1px solid var(--border); }
+.sad-stage-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.sad-stage-tgt { font-size: 13px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.sad-chips.inline { display: inline-flex; gap: 6px; flex-wrap: wrap; }
+.sad-chip.cur { border-color: var(--secondary); color: var(--secondary); font-weight: 700; }
+.sad-note { width: 100%; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); font-size: 14px; }
+.sad-stage-actions { display: flex; gap: 8px; justify-content: flex-end; }
 
 /* 전송(업로드/다운로드) 현황 패널 — 하단 고정 */
 #xfer-panel { position: fixed; right: 16px; bottom: 16px; width: 340px; max-width: calc(100vw - 24px); background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-lg); z-index: 60; overflow: hidden; }
