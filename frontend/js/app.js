@@ -2486,7 +2486,6 @@ const App = (() => {
 
   // ── 재고조사 오차체크(영업점) : 두 엑셀 → 오차 추출 + 서가별 실사수량 병합 표 ──────────
   const SA_MAX_SHELF = 10;
-  const SA_STORE_KEY = 'bj_stockaudit_v1';
   function stockAuditModal() {
     const m = UI.modal(`<h3>📊 재고조사 오차체크</h3>
       <p class="muted" style="font-size:12px;margin:-6px 0 12px">두 엑셀을 올리면 오차 항목(예외 제외·차이≠0)을 뽑아 서가별 실사수량과 함께 표로 보여줍니다.</p>
@@ -2519,17 +2518,19 @@ const App = (() => {
     let saCurrentFolder = state.folder || '/';  // 사진 저장·확인 대상 폴더
     let saPhotoStems = new Set();   // 현재 폴더에 이미 사진이 있는 ISBN
 
-    // ── 목록 저장/불러오기(브라우저 보관 — 재업로드 없이 이어서 작업) ──
-    // 저장은 '작업 대상 영업점 계정'별로 분리 → 같은 기기에서 계정이 달라도 서로 섞이지 않음
-    const storeOwner = () => state.ownerId || (state.user && state.user.id) || 'anon';
-    const storeKey = () => `${SA_STORE_KEY}_${storeOwner()}`;
-    function persist() {
+    // ── 목록 저장/불러오기(서버 보관 · 계정별) — 같은 계정이면 어느 기기서든 이어서 작업 ──
+    async function persist() {
+      const btn = m.q('#sa-save'); if (btn) btn.disabled = true;
       try {
-        localStorage.setItem(storeKey(), JSON.stringify({ savedAt: Date.now(), ownerId: storeOwner(), disc }));
-        UI.toast(`목록 저장됨 (${disc.length.toLocaleString()}건) — 다음에 이어서 볼 수 있어요`, 'success');
-      } catch (_) { UI.toast('저장 실패(브라우저 저장 용량 초과일 수 있어요)', 'error'); }
+        await API.stockAuditSave(disc, state.ownerId);
+        UI.toast(`목록 저장됨 (${disc.length.toLocaleString()}건) — 다른 기기에서도 이어서 볼 수 있어요`, 'success');
+      } catch (e) { UI.toast('저장 실패: ' + (e.message || '네트워크 오류'), 'error'); }
+      finally { if (btn) btn.disabled = false; }
     }
-    function loadStored() { try { return JSON.parse(localStorage.getItem(storeKey()) || 'null'); } catch (_) { return null; } }
+    async function loadStored() {
+      try { const r = await API.stockAuditGet(state.ownerId); return (r && Array.isArray(r.data) && r.data.length) ? r : null; }
+      catch (_) { return null; }
+    }
 
     // ── 폴더 사진 유무 확인 → 표에 음영 표시 ──
     const stem = (name) => String(name || '').replace(/\.[^.]+$/, '');
@@ -2726,20 +2727,23 @@ const App = (() => {
       } catch (e) { UI.toast(e.message || '다운로드 실패', 'error'); }
     }
 
-    // 저장된 목록이 있으면(같은 계정) 재업로드 없이 이어서 볼 수 있게 안내
-    (function showResume() {
-      const st = loadStored();   // storeKey()가 계정별로 분리돼 있어 다른 계정 목록은 애초에 안 불러옴
-      if (!st || !Array.isArray(st.disc) || !st.disc.length) return;
-      const dt = new Date(st.savedAt || 0); const p2 = (x) => String(x).padStart(2, '0');
-      const when = st.savedAt ? `${dt.getFullYear()}-${p2(dt.getMonth() + 1)}-${p2(dt.getDate())} ${p2(dt.getHours())}:${p2(dt.getMinutes())}` : '';
-      const box = m.q('#sa-resume');
-      box.innerHTML = `<div class="sa-resume">💾 저장된 목록 <b>${st.disc.length.toLocaleString()}건</b>${when ? ` <span class="muted">(${when})</span>` : ''}<span style="flex:1"></span><button class="btn btn-sm btn-primary" id="sa-resume-go">이어서 보기</button><button class="btn btn-sm btn-ghost" id="sa-resume-del">삭제</button></div>`;
+    // 저장된 목록이 있으면(같은 계정 · 서버) 재업로드 없이 이어서 볼 수 있게 안내
+    (async function showResume() {
+      const st = await loadStored();   // 서버가 계정(owner)별로 보관 → 다른 계정 목록은 애초에 안 옴
+      if (!st || !Array.isArray(st.data) || !st.data.length) return;
+      const dt = new Date(st.updatedAt || 0); const p2 = (x) => String(x).padStart(2, '0');
+      const when = st.updatedAt ? `${dt.getFullYear()}-${p2(dt.getMonth() + 1)}-${p2(dt.getDate())} ${p2(dt.getHours())}:${p2(dt.getMinutes())}` : '';
+      const box = m.q('#sa-resume'); if (!box) return;
+      box.innerHTML = `<div class="sa-resume">💾 저장된 목록 <b>${st.data.length.toLocaleString()}건</b>${when ? ` <span class="muted">(${when})</span>` : ''}<span style="flex:1"></span><button class="btn btn-sm btn-primary" id="sa-resume-go">이어서 보기</button><button class="btn btn-sm btn-ghost" id="sa-resume-del">삭제</button></div>`;
       m.q('#sa-resume-go').addEventListener('click', () => {
-        disc = st.disc.map((d) => ({ ...d, shelves: d.shelves || [] }));
+        disc = st.data.map((d) => ({ ...d, shelves: d.shelves || [] }));
         isbnSet = new Set(disc.map((d) => d.isbn));
         box.innerHTML = ''; status(''); renderResult();
       });
-      m.q('#sa-resume-del').addEventListener('click', () => { try { localStorage.removeItem(storeKey()); } catch (_) {} box.innerHTML = ''; });
+      m.q('#sa-resume-del').addEventListener('click', async () => {
+        try { await API.stockAuditDelete(state.ownerId); box.innerHTML = ''; UI.toast('저장된 목록을 삭제했습니다', 'success'); }
+        catch (e) { UI.toast('삭제 실패: ' + (e.message || ''), 'error'); }
+      });
     })();
 
     m.q('#sa-run').addEventListener('click', async () => {

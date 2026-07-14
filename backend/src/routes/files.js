@@ -150,6 +150,32 @@ router.get('/accounts', authenticate, wrap(async (req, res) => {
   res.json({ accounts: [] });
 }));
 
+// ── 재고조사 오차체크 저장(계정별 · 서버 보관) ──────────
+// 접근 규칙은 resolveOwner/canAccessOwner 와 동일: 영업점 본인 또는 관리자만.
+router.get('/stock-audit', authenticate, wrap(resolveOwner), wrap(async (req, res) => {
+  const r = await query('SELECT data, item_count, updated_at FROM stock_audits WHERE owner_id=$1', [req.targetOwnerId]);
+  if (!r.rowCount) return res.json({ data: null });
+  res.json({ data: r.rows[0].data, itemCount: r.rows[0].item_count, updatedAt: r.rows[0].updated_at });
+}));
+router.put('/stock-audit', authenticate, wrap(resolveOwner), wrap(async (req, res) => {
+  const data = req.body.data;
+  if (!Array.isArray(data)) return res.status(400).json({ error: '목록 형식이 올바르지 않습니다.' });
+  if (data.length > 50000) return res.status(413).json({ error: '항목이 너무 많습니다(최대 5만).' });
+  await query(
+    `INSERT INTO stock_audits (owner_id, data, item_count, updated_by, updated_at)
+       VALUES ($1, $2::jsonb, $3, $4, now())
+     ON CONFLICT (owner_id) DO UPDATE
+       SET data=EXCLUDED.data, item_count=EXCLUDED.item_count, updated_by=EXCLUDED.updated_by, updated_at=now()`,
+    [req.targetOwnerId, JSON.stringify(data), data.length, req.user.id]
+  );
+  await audit(req, 'stock_audit_save', `owner=${req.targetOwnerId} items=${data.length}`);
+  res.json({ ok: true, itemCount: data.length });
+}));
+router.delete('/stock-audit', authenticate, wrap(resolveOwner), wrap(async (req, res) => {
+  await query('DELETE FROM stock_audits WHERE owner_id=$1', [req.targetOwnerId]);
+  res.json({ ok: true });
+}));
+
 // ── 폴더 트리 ──────────
 router.get('/tree', authenticate, wrap(resolveOwner), wrap(async (req, res) => {
   const [ff, fx] = await Promise.all([

@@ -260,6 +260,16 @@ const MIGRATIONS = [
     ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN ('user','manager','admin','branch'));
     ALTER TABLE notices ALTER COLUMN target_roles SET DEFAULT ARRAY['admin','manager','user','branch'];
   ` },
+  // 재고조사 오차체크 저장(계정별 1행) — 서버 보관 → 같은 계정이면 어느 기기서든 이어보기
+  { id: '0003_stock_audit', sql: `
+    CREATE TABLE IF NOT EXISTS stock_audits (
+      owner_id   INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+      data       JSONB NOT NULL DEFAULT '[]'::jsonb,
+      item_count INTEGER NOT NULL DEFAULT 0,
+      updated_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+  ` },
 ];
 
 // 적용 안 된 마이그레이션만 트랜잭션으로 실행하고 schema_migrations 에 기록.

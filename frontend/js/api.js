@@ -47,6 +47,9 @@ const API = (() => {
     markNotificationsRead: (ids) => req('POST', '/files/notifications/read', ids ? { ids } : {}),
     // files & folders
     listFiles: (folder, ownerId) => req('GET', `/files?folder=${encodeURIComponent(folder)}${ownerId ? '&ownerId=' + ownerId : ''}`),
+    stockAuditGet: (ownerId) => req('GET', `/files/stock-audit${ownerId ? '?ownerId=' + ownerId : ''}`),
+    stockAuditSave: (data, ownerId) => req('PUT', '/files/stock-audit', { data, ownerId }),
+    stockAuditDelete: (ownerId) => req('DELETE', `/files/stock-audit${ownerId ? '?ownerId=' + ownerId : ''}`),
     tree: (ownerId) => req('GET', `/files/tree${ownerId ? '?ownerId=' + ownerId : ''}`),
     accounts: () => req('GET', '/files/accounts'),
     branches: () => req('GET', '/meta/branches'),
