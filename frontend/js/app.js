@@ -1422,9 +1422,31 @@ const App = (() => {
       try { URL.revokeObjectURL(url); } catch (_) {}
       const upBlob = await downscaleBlob(file, 1600, 0.85);
       const codes = [...new Set(found.map((f) => f.code).filter((c) => window.ISBN.isBookIsbn(c)))];
-      if (codes.length >= 2) { setStatus(`✓ 바코드 ${codes.length}개 → 각각 저장`, 'ok'); for (const c of codes) await saveFile(upBlob, c, thumb); return; }
+      if (codes.length >= 2) { confirmMulti(codes, upBlob, thumb, file); return; } // 저장 전 확인(오인식 대비)
       setStatus(codes.length === 1 ? '바코드 1개만 자동 인식 — 영역 지정에서 나머지를 추가하세요' : '자동 인식 실패 — 바코드 영역을 지정하세요', 'bad');
       regionPicker(file, img, upBlob, thumb, found);
+    }
+
+    // 인식된 바코드가 여러 개면 저장 전에 확인 — 잘못 인식된 것(오독 팬텀)을 체크 해제하고 저장.
+    function confirmMulti(codes, upBlob, thumb, file) {
+      const url = URL.createObjectURL(file);
+      const rows = codes.map((c) => `<label class="mb-chk"><input type="checkbox" checked data-code="${c}"><span class="mb-isbn">${c}</span></label>`).join('');
+      const cm = UI.modal(`<h3>✅ 인식된 바코드 확인 <span class="muted" style="font-size:12px;font-weight:400">· ${codes.length}개</span></h3>
+        <p class="muted" style="font-size:12px;margin:-6px 0 10px">책과 비교해 <b>저장할 바코드만 체크</b>하세요. 잘못 인식된 건 체크를 해제하면 저장되지 않습니다.</p>
+        <div class="mb-confirm-img"><img src="${url}" alt=""></div>
+        <div class="mb-chks">${rows}</div>
+        <div class="modal-actions"><button class="btn btn-ghost" id="mbc-cancel">취소</button><span style="flex:1"></span><button class="btn btn-primary" id="mbc-save">선택 저장</button></div>`,
+        { onClose: () => { try { URL.revokeObjectURL(url); } catch (_) {} } });
+      cm.el.querySelector('.modal').classList.add('modal-wide');
+      cm.q('#mbc-cancel').addEventListener('click', cm.close);
+      cm.q('#mbc-save').addEventListener('click', async () => {
+        const sel = [...cm.el.querySelectorAll('.mb-chks input:checked')].map((x) => x.dataset.code);
+        if (!sel.length) return UI.toast('저장할 바코드를 하나 이상 선택하세요', 'error');
+        cm.close();
+        setStatus(`⏳ ${sel.length}개 저장 중…`);
+        for (const c of sel) await saveFile(upBlob, c, thumb);
+        setStatus(`✓ ${sel.length}개 저장 완료`, 'ok');
+      });
     }
 
     // 영역 지정 v2: 자동 후보 제시(구조텐서) + 박스별 실시간 ✓/✗ + 자동 인식분 미리 표시
