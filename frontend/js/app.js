@@ -25,7 +25,7 @@ const App = (() => {
   };
   const root = () => document.getElementById('app');
   const isPriv = () => state.user && (state.user.role === 'admin' || state.user.role === 'manager');
-  const roleLabel = (r) => ({ admin: '관리자', manager: '담당자', user: '일반' }[r] || r);
+  const roleLabel = (r) => ({ admin: '관리자', manager: '담당자', user: '외부업체', branch: '영업점' }[r] || r);
   const selKey = (i) => (i.type === 'file' ? `file:${i.id}` : `folder:${i.path}`);
   // 폴더 아이콘(모양)·색상 프리셋
   const FOLDER_ICONS = ['📁', '📂', '🗂️', '🗃️', '📦', '📚', '⭐', '🏷️', '🎁', '🔖', '💼', '🎨'];

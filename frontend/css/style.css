@@ -601,6 +601,7 @@ th { background: var(--bg); font-weight: 700; color: var(--text-muted); font-siz
 .badge.admin { background: #FFE9A8; color: #7a5a00; }
 .badge.manager { background: #D8F8EE; color: #05835f; }
 .badge.user { background: #E7F5FB; color: var(--secondary); }
+.badge.branch { background: #F3E8FF; color: #7c3aed; }
 .badge.on { background: #D8F8EE; color: #05835f; }
 .badge.off { background: #F1F3F5; color: var(--text-muted); }
 

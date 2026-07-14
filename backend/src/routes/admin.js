@@ -69,7 +69,7 @@ router.get('/users', wrap(async (req, res) => {
 router.post('/users', wrap(async (req, res) => {
   const username = String(req.body.username || '').trim().toLowerCase();
   const displayName = String(req.body.displayName || '').trim();
-  const role = ['admin', 'manager', 'user'].includes(req.body.role) ? req.body.role : 'user';
+  const role = ['admin', 'manager', 'user', 'branch'].includes(req.body.role) ? req.body.role : 'user';
   // 관리자는 무제한(quota 0), 그 외는 지정 할당(0=미할당)
   const quotaBytes = role === 'admin' ? 0 : Math.max(0, parseInt(req.body.quotaBytes || '0', 10) || 0);
   let password = String(req.body.password || '').trim();
@@ -144,7 +144,7 @@ router.patch('/users/:id', wrap(async (req, res) => {
   let i = 1;
   if (req.body.role !== undefined) {
     fields.push(`role = $${i++}`);
-    values.push(['admin', 'manager', 'user'].includes(req.body.role) ? req.body.role : 'user');
+    values.push(['admin', 'manager', 'user', 'branch'].includes(req.body.role) ? req.body.role : 'user');
   }
   if (req.body.quotaBytes !== undefined) {
     // 대상 계정의 역할 확인 (관리자는 항상 무제한 0)
@@ -425,7 +425,7 @@ router.delete('/branches/:id', wrap(async (req, res) => {
 }));
 
 // ══════════ 공지사항 관리 ══════════
-const ALL_ROLES = ['admin', 'manager', 'user'];
+const ALL_ROLES = ['admin', 'manager', 'user', 'branch'];
 function sanitizeRoles(input) {
   const arr = Array.isArray(input) ? input : [];
   const roles = ALL_ROLES.filter((r) => arr.includes(r));

@@ -28,9 +28,9 @@ function wrap(fn) {
 }
 
 // 권한 규칙:
-//  - admin   : 모든 계정 접근
-//  - manager : 본인 + 일반 사용자(role='user') 계정 접근 (관리자 기능은 불가)
-//  - user    : 본인만
+//  - admin   : 모든 계정 접근(외부업체·영업점 포함)
+//  - manager : 본인 + 외부업체(role='user') 계정만 접근. 영업점(role='branch')은 접근 불가.
+//  - user(외부업체)/branch(영업점) : 본인만
 // ownerId 소유자에 대한 접근 가능 여부를 판정 (owner 미존재 시 false)
 async function canAccessOwner(requester, ownerId) {
   if (Number(ownerId) === requester.id) return true;

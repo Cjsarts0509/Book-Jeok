@@ -131,7 +131,7 @@ const Admin = (() => {
     const rows = state.users.map((u) => `
       <tr>
         <td><b>${UI.escapeHtml(u.username)}</b><br><span style="color:var(--text-muted);font-size:12px">${UI.escapeHtml(u.displayName)}</span></td>
-        <td><span class="badge ${u.role}">${({admin:'관리자',manager:'담당자',user:'일반'})[u.role] || u.role}</span></td>
+        <td><span class="badge ${u.role}">${({admin:'관리자',manager:'담당자',user:'외부업체',branch:'영업점'})[u.role] || u.role}</span></td>
         <td><span class="badge ${u.isActive ? 'on' : 'off'}">${u.isActive ? '활성' : '정지'}</span></td>
         <td class="num">${u.fileCount}개 · ${UI.bytes(u.usedBytes)}${u.quotaBytes > 0 ? ' / ' + UI.bytes(u.quotaBytes) : ''}</td>
         <td style="text-align:right">
@@ -173,8 +173,9 @@ const Admin = (() => {
       <div class="field"><label>비밀번호 확인 (직접 입력 시)</label><input class="input" type="password" id="password2"><span class="pw-match muted" id="match"></span></div>
       <div class="field"><label>권한</label>
         <select class="input" id="role">
-          <option value="user">일반 (본인 파일만)</option>
-          <option value="manager">담당자 (일반 사용자 파일 열람·업로드, 관리기능 제외)</option>
+          <option value="user">외부업체 (본인 파일만)</option>
+          <option value="branch">영업점 (본인 파일만 · 담당자 접근 불가, 관리자만 열람)</option>
+          <option value="manager">담당자 (외부업체 파일 열람·업로드, 관리기능 제외)</option>
           <option value="admin">관리자 (전체 + 관리기능, 무제한)</option>
         </select>
       </div>
@@ -248,7 +249,8 @@ const Admin = (() => {
       <div class="field"><label>표시 이름</label><input class="input" id="dn" value="${UI.escapeHtml(u.displayName)}"></div>
       <div class="field"><label>권한</label>
         <select class="input" id="role">
-          <option value="user" ${u.role === 'user' ? 'selected' : ''}>일반</option>
+          <option value="user" ${u.role === 'user' ? 'selected' : ''}>외부업체</option>
+          <option value="branch" ${u.role === 'branch' ? 'selected' : ''}>영업점</option>
           <option value="manager" ${u.role === 'manager' ? 'selected' : ''}>담당자</option>
           <option value="admin" ${u.role === 'admin' ? 'selected' : ''}>관리자</option>
         </select></div>
@@ -443,9 +445,9 @@ const Admin = (() => {
       const now = Date.now();
       const rows = notices.map((n) => {
         const active = (!n.start_at || new Date(n.start_at).getTime() <= now) && (!n.end_at || new Date(n.end_at).getTime() >= now);
-        const roleLbl = { admin: '관리자', manager: '담당자', user: '일반' };
-        const roles = Array.isArray(n.target_roles) ? n.target_roles : ['admin', 'manager', 'user'];
-        const roleText = roles.length >= 3 ? '전체' : roles.map((r) => roleLbl[r] || r).join(', ');
+        const roleLbl = { admin: '관리자', manager: '담당자', user: '외부업체', branch: '영업점' };
+        const roles = Array.isArray(n.target_roles) ? n.target_roles : ['admin', 'manager', 'user', 'branch'];
+        const roleText = roles.length >= 4 ? '전체' : roles.map((r) => roleLbl[r] || r).join(', ');
         return `<tr class="fade-in">
           <td><b>${UI.escapeHtml(n.title)}</b><br><span class="muted" style="font-size:12px">${n.start_at ? UI.date(n.start_at) : '무기한'} ~ ${n.end_at ? UI.date(n.end_at) : '무기한'} · 👥 ${roleText}</span></td>
           <td><span class="badge ${active ? 'on' : 'off'}">${active ? '노출중' : '비노출'}</span></td>
@@ -487,7 +489,7 @@ const Admin = (() => {
       </div>
       <div class="field"><label>노출 대상 (권한)</label>
         <div class="role-picker" id="roles">
-          ${[['admin', '관리자'], ['manager', '담당자'], ['user', '일반']].map(([v, lbl]) => {
+          ${[['admin', '관리자'], ['manager', '담당자'], ['user', '외부업체'], ['branch', '영업점']].map(([v, lbl]) => {
             const checked = !n || !Array.isArray(n.target_roles) || n.target_roles.includes(v);
             return `<label class="role-chip"><input type="checkbox" value="${v}" ${checked ? 'checked' : ''}> ${lbl}</label>`;
           }).join('')}

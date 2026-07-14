@@ -120,11 +120,12 @@ const Manual = (() => {
       <table class="manual-table">
         <thead><tr><th>권한</th><th>볼 수 있는 파일</th><th>디스크</th></tr></thead>
         <tbody>
-          <tr><td><b>담당자</b></td><td>본인 + 일반 사용자</td><td>할당량</td></tr>
-          <tr><td><b>일반</b></td><td>본인만</td><td>할당량</td></tr>
+          <tr><td><b>담당자</b></td><td>본인 + 외부업체</td><td>할당량</td></tr>
+          <tr><td><b>외부업체</b></td><td>본인만</td><td>할당량</td></tr>
+          <tr><td><b>영업점</b></td><td>본인만 (담당자는 못 봄 · 관리자만 열람)</td><td>할당량</td></tr>
         </tbody>
       </table>
-      <p class="manual-note">담당자는 상단 <b>계정 전환</b>으로 일반 사용자의 파일을 열람·업로드할 수 있습니다(관리 기능은 없음). 열람 중 삭제한 파일은 그 계정 열람 상태에서 <span class="kbd">🗑️ 휴지통</span>으로 복원할 수 있습니다.</p>
+      <p class="manual-note">담당자는 상단 <b>계정 전환</b>으로 <b>외부업체</b> 계정의 파일을 열람·업로드할 수 있습니다(관리 기능은 없음). <b>영업점</b> 자료는 담당자가 볼 수 없고 <b>관리자만</b> 열람합니다. 열람 중 삭제한 파일은 그 계정 열람 상태에서 <span class="kbd">🗑️ 휴지통</span>으로 복원할 수 있습니다.</p>
     </section>
 
     <section class="manual-sec manual-tips">
@@ -162,9 +163,10 @@ const Manual = (() => {
       <table class="manual-table">
         <thead><tr><th>권한</th><th>볼 수 있는 파일</th><th>관리 기능</th><th>디스크</th></tr></thead>
         <tbody>
-          <tr><td><b>관리자</b></td><td>모든 계정</td><td>전체</td><td>무제한</td></tr>
-          <tr><td><b>담당자</b></td><td>본인 + 일반 사용자</td><td>없음(열람·업로드만)</td><td>할당량</td></tr>
-          <tr><td><b>일반</b></td><td>본인만</td><td>없음</td><td>할당량</td></tr>
+          <tr><td><b>관리자</b></td><td>모든 계정 (외부업체·영업점 포함)</td><td>전체</td><td>무제한</td></tr>
+          <tr><td><b>담당자</b></td><td>본인 + 외부업체 (영업점 제외)</td><td>없음(열람·업로드만)</td><td>할당량</td></tr>
+          <tr><td><b>외부업체</b></td><td>본인만</td><td>없음</td><td>할당량</td></tr>
+          <tr><td><b>영업점</b></td><td>본인만 (관리자만 열람 가능)</td><td>없음</td><td>할당량</td></tr>
         </tbody>
       </table>
     </section>

@@ -254,7 +254,12 @@ INSERT INTO settings (key, value) VALUES ('share_qr_enabled', '1') ON CONFLICT (
 // 버전 관리 마이그레이션 목록. id 는 절대 바꾸지 말고, 새 변경은 뒤에 추가만 하세요.
 const MIGRATIONS = [
   { id: '0001_baseline', sql: BASELINE_SQL },
-  // 예) { id: '0002_add_xxx', sql: `ALTER TABLE ... ;` },
+  // 영업점(branch) 역할 추가 — 담당자는 접근 불가(role='user'만), 관리자만 접근
+  { id: '0002_role_branch', sql: `
+    ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check;
+    ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN ('user','manager','admin','branch'));
+    ALTER TABLE notices ALTER COLUMN target_roles SET DEFAULT ARRAY['admin','manager','user','branch'];
+  ` },
 ];
 
 // 적용 안 된 마이그레이션만 트랜잭션으로 실행하고 schema_migrations 에 기록.
