@@ -2751,14 +2751,13 @@ const App = (() => {
         const r2 = await readSheet(XLSX, f2);
         status('오차 계산 중…'); await new Promise((r) => setTimeout(r));
 
-        // ① 오차 추출: 예외≠Y · 차이≠0 · (실재고-스캔재고)≠0
+        // ① 오차 추출: 예외여부 Y는 제외 + (차이≠0 '또는' 실재고-스캔재고≠0)이면 포함
         // 칼럼: ISBN0 도서명1 분야2 출판사3 전산재고4 실재고5 누락재고6 예외여부7 스캔재고8 차이9
         disc = []; isbnSet = new Set();
         for (let i = 1; i < r1.length; i++) {
           const r = r1[i]; if (!r || r[0] == null || r[0] === '') continue;
-          if (String(r[7] || '').trim().toUpperCase() === 'Y') continue;
-          if (num(r[9]) === 0) continue;
-          if (num(r[5]) - num(r[8]) === 0) continue;
+          if (String(r[7] || '').trim().toUpperCase() === 'Y') continue;           // 예외여부 Y 제외
+          if (num(r[9]) === 0 && num(r[5]) - num(r[8]) === 0) continue;            // 둘 다 0이면 제외(하나라도 ≠0이면 포함)
           const isbn = String(r[0]).trim();
           disc.push({ isbn, name: r[1], field: r[2], pub: r[3], sys: r[4], real: r[5], miss: r[6], exc: r[7], scan: r[8], diff: r[9] });
           isbnSet.add(isbn);
