@@ -1107,45 +1107,102 @@ const App = (() => {
     });
   }
 
+  // ── 전송(업로드/다운로드) 현황 패널 ── 하단 고정, 다건·실시간 진행바·실패사유 표시
+  const Xfer = (() => {
+    let panel = null, listEl = null, items = [], seq = 0;
+    function ensure() {
+      if (panel) return;
+      panel = document.createElement('div');
+      panel.id = 'xfer-panel'; panel.className = 'hidden';
+      panel.innerHTML = `<div class="xfer-head"><span class="xfer-title">전송 현황</span><span class="xfer-count" id="xfer-count"></span><div style="flex:1"></div><button class="xfer-btn" id="xfer-clear" title="완료·실패 항목 지우기">지우기</button><button class="xfer-btn" id="xfer-min" title="접기/펼치기">▾</button></div><div class="xfer-list" id="xfer-list"></div>`;
+      document.body.appendChild(panel);
+      listEl = panel.querySelector('#xfer-list');
+      panel.querySelector('#xfer-clear').addEventListener('click', () => { items = items.filter((i) => i.status === 'active'); render(); });
+      panel.querySelector('#xfer-min').addEventListener('click', () => panel.classList.toggle('collapsed'));
+    }
+    function render() {
+      ensure();
+      panel.classList.toggle('hidden', items.length === 0);
+      const active = items.filter((i) => i.status === 'active').length;
+      panel.querySelector('#xfer-count').textContent = active ? `· ${active}건 진행 중` : `· ${items.length}건`;
+      listEl.innerHTML = items.map((it) => {
+        const pct = it.total > 0 ? Math.min(100, Math.round((it.loaded / it.total) * 100)) : (it.status === 'done' ? 100 : 0);
+        const cls = it.status === 'done' ? 'done' : it.status === 'error' ? 'err' : '';
+        const right = it.status === 'error' ? '실패' : it.status === 'done' ? '완료' : (it.total ? `${pct}%` : '…');
+        return `<div class="xfer-row ${cls}"><div class="xfer-line"><span class="xfer-ic">${it.dir === 'up' ? '⬆️' : '⬇️'}</span><span class="xfer-name" title="${UI.escapeHtml(it.name)}">${UI.escapeHtml(it.name)}</span><span class="xfer-pct">${right}</span></div><div class="xfer-bar"><span style="width:${pct}%"></span></div>${it.status === 'error' && it.error ? `<div class="xfer-err" title="${UI.escapeHtml(it.error)}">${UI.escapeHtml(it.error)}</div>` : ''}</div>`;
+      }).join('');
+    }
+    function add(name, dir) {
+      const it = { id: ++seq, name, dir, loaded: 0, total: 0, status: 'active', error: '' };
+      items.push(it); render();
+      return {
+        update(loaded, total) { it.loaded = loaded; if (total != null) it.total = total; render(); },
+        done() { it.status = 'done'; it.loaded = it.total || it.loaded; render(); setTimeout(() => { items = items.filter((x) => x !== it); render(); }, 4000); },
+        fail(msg) { it.status = 'error'; it.error = msg || '실패'; render(); },
+      };
+    }
+    return { add };
+  })();
+
+  // 업로드 진행률을 얻기 위해 XHR 사용(fetch는 업로드 진행 이벤트 미지원)
+  function xhrPost(path, formData, onProgress) {
+    return new Promise((resolve, reject) => {
+      const base = (window.BOOKJEOK_API || '').replace(/\/$/, '') || '';
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', base + '/api' + path);
+      const tk = API.getToken(); if (tk) xhr.setRequestHeader('Authorization', 'Bearer ' + tk);
+      xhr.withCredentials = true;
+      xhr.upload.onprogress = (e) => { if (e.lengthComputable && onProgress) onProgress(e.loaded, e.total); };
+      xhr.onload = () => {
+        let data = null; try { data = JSON.parse(xhr.responseText); } catch (_) { /* noop */ }
+        if (xhr.status >= 200 && xhr.status < 300) resolve(data);
+        else { const err = new Error((data && data.error) || `요청 실패 (${xhr.status})`); err.status = xhr.status; reject(err); }
+      };
+      xhr.onerror = () => reject(new Error('네트워크 오류로 전송에 실패했습니다.'));
+      xhr.send(formData);
+    });
+  }
+
   // Cloudflare 무료플랜 본문 100MB 제한 → 80MB 초과 파일은 50MB 청크로 분할 업로드
   const CHUNK_THRESHOLD = 80 * 1024 * 1024;
   const CHUNK_SIZE = 50 * 1024 * 1024;
 
+  // 파일들을 하나씩 순차 업로드(각 파일이 전송 패널에 개별 항목·진행바로 표시)
   async function uploadFiles(fileList) {
     const files = [...fileList];
-    const small = files.filter((f) => f.size <= CHUNK_THRESHOLD);
-    const large = files.filter((f) => f.size > CHUNK_THRESHOLD);
-    try {
-      if (small.length) {
-        const fd = new FormData(); fd.append('folder', state.folder);
-        small.forEach((f) => fd.append('file', f));
-        UI.toast(`${small.length}개 업로드 중…`);
-        const r = await API.upload(fd, state.ownerId);
-        if (r && r.rejected && r.rejected.length) UI.toast(`⚠️ ${r.rejected.length}개 차단됨 (${r.rejected.map((x) => x.reason || '보안 정책').join(' · ')})`, 'error');
-      }
-      for (const f of large) await chunkedUploadFile(f, state.folder, state.ownerId); // 대용량은 하나씩 분할 전송
-      UI.toast('업로드 완료 ✅', 'success');
-      loadAll();
-    } catch (err) { UI.toast(err.message, 'error'); }
+    if (!files.length) return;
+    let ok = 0, fail = 0;
+    for (const f of files) {
+      const t = Xfer.add(f.name, 'up');
+      try {
+        if (f.size > CHUNK_THRESHOLD) { await chunkedUploadFile(f, state.folder, state.ownerId, t); t.done(); ok++; }
+        else {
+          const fd = new FormData(); fd.append('folder', state.folder); fd.append('file', f);
+          const r = await xhrPost(`/files/upload${state.ownerId ? '?ownerId=' + state.ownerId : ''}`, fd, (l, tot) => t.update(l, tot));
+          if (r && r.rejected && r.rejected.length) { t.fail(r.rejected.map((x) => x.reason || '보안 정책').join(' · ')); fail++; }
+          else { t.done(); ok++; }
+        }
+      } catch (err) { t.fail(err.message); fail++; }
+    }
+    loadAll();
+    if (ok && !fail) UI.toast('업로드 완료 ✅', 'success');
+    else if (fail) UI.toast(`${fail}개 실패 · ${ok}개 완료 (전송 현황 참고)`, 'error');
   }
 
-  // 대용량 파일(>80MB)을 50MB 조각으로 나눠 순차 전송 후 서버에서 합침. 진행률 토스트 표시.
-  async function chunkedUploadFile(file, folder, ownerId) {
+  // 대용량(>80MB): 50MB 조각으로 순차 전송 후 서버에서 합침. 진행률은 전송 패널 항목 t에 반영.
+  async function chunkedUploadFile(file, folder, ownerId, t) {
     const uid = (self.crypto && crypto.randomUUID) ? crypto.randomUUID()
       : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => { const r = Math.floor(Math.random() * 16); return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16); });
     const total = Math.ceil(file.size / CHUNK_SIZE);
-    try {
-      for (let i = 0; i < total; i++) {
-        const blob = file.slice(i * CHUNK_SIZE, Math.min(file.size, (i + 1) * CHUNK_SIZE));
-        const fd = new FormData();
-        fd.append('uploadId', uid); fd.append('index', String(i)); fd.append('chunk', blob, 'chunk');
-        UI.toast(`${file.name} 업로드 중… ${i + 1}/${total}`, 'info');
-        await API.uploadChunk(fd);
-      }
-      await API.uploadComplete({ uploadId: uid, filename: file.name, folder, totalChunks: total, mime: file.type || '' }, ownerId);
-    } catch (err) {
-      throw new Error(`'${file.name}' 업로드 실패: ${err.message}`);
+    for (let i = 0; i < total; i++) {
+      const start = i * CHUNK_SIZE;
+      const blob = file.slice(start, Math.min(file.size, start + CHUNK_SIZE));
+      const fd = new FormData();
+      fd.append('uploadId', uid); fd.append('index', String(i)); fd.append('chunk', blob, 'chunk');
+      await xhrPost('/files/upload/chunk', fd, (l) => t.update(start + l, file.size)); // 조각별 진행분을 누적해 전체 진행률로
+      t.update(Math.min(file.size, start + blob.size), file.size);
     }
+    await API.uploadComplete({ uploadId: uid, filename: file.name, folder, totalChunks: total, mime: file.type || '' }, ownerId);
   }
 
   // ── 모바일 하단 FAB(⬆️) → 파일/촬영/스캔 선택 시트 ──────────
@@ -1757,13 +1814,25 @@ const App = (() => {
       </div>`).join('') + '</div>';
   }
 
-  function downloadFile(id) {
+  async function downloadFile(id) {
     // 이미 목록에 아는 파일명이 있으면 그것을 기본값으로 (헤더를 못 읽어도 이름 보존)
     const known = state.files.find((x) => String(x.id) === String(id));
-    fetch(API.downloadUrl(id), { headers: { Authorization: 'Bearer ' + API.getToken() }, credentials: 'include' })
-      .then((r) => { if (!r.ok) throw new Error('다운로드 실패'); return r.blob().then((b) => ({ b, r })); })
-      .then(({ b, r }) => { const name = filenameFromCD(r.headers.get('content-disposition'), known ? known.name : 'download'); const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = name; a.click(); URL.revokeObjectURL(a.href); })
-      .catch((err) => UI.toast(err.message, 'error'));
+    const name0 = known ? known.name : 'download';
+    const t = Xfer.add(name0, 'down');
+    try {
+      const res = await fetch(API.downloadUrl(id), { headers: { Authorization: 'Bearer ' + API.getToken() }, credentials: 'include' });
+      if (!res.ok) throw new Error('다운로드 실패 (' + res.status + ')');
+      const name = filenameFromCD(res.headers.get('content-disposition'), name0);
+      const total = Number(res.headers.get('content-length')) || 0;
+      let blob;
+      if (res.body && res.body.getReader) { // 스트림으로 받아 진행률 표시
+        const reader = res.body.getReader(); const parts = []; let loaded = 0;
+        for (;;) { const { done, value } = await reader.read(); if (done) break; parts.push(value); loaded += value.length; t.update(loaded, total || loaded); }
+        blob = new Blob(parts);
+      } else { blob = await res.blob(); }
+      const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; a.click(); URL.revokeObjectURL(a.href);
+      t.done();
+    } catch (err) { t.fail(err.message); UI.toast(err.message, 'error'); }
   }
 
   async function deleteFile(id) {

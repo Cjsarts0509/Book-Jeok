@@ -836,6 +836,32 @@ th { background: var(--bg); font-weight: 700; color: var(--text-muted); font-siz
 .ss-meta > div { flex: 1 1 120px; display: flex; flex-direction: column; gap: 3px; font-size: 15px; }
 .ss-meta > div .muted { font-size: 12px; }
 
+/* 전송(업로드/다운로드) 현황 패널 — 하단 고정 */
+#xfer-panel { position: fixed; right: 16px; bottom: 16px; width: 340px; max-width: calc(100vw - 24px); background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-lg); z-index: 60; overflow: hidden; }
+#xfer-panel.hidden { display: none; }
+.xfer-head { display: flex; align-items: center; gap: 6px; padding: 10px 12px; border-bottom: 1px solid var(--border); background: var(--bg); }
+.xfer-title { font-weight: 700; font-size: 13px; color: var(--text); }
+.xfer-count { font-size: 12px; color: var(--text-muted); }
+.xfer-btn { border: none; background: none; color: var(--text-muted); font-size: 12px; font-weight: 600; cursor: pointer; padding: 3px 6px; border-radius: 6px; }
+.xfer-btn:hover { background: var(--border); color: var(--text); }
+.xfer-list { max-height: 260px; overflow-y: auto; padding: 6px; display: flex; flex-direction: column; gap: 4px; }
+#xfer-panel.collapsed .xfer-list { display: none; }
+.xfer-row { padding: 7px 8px; border-radius: var(--radius-sm); }
+.xfer-line { display: flex; align-items: center; gap: 7px; font-size: 13px; }
+.xfer-ic { flex: none; font-size: 13px; }
+.xfer-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; color: var(--text); }
+.xfer-pct { flex: none; font-size: 12px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.xfer-bar { height: 6px; background: var(--border); border-radius: 4px; overflow: hidden; margin-top: 5px; }
+.xfer-bar > span { display: block; height: 100%; width: 0; background: var(--secondary); border-radius: 4px; transition: width .2s ease; }
+.xfer-row.done .xfer-bar > span { background: var(--accent); }
+.xfer-row.done .xfer-pct { color: var(--accent); }
+.xfer-row.err .xfer-bar > span { background: var(--danger); }
+.xfer-row.err .xfer-pct { color: var(--danger); font-weight: 700; }
+.xfer-err { margin-top: 5px; font-size: 12px; color: var(--danger); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 768px) { /* 모바일: 하단 탭바 위로, 가로 꽉 차게 */
+  #xfer-panel { right: 8px; left: 8px; bottom: 68px; width: auto; }
+}
+
 /* 인라인 이름변경 */
 .inline-rename { height: 30px; padding: 3px 8px; font-size: 14px; font-weight: 600; width: 100%; max-width: 340px; }
 
