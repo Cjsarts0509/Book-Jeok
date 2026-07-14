@@ -975,13 +975,13 @@ const App = (() => {
     } catch (err) { UI.toast(err.message, 'error'); }
   }
 
-  // 삭제 직후 "실행취소" 토스트 옵션 (본인 계정 볼 때만 · 셀프 복원 API 사용)
+  // 삭제 직후 "실행취소" 토스트 옵션 — 열람 중인 계정(state.ownerId) 기준으로 복원
   function undoOpts(fileIds, folderIds) {
-    if (state.ownerId) return {}; // 다른 계정 열람 중엔 셀프 복원 불가 → Undo 미제공
+    const oid = state.ownerId || undefined;
     return { action: { label: '↩ 실행취소', onClick: async () => {
       try {
-        for (const id of (fileIds || [])) await API.restoreSelfFile(id).catch(() => {});
-        for (const id of (folderIds || [])) await API.restoreSelfFolder(id).catch(() => {});
+        for (const id of (fileIds || [])) await API.restoreSelfFile(id, oid).catch(() => {});
+        for (const id of (folderIds || [])) await API.restoreSelfFolder(id, oid).catch(() => {});
         UI.toast('복원되었습니다', 'success'); loadAll();
       } catch (e) { UI.toast(e.message, 'error'); }
     } } };
@@ -2232,22 +2232,24 @@ const App = (() => {
   }
 
   function trashModal() {
-    const m = UI.modal(`<h3>🗑️ 내 휴지통 <span class="muted" id="trash-sub" style="font-size:13px;font-weight:400"></span></h3><div id="trash-body"><p class="muted">불러오는 중…</p></div><div class="modal-actions"><button class="btn btn-danger" id="empty" style="margin-right:auto">휴지통 비우기</button><button class="btn btn-ghost" id="tc">닫기</button></div>`);
+    const oid = state.ownerId || undefined; // 담당자·관리자가 다른 계정 열람 중이면 그 계정의 휴지통
+    const who = oid ? (state.ownerName ? `${state.ownerName} 계정 휴지통` : '열람 계정 휴지통') : '내 휴지통';
+    const m = UI.modal(`<h3>🗑️ ${UI.escapeHtml(who)} <span class="muted" id="trash-sub" style="font-size:13px;font-weight:400"></span></h3><div id="trash-body"><p class="muted">불러오는 중…</p></div><div class="modal-actions"><button class="btn btn-danger" id="empty" style="margin-right:auto">휴지통 비우기</button><button class="btn btn-ghost" id="tc">닫기</button></div>`);
     m.el.querySelector('.modal').classList.add('modal-wide');
     m.q('#tc').addEventListener('click', m.close);
     let days = 30;
     const daysLeft = (iso) => Math.max(0, days - Math.floor((Date.now() - new Date(iso).getTime()) / 86400000));
     m.q('#empty').addEventListener('click', async () => {
       if (!(await UI.confirm({ title: '휴지통 비우기', danger: true, confirmText: '영구 삭제', message: '휴지통의 모든 항목을 영구 삭제합니다. 복원할 수 없습니다.' }))) return;
-      try { await API.emptySelfTrash(); UI.toast('휴지통을 비웠습니다', 'success'); load(); loadAll(); } catch (e) { UI.toast(e.message, 'error'); }
+      try { await API.emptySelfTrash(oid); UI.toast('휴지통을 비웠습니다', 'success'); load(); loadAll(); } catch (e) { UI.toast(e.message, 'error'); }
     });
     async function purge(kind, id) {
       if (!(await UI.confirm({ title: '영구 삭제', danger: true, confirmText: '영구 삭제', message: '이 항목을 영구 삭제합니다. 복원할 수 없습니다.' }))) return;
-      try { await (kind === 'folder' ? API.purgeSelfFolder(id) : API.purgeSelfFile(id)); UI.toast('영구 삭제됨', 'success'); load(); loadAll(); } catch (e) { UI.toast(e.message, 'error'); }
+      try { await (kind === 'folder' ? API.purgeSelfFolder(id, oid) : API.purgeSelfFile(id, oid)); UI.toast('영구 삭제됨', 'success'); load(); loadAll(); } catch (e) { UI.toast(e.message, 'error'); }
     }
     async function load() {
       try {
-        const res = await API.selfTrash(); const { folders, files } = res; days = res.days || 30;
+        const res = await API.selfTrash(oid); const { folders, files } = res; days = res.days || 30;
         m.q('#trash-sub').textContent = `· 최근 ${days}일 이내 복원 가능`;
         m.q('#empty').style.display = (folders.length || files.length) ? '' : 'none';
         if (!folders.length && !files.length) { m.q('#trash-body').innerHTML = '<p class="muted" style="text-align:center;padding:24px">휴지통이 비어 있습니다.</p>'; return; }
@@ -2255,8 +2257,8 @@ const App = (() => {
         const frows = folders.map((f) => `<tr><td>📁 <b>${UI.escapeHtml(f.name)}</b> <span class="muted" style="font-size:12px">(${f.fileCount}개)</span><br><span class="muted" style="font-size:11px">${UI.escapeHtml(f.path)}</span></td><td class="num muted">${daysLeft(f.deletedAt)}일 남음</td><td style="text-align:right;white-space:nowrap">${acts('folder', f.id, 'rf')}</td></tr>`).join('');
         const rows = files.map((f) => `<tr><td>📄 ${UI.escapeHtml(f.name)}<br><span class="muted" style="font-size:11px">${UI.escapeHtml(f.folder)} · ${UI.bytes(f.size)}</span></td><td class="num muted">${daysLeft(f.deletedAt)}일 남음</td><td style="text-align:right;white-space:nowrap">${acts('file', f.id, 'rfile')}</td></tr>`).join('');
         m.q('#trash-body').innerHTML = `<div class="table-wrap"><table><tbody>${frows}${rows}</tbody></table></div>`;
-        m.el.querySelectorAll('[data-rf]').forEach((b) => b.addEventListener('click', async () => { try { await API.restoreSelfFolder(b.dataset.rf); UI.toast('폴더 복원됨', 'success'); load(); loadAll(); } catch (e) { UI.toast(e.message, 'error'); } }));
-        m.el.querySelectorAll('[data-rfile]').forEach((b) => b.addEventListener('click', async () => { try { await API.restoreSelfFile(b.dataset.rfile); UI.toast('파일 복원됨', 'success'); load(); loadAll(); } catch (e) { UI.toast(e.message, 'error'); } }));
+        m.el.querySelectorAll('[data-rf]').forEach((b) => b.addEventListener('click', async () => { try { await API.restoreSelfFolder(b.dataset.rf, oid); UI.toast('폴더 복원됨', 'success'); load(); loadAll(); } catch (e) { UI.toast(e.message, 'error'); } }));
+        m.el.querySelectorAll('[data-rfile]').forEach((b) => b.addEventListener('click', async () => { try { await API.restoreSelfFile(b.dataset.rfile, oid); UI.toast('파일 복원됨', 'success'); load(); loadAll(); } catch (e) { UI.toast(e.message, 'error'); } }));
         m.el.querySelectorAll('[data-pfolder]').forEach((b) => b.addEventListener('click', () => purge('folder', b.dataset.pfolder)));
         m.el.querySelectorAll('[data-pfile]').forEach((b) => b.addEventListener('click', () => purge('file', b.dataset.pfile)));
       } catch (e) { m.q('#trash-body').innerHTML = `<p class="muted" style="color:var(--danger)">${UI.escapeHtml(e.message)}</p>`; }

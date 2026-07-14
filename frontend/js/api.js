@@ -79,12 +79,12 @@ const API = (() => {
       return req('GET', `/files/search?${qs.toString()}`);
     },
     usageReport: (ownerId) => req('GET', `/files/usage/report${ownerId ? '?ownerId=' + ownerId : ''}`),
-    selfTrash: () => req('GET', '/files/trash'),
-    restoreSelfFile: (id) => req('POST', `/files/trash/file/${id}/restore`),
-    restoreSelfFolder: (id) => req('POST', `/files/trash/folder/${id}/restore`),
-    purgeSelfFile: (id) => req('DELETE', `/files/trash/file/${id}`),
-    purgeSelfFolder: (id) => req('DELETE', `/files/trash/folder/${id}`),
-    emptySelfTrash: () => req('POST', '/files/trash/empty'),
+    selfTrash: (ownerId) => req('GET', '/files/trash' + (ownerId ? `?ownerId=${ownerId}` : '')),
+    restoreSelfFile: (id, ownerId) => req('POST', `/files/trash/file/${id}/restore` + (ownerId ? `?ownerId=${ownerId}` : '')),
+    restoreSelfFolder: (id, ownerId) => req('POST', `/files/trash/folder/${id}/restore` + (ownerId ? `?ownerId=${ownerId}` : '')),
+    purgeSelfFile: (id, ownerId) => req('DELETE', `/files/trash/file/${id}` + (ownerId ? `?ownerId=${ownerId}` : '')),
+    purgeSelfFolder: (id, ownerId) => req('DELETE', `/files/trash/folder/${id}` + (ownerId ? `?ownerId=${ownerId}` : '')),
+    emptySelfTrash: (ownerId) => req('POST', '/files/trash/empty' + (ownerId ? `?ownerId=${ownerId}` : '')),
     // 즐겨찾기 / 태그 / QR
     toggleFav: (data) => req('POST', '/files/favorites/toggle', data),
     tags: (ownerId) => req('GET', `/files/tags${ownerId ? '?ownerId=' + ownerId : ''}`),

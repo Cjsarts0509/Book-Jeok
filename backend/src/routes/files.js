@@ -694,8 +694,8 @@ router.get('/usage/report', authenticate, wrap(resolveOwner), wrap(async (req, r
 
 // ── 사용자 셀프 휴지통 (본인 것, 보관기간=관리자 설정) ──────────
 const trashCutoff = () => new Date(Date.now() - trashRetentionDays() * 86400000).toISOString();
-router.get('/trash', authenticate, wrap(async (req, res) => {
-  const owner = req.user.id; const cutoff = trashCutoff();
+router.get('/trash', authenticate, wrap(resolveOwner), wrap(async (req, res) => {
+  const owner = req.targetOwnerId; const cutoff = trashCutoff();
   const files = await query(
     `SELECT id, original_name AS name, folder, size_bytes, deleted_at FROM files
      WHERE owner_id=$1 AND deleted_at IS NOT NULL AND deleted_with_folder IS NULL AND deleted_at > $2
@@ -711,29 +711,30 @@ router.get('/trash', authenticate, wrap(async (req, res) => {
   });
 }));
 // 영구 삭제(본인) — 단일 파일
-router.delete('/trash/file/:id(\\d+)', authenticate, wrap(async (req, res) => {
-  const r = await query('SELECT stored_name, owner_id FROM files WHERE id=$1 AND owner_id=$2 AND deleted_at IS NOT NULL', [req.params.id, req.user.id]);
+router.delete('/trash/file/:id(\\d+)', authenticate, wrap(resolveOwner), wrap(async (req, res) => {
+  const r = await query('SELECT stored_name, owner_id FROM files WHERE id=$1 AND owner_id=$2 AND deleted_at IS NOT NULL', [req.params.id, req.targetOwnerId]);
   if (r.rowCount === 0) return res.status(404).json({ error: '항목을 찾을 수 없습니다.' });
   await fsp.unlink(path.join(userDir(r.rows[0].owner_id), r.rows[0].stored_name)).catch(() => {});
   await query('DELETE FROM files WHERE id=$1', [req.params.id]);
   await audit(req, 'self_purge_file', `file=${req.params.id}`);
   res.json({ ok: true });
 }));
-// 영구 삭제(본인) — 폴더(그 폴더로 삭제된 파일 포함)
-router.delete('/trash/folder/:id(\\d+)', authenticate, wrap(async (req, res) => {
-  const r = await query('SELECT path FROM folders WHERE id=$1 AND owner_id=$2 AND deleted_at IS NOT NULL', [req.params.id, req.user.id]);
+// 영구 삭제 — 폴더(그 폴더로 삭제된 파일 포함)
+router.delete('/trash/folder/:id(\\d+)', authenticate, wrap(resolveOwner), wrap(async (req, res) => {
+  const owner = req.targetOwnerId;
+  const r = await query('SELECT path FROM folders WHERE id=$1 AND owner_id=$2 AND deleted_at IS NOT NULL', [req.params.id, owner]);
   if (r.rowCount === 0) return res.status(404).json({ error: '항목을 찾을 수 없습니다.' });
   const p = r.rows[0].path;
-  const files = await query('SELECT id, stored_name FROM files WHERE owner_id=$1 AND deleted_with_folder=$2', [req.user.id, p]);
-  for (const f of files.rows) await fsp.unlink(path.join(userDir(req.user.id), f.stored_name)).catch(() => {});
+  const files = await query('SELECT id, stored_name FROM files WHERE owner_id=$1 AND deleted_with_folder=$2', [owner, p]);
+  for (const f of files.rows) await fsp.unlink(path.join(userDir(owner), f.stored_name)).catch(() => {});
   if (files.rowCount) await query('DELETE FROM files WHERE id = ANY($1::bigint[])', [files.rows.map((f) => f.id)]);
   await query('DELETE FROM folders WHERE id=$1', [req.params.id]);
   await audit(req, 'self_purge_folder', `${p}`);
   res.json({ ok: true });
 }));
-// 휴지통 비우기(본인 전체 영구삭제)
-router.post('/trash/empty', authenticate, wrap(async (req, res) => {
-  const owner = req.user.id;
+// 휴지통 비우기(대상 계정 전체 영구삭제)
+router.post('/trash/empty', authenticate, wrap(resolveOwner), wrap(async (req, res) => {
+  const owner = req.targetOwnerId;
   const files = await query('SELECT id, stored_name FROM files WHERE owner_id=$1 AND deleted_at IS NOT NULL', [owner]);
   for (const f of files.rows) await fsp.unlink(path.join(userDir(owner), f.stored_name)).catch(() => {});
   if (files.rowCount) await query('DELETE FROM files WHERE id = ANY($1::bigint[])', [files.rows.map((f) => f.id)]);
@@ -741,8 +742,8 @@ router.post('/trash/empty', authenticate, wrap(async (req, res) => {
   await audit(req, 'self_empty_trash', `files=${files.rowCount} folders=${folders.rowCount}`);
   res.json({ ok: true, files: files.rowCount, folders: folders.rowCount });
 }));
-router.post('/trash/file/:id(\\d+)/restore', authenticate, wrap(async (req, res) => {
-  const r = await query('SELECT * FROM files WHERE id=$1 AND owner_id=$2 AND deleted_at IS NOT NULL AND deleted_at > $3', [req.params.id, req.user.id, trashCutoff()]);
+router.post('/trash/file/:id(\\d+)/restore', authenticate, wrap(resolveOwner), wrap(async (req, res) => {
+  const r = await query('SELECT * FROM files WHERE id=$1 AND owner_id=$2 AND deleted_at IS NOT NULL AND deleted_at > $3', [req.params.id, req.targetOwnerId, trashCutoff()]);
   if (r.rowCount === 0) return res.status(404).json({ error: '복원할 수 없습니다. (없거나 보관기간 초과)' });
   const f = r.rows[0];
   await ensureFolder(f.owner_id, f.folder);
@@ -751,8 +752,8 @@ router.post('/trash/file/:id(\\d+)/restore', authenticate, wrap(async (req, res)
   await audit(req, 'self_restore_file', `file=${f.id}`);
   res.json({ ok: true, name, folder: f.folder });
 }));
-router.post('/trash/folder/:id(\\d+)/restore', authenticate, wrap(async (req, res) => {
-  const r = await query('SELECT * FROM folders WHERE id=$1 AND owner_id=$2 AND deleted_at IS NOT NULL AND deleted_at > $3', [req.params.id, req.user.id, trashCutoff()]);
+router.post('/trash/folder/:id(\\d+)/restore', authenticate, wrap(resolveOwner), wrap(async (req, res) => {
+  const r = await query('SELECT * FROM folders WHERE id=$1 AND owner_id=$2 AND deleted_at IS NOT NULL AND deleted_at > $3', [req.params.id, req.targetOwnerId, trashCutoff()]);
   if (r.rowCount === 0) return res.status(404).json({ error: '복원할 수 없습니다. (없거나 보관기간 초과)' });
   const fo = r.rows[0];
   let newPath = fo.path;
