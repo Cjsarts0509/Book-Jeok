@@ -173,6 +173,8 @@ const App = (() => {
     restoreLoc();   // 마지막 폴더로 복귀(모바일 재로딩 대비) — loadAll 전에 folder 설정
     loadAll();
     loadBranches();
+    // 재고조사 작업 중 재로딩됐다면(닫지 않고 이탈) 모달을 자동으로 다시 열어 그 목록 복원
+    try { if ((state.user.role === 'branch' || admin) && saSessionActive()) setTimeout(() => stockAuditModal(true), 350); } catch (_) {}
     loadAllowedExt();
     showNotices();
   }
@@ -2503,7 +2505,28 @@ const App = (() => {
 
   // ── 재고조사 오차체크(영업점) : 두 엑셀 → 오차 추출 + 서가별 실사수량 병합 표 ──────────
   const SA_MAX_SHELF = 10;
-  function stockAuditModal() {
+  // 진행 중 세션 자동 보관(브라우저) — 모바일 재로딩으로 모달이 닫혀도 하던 목록으로 자동 복귀
+  const SA_SESSION_KEY = 'bj_sa_session';
+  function saSessionSave(patch) {
+    try {
+      const cur = JSON.parse(localStorage.getItem(SA_SESSION_KEY) || 'null') || {};
+      localStorage.setItem(SA_SESSION_KEY, JSON.stringify({ ...cur, uid: state.user && state.user.id, ...patch }));
+    } catch (_) {}
+  }
+  function saSessionLoad() {
+    try {
+      const s = JSON.parse(localStorage.getItem(SA_SESSION_KEY) || 'null');
+      if (!s || s.uid !== (state.user && state.user.id)) return null;
+      return s;
+    } catch (_) { return null; }
+  }
+  // 재로딩 후 자동 복귀 대상인가? (닫지 않음 · 6시간 이내 · 항목 있음 · 같은 계정)
+  function saSessionActive() {
+    const s = saSessionLoad();
+    return (s && !s.closed && Array.isArray(s.disc) && s.disc.length &&
+      Date.now() - (s.at || 0) < 6 * 60 * 60 * 1000 && (s.ownerId || null) === (state.ownerId || null)) ? s : null;
+  }
+  function stockAuditModal(auto) {
     const m = UI.modal(`<h3>📊 재고조사 오차체크</h3>
       <p class="muted" style="font-size:12px;margin:-6px 0 12px">두 엑셀을 올리면 오차 항목(예외 제외·차이≠0)을 뽑아 서가별 실사수량과 함께 표로 보여줍니다.</p>
       <div id="sa-resume"></div>
@@ -2512,7 +2535,8 @@ const App = (() => {
         <label class="sa-file"><span class="sa-lbl">② 서가별스캔데이터</span><input type="file" id="sa-f2" accept=".xlsx,.xls"><span class="sa-name" id="sa-n2">파일 선택…</span></label>
       </div>
       <div class="modal-actions"><span class="muted" id="sa-status" style="flex:1;font-size:12px"></span><button class="btn btn-ghost" id="sa-close">닫기</button><button class="btn btn-primary" id="sa-run">분석</button></div>
-      <div id="sa-result" style="margin-top:12px"></div>`);
+      <div id="sa-result" style="margin-top:12px"></div>`,
+      { onClose: () => saSessionSave({ closed: true }) });   // 닫으면 자동 복귀 대상에서 제외
     m.el.querySelector('.modal').classList.add('sa-modal');
     m.q('#sa-close').addEventListener('click', m.close);
     const status = (t) => { m.q('#sa-status').textContent = t || ''; };
@@ -2713,6 +2737,7 @@ const App = (() => {
 
     // ── 오차 항목 상세(모바일): 표지 + 재고 + 서가 + 폴더지정 + 촬영저장 ──
     function openDetail(d) {
+      saSessionSave({ at: Date.now() });   // 활동 중 → 자동 복귀 창(6h) 갱신
       const shelfChips = (d.shelves && d.shelves.length)
         ? `<div class="sad-chips">${d.shelves.map((s) => `<span class="sad-chip">${esc(String(s[0]))} <b>(${esc(String(s[1]))})</b></span>`).join('')}</div>`
         : '<p class="muted" style="font-size:13px">서가 스캔 데이터 없음</p>';
@@ -2847,6 +2872,8 @@ const App = (() => {
       wireFieldFilter(fields);
       renderTable();
       refreshPhotos();   // 선택된 폴더에 이미 사진이 있는 항목 음영 표시(+사진 필터 시 반영)
+      // 진행 중 세션 자동 보관 → 재로딩돼도 자동 복귀(저장 버튼 없이도)
+      saSessionSave({ ownerId: state.ownerId || null, folder: saCurrentFolder, disc, at: Date.now(), closed: false });
     }
 
     // 분야 다중선택 — 별도 모달(전체선택/전체해제). 팝오버가 모달 스크롤 영역에 잘려서 모달로 띄움.
@@ -2890,8 +2917,24 @@ const App = (() => {
       } catch (e) { UI.toast(e.message || '다운로드 실패', 'error'); }
     }
 
+    // 재로딩으로 모달이 닫혔던 경우(auto): 진행 중이던 로컬 세션을 재업로드 없이 즉시 복원
+    (function initResume() {
+      if (auto) {
+        const s = saSessionActive();
+        if (s) {
+          if (s.folder) saCurrentFolder = s.folder;
+          disc = s.disc.map((d) => ({ ...d, shelves: d.shelves || [] }));
+          isbnSet = new Set(disc.map((d) => d.isbn));
+          status(''); renderResult();
+          UI.toast('하던 재고조사 목록을 이어서 표시합니다', 'info');
+          return;
+        }
+      }
+      showResume();   // 그 외엔 서버 저장 목록 '이어서 보기' 배너
+    })();
+
     // 저장된 목록이 있으면(같은 계정 · 서버) 재업로드 없이 이어서 볼 수 있게 안내
-    (async function showResume() {
+    async function showResume() {
       const st = await loadStored();   // 서버가 계정(owner)별로 보관 → 다른 계정 목록은 애초에 안 옴
       if (!st || !Array.isArray(st.data) || !st.data.length) return;
       const dt = new Date(st.updatedAt || 0); const p2 = (x) => String(x).padStart(2, '0');
@@ -2907,7 +2950,7 @@ const App = (() => {
         try { await API.stockAuditDelete(state.ownerId); box.innerHTML = ''; UI.toast('저장된 목록을 삭제했습니다', 'success'); }
         catch (e) { UI.toast('삭제 실패: ' + (e.message || ''), 'error'); }
       });
-    })();
+    }
 
     m.q('#sa-run').addEventListener('click', async () => {
       const f1 = m.q('#sa-f1').files[0], f2 = m.q('#sa-f2').files[0];
