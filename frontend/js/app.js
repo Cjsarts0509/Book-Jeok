@@ -837,6 +837,10 @@ const App = (() => {
   let globalsBound = false;
   function setupGlobal() {
     if (globalsBound) return; globalsBound = true;
+    // 백그라운드로 갈 때(촬영·앱전환 등) 진행 중 재고조사 세션 시각을 갱신 → 돌아오면 항상 복원 창 안
+    const touchSA = () => { try { const s = saSessionLoad(); if (s && !s.closed && Array.isArray(s.disc) && s.disc.length) saSessionSave({ at: Date.now() }); } catch (_) {} };
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') touchSA(); });
+    window.addEventListener('pagehide', touchSA);
     let dragDepth = 0;
     const overlay = () => document.getElementById('drop-overlay');
     const hasFiles = (e) => Array.from(e.dataTransfer?.types || []).includes('Files');
@@ -2737,7 +2741,7 @@ const App = (() => {
 
     // ── 오차 항목 상세(모바일): 표지 + 재고 + 서가 + 폴더지정 + 촬영저장 ──
     function openDetail(d) {
-      saSessionSave({ at: Date.now() });   // 활동 중 → 자동 복귀 창(6h) 갱신
+      saSessionSave({ at: Date.now(), lastIsbn: d.isbn });   // 활동 중 → 창 갱신 + 열려있던 항목 기억(촬영 중 재로딩 대비)
       const shelfChips = (d.shelves && d.shelves.length)
         ? `<div class="sad-chips">${d.shelves.map((s) => `<span class="sad-chip">${esc(String(s[0]))} <b>(${esc(String(s[1]))})</b></span>`).join('')}</div>`
         : '<p class="muted" style="font-size:13px">서가 스캔 데이터 없음</p>';
@@ -2756,7 +2760,7 @@ const App = (() => {
         <div id="sad-stage"></div>
         <div class="modal-actions"><button class="btn btn-ghost" id="sad-close">닫기</button><span style="flex:1"></span><button class="btn btn-primary" id="sad-shoot">📷 사진 촬영</button></div>
         <div class="scan-list" id="sad-saved" style="margin-top:10px"></div>`,
-        { onClose: () => { try { if (stageUrl) URL.revokeObjectURL(stageUrl); } catch (_) {} } });
+        { onClose: () => { try { if (stageUrl) URL.revokeObjectURL(stageUrl); } catch (_) {} saSessionSave({ lastIsbn: null }); } });
       dm.el.querySelector('.modal').classList.add('modal-wide');
       attachCover(dm.q('#sad-cover'), d.isbn);
       dm.q('#sad-close').addEventListener('click', dm.close);
@@ -2927,6 +2931,8 @@ const App = (() => {
           isbnSet = new Set(disc.map((d) => d.isbn));
           status(''); renderResult();
           UI.toast('하던 재고조사 목록을 이어서 표시합니다', 'info');
+          // 촬영 중(항목 상세)이었다면 그 항목 상세를 다시 열어줌
+          if (s.lastIsbn) { const d = disc.find((x) => x.isbn === s.lastIsbn); if (d) setTimeout(() => openDetail(d), 200); }
           return;
         }
       }
