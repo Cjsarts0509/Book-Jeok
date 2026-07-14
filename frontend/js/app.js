@@ -1421,18 +1421,30 @@ const App = (() => {
       let found = []; try { found = await window.ISBN.scanMulti(img); } catch (_) {}
       try { URL.revokeObjectURL(url); } catch (_) {}
       const upBlob = await downscaleBlob(file, 1600, 0.85);
-      const codes = [...new Set(found.map((f) => f.code).filter((c) => window.ISBN.isBookIsbn(c)))];
-      if (codes.length >= 2) { confirmMulti(codes, upBlob, thumb, file); return; } // 저장 전 확인(오인식 대비)
-      setStatus(codes.length === 1 ? '바코드 1개만 자동 인식 — 영역 지정에서 나머지를 추가하세요' : '자동 인식 실패 — 바코드 영역을 지정하세요', 'bad');
+      // 위치(위→아래) 순서 유지 + 위치 정보(box)까지 넘겨 확인 모달에서 순번·중복위치 표시
+      const seen = new Set();
+      const items = found.filter((f) => window.ISBN.isBookIsbn(f.code) && !seen.has(f.code) && seen.add(f.code));
+      if (items.length >= 2) { confirmMulti(items, upBlob, thumb, file); return; } // 저장 전 확인(오인식 대비)
+      setStatus(items.length === 1 ? '바코드 1개만 자동 인식 — 영역 지정에서 나머지를 추가하세요' : '자동 인식 실패 — 바코드 영역을 지정하세요', 'bad');
       regionPicker(file, img, upBlob, thumb, found);
     }
 
-    // 인식된 바코드가 여러 개면 저장 전에 확인 — 잘못 인식된 것(오독 팬텀)을 체크 해제하고 저장.
-    function confirmMulti(codes, upBlob, thumb, file) {
+    // 인식된 바코드가 여러 개면 저장 전에 확인 — 위→아래 순서로 번호 매겨 보여주고,
+    // 같은 위치에 두 개면(한 바코드의 오독 가능성) 경고 표시. 잘못 인식된 것은 체크 해제 후 저장.
+    function confirmMulti(items, upBlob, thumb, file) {
       const url = URL.createObjectURL(file);
-      const rows = codes.map((c) => `<label class="mb-chk"><input type="checkbox" checked data-code="${c}"><span class="mb-isbn">${c}</span></label>`).join('');
-      const cm = UI.modal(`<h3>✅ 인식된 바코드 확인 <span class="muted" style="font-size:12px;font-weight:400">· ${codes.length}개</span></h3>
-        <p class="muted" style="font-size:12px;margin:-6px 0 10px">책과 비교해 <b>저장할 바코드만 체크</b>하세요. 잘못 인식된 건 체크를 해제하면 저장되지 않습니다.</p>
+      // 위치(박스 y) 오름차순 정렬 — 박스 없는 건 맨 뒤(위치 불명)
+      const ordered = items.map((it, i) => ({ code: it.code, box: it.box || null, _i: i }))
+        .sort((a, b) => ((a.box ? a.box.y : Infinity) - (b.box ? b.box.y : Infinity)) || (a._i - b._i));
+      const overlapY = (a, b) => { if (!a || !b) return false; const inter = Math.max(0, Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y)); return inter / Math.max(1, Math.min(a.h, b.h)) > 0.5; };
+      const rows = ordered.map((it, idx) => {
+        const dup = idx > 0 && it.box && ordered[idx - 1].box && overlapY(it.box, ordered[idx - 1].box);
+        const pos = it.box ? (idx + 1) : '?';
+        const warn = dup ? '<span class="mb-warn">⚠ 위와 같은 위치 — 한 권의 오독일 수 있어요</span>' : '';
+        return `<label class="mb-chk${dup ? ' mb-dup' : ''}"><input type="checkbox" checked data-code="${it.code}"><span class="mb-pos">${pos}</span><span class="mb-isbn">${it.code}</span>${warn}</label>`;
+      }).join('');
+      const cm = UI.modal(`<h3>✅ 인식된 바코드 확인 <span class="muted" style="font-size:12px;font-weight:400">· ${ordered.length}개 (위→아래 순)</span></h3>
+        <p class="muted" style="font-size:12px;margin:-6px 0 10px">책과 비교해 <b>저장할 바코드만 체크</b>하세요. <b>⚠ 표시</b>는 같은 위치에 두 개가 잡힌 것으로, 보통 한쪽이 오인식입니다.</p>
         <div class="mb-confirm-img"><img src="${url}" alt=""></div>
         <div class="mb-chks">${rows}</div>
         <div class="modal-actions"><button class="btn btn-ghost" id="mbc-cancel">취소</button><span style="flex:1"></span><button class="btn btn-primary" id="mbc-save">선택 저장</button></div>`,

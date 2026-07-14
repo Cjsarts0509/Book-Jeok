@@ -855,10 +855,13 @@ th { background: var(--bg); font-weight: 700; color: var(--text-muted); font-siz
 .mb-confirm-img { max-height: 42vh; overflow: hidden; border-radius: var(--radius-sm); border: 1px solid var(--border); margin-bottom: 12px; background: var(--bg); }
 .mb-confirm-img img { width: 100%; display: block; object-fit: contain; max-height: 42vh; }
 .mb-chks { display: flex; flex-direction: column; gap: 8px; }
-.mb-chk { display: flex; align-items: center; gap: 11px; padding: 11px 13px; border: 1.5px solid var(--border); border-radius: var(--radius-sm); cursor: pointer; }
+.mb-chk { display: flex; align-items: center; flex-wrap: wrap; gap: 11px; padding: 11px 13px; border: 1.5px solid var(--border); border-radius: var(--radius-sm); cursor: pointer; }
 .mb-chk input { width: 18px; height: 18px; flex: none; }
 .mb-chk:has(input:checked) { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 9%, transparent); }
+.mb-pos { flex: none; width: 22px; height: 22px; border-radius: 50%; background: var(--bg); border: 1px solid var(--border); display: inline-grid; place-items: center; font-size: 12px; font-weight: 800; color: var(--text-muted); }
 .mb-isbn { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 15px; font-weight: 700; letter-spacing: .5px; }
+.mb-chk.mb-dup { border-color: color-mix(in srgb, var(--danger) 45%, var(--border)); border-style: dashed; }
+.mb-warn { flex-basis: 100%; font-size: 11.5px; color: var(--danger); padding-left: 33px; }
 
 /* 전송(업로드/다운로드) 현황 패널 — 하단 고정 */
 #xfer-panel { position: fixed; right: 16px; bottom: 16px; width: 340px; max-width: calc(100vw - 24px); background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-lg); z-index: 60; overflow: hidden; }
