@@ -6,6 +6,45 @@
 
 ---
 
+## 📊 현재 운영 스펙 (Live)
+
+> 교보문고 영업점(~40개) 파일 수집용. 파일 명명 `지점명_날짜` → `/연도/지점명` 자동분류.
+
+**인프라**
+| 항목 | 내용 |
+|---|---|
+| 접속 | `bookjeok.cjs0509.xyz` (Cloudflare Tunnel, 인바운드 개방 없음) |
+| 호스팅 | Oracle Cloud VM · ARM Ampere A1 · 리전 `ap-chuncheon-1` |
+| 사양 | 2 vCPU / 12GB RAM · 블록볼륨 99GB(사용 15GB) |
+| 구성 | Docker Compose `bookjeok-db`(PostgreSQL 16) + `bookjeok-api`(Node/Express) · 둘 다 `127.0.0.1` 바인딩 |
+| 컨테이너 보호 | api `mem_limit 4g`·db `3g` · 로그회전(10m×5) · 헬스체크 · graceful shutdown |
+| 배포 | `git pull && docker compose up -d --build` (프론트 ro 마운트) |
+
+**데이터 / 역할**
+| 항목 | 내용 |
+|---|---|
+| DB | 11MB (계정·메타·폴더·태그·공유·알림·감사로그) |
+| 파일 | 15GB |
+| 역할 | `admin`(전체관리) · `manager`(담당자: 사용자 파일 열람·업로드) · `user`(본인만) |
+| 허용 확장자 | csv·xls·xlsx·xlsm·xlsb·jpg·jpeg·png·gif·ppt·pptx·doc·docx·txt |
+
+**백업 (자동화)**
+| 대상 | 주기 | 저장 | 검증 |
+|---|---|---|---|
+| DB (11MB) | 매일 03:00 | OCI 오브젝트 스토리지(원격) + 로컬 · 14일 보관 | ✅ 복구 테스트 통과 |
+| 파일 (15GB) | 매주 일 04:00 | OCI 증분 볼륨 백업 · 35일 보관 | ✅ |
+
+**성능 (실측)** — 자세한 공유본은 별도. 2코어/12GB로 40개 영업점 운영에 여유 충분.
+| 시나리오 | 동시 | p95 | 실패 |
+|---|---|---|---|
+| 열람(`/health`) | 300명 | 1.9ms | 0% |
+| 로그인+목록(DB) | 60명 | 9.6ms | 0% |
+| 업로드 | 15명 | 29ms (CPU 24%) | 0% |
+
+**보안 요약** — bcrypt·JWT(8h)·2FA(TOTP, 관리자 필수)·helmet·레이트리밋(300/분)·AES-256-GCM·시크릿 fail-closed·경로순회 방지·SQL 파라미터화·XSS 이스케이프·감사로그·업로드 매직바이트+YARA 검사. ([상세](docs/security.md))
+
+---
+
 ## ✨ 핵심 기능
 1. **계정별 격리 웹하드** — 각자 본인 파일만 업로드/다운로드/열람. 관리자·담당자는 타 계정 열람·업로드 가능
 2. **철저한 보안** — bcrypt 인증, JWT, 레이트리밋, helmet, 경로순회 방지, 감사 로그 ([상세](docs/security.md))
