@@ -809,11 +809,13 @@ const App = (() => {
   // 홈에서 되돌릴 게 없으면 "한 번 더 누르면 나가기"로 실수 이탈만 방지.
   function setupBackTrap() {
     if (backHooked) return; backHooked = true;
-    const rearm = () => history.pushState({ bjGuard: 1 }, '');
-    rearm(); // 상단에 가드 상태 하나를 항상 유지
-    // 네이티브 카메라/파일 선택으로 페이지가 백그라운드 갔다 오면 가드 상태가 사라질 수 있음 →
-    // 돌아왔을 때 가드가 없으면 다시 세워, 첫 뒤로가기에 바로 이탈하지 않게 한다(모달 열림 중엔 제외).
+    const rearm = () => { try { history.pushState({ bjGuard: 1 }, ''); } catch (_) {} };
+    // 가드가 없으면 심는다. 단 '사용자 제스처' 문맥에서 최초로 심어야, 크롬(안드로이드)의
+    // history-manipulation 개입(제스처 없이 넣은 히스토리 항목을 뒤로가기에서 건너뛰어 사이트를
+    // 바로 나가버림)을 피할 수 있다. 그래서 로드 직후가 아니라 첫 터치/클릭에 가드를 심는다.
+    // (카메라/앱전환 후 복귀 때도 가드가 없으면 다음 제스처·visible 시 다시 세운다. 모달 열림 중엔 제외.)
     const ensureGuard = () => { if (state.user && !document.querySelector('.modal-backdrop') && !(history.state && history.state.bjGuard)) rearm(); };
+    ['pointerdown', 'touchstart', 'keydown', 'click'].forEach((ev) => window.addEventListener(ev, ensureGuard, { capture: true, passive: true }));
     document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') ensureGuard(); });
     window.addEventListener('pageshow', ensureGuard);
     let exitArmed = false, exitTimer = null;
