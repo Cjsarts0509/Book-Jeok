@@ -2640,16 +2640,48 @@ const App = (() => {
       catch (_) { return false; }
     }
     // 교보문고 표지(ISBN) — 클라이언트에서 직접 로드(실패 시 다음 후보→플레이스홀더)
+    //  · 추가 이미지(addt/{ISBN}_01.jpg, _02 …)가 있으면 탭할 때마다 원본→_01→_02→…→원본 순환
     function attachCover(coverEl, isbn) {
       const i = String(isbn || '').replace(/[^0-9Xx]/g, '');
-      const urls = i.length >= 10 ? [
+      if (i.length < 10) { coverEl.classList.add('sad-nocover'); return; }
+      const mainUrls = [
         `https://contents.kyobobook.co.kr/sih/fit-in/400x0/pdt/${i}.jpg`,
         `https://contents.kyobobook.co.kr/sih/fit-in/458x0/pdt/${i}.jpg`,
-      ] : [];
-      if (!urls.length) { coverEl.classList.add('sad-nocover'); return; }
-      const img = document.createElement('img'); img.alt = '표지'; let idx = 0;
-      img.addEventListener('error', () => { idx++; if (idx < urls.length) img.src = urls[idx]; else { img.remove(); coverEl.classList.add('sad-nocover'); } });
-      img.src = urls[0]; coverEl.appendChild(img);
+      ];
+      const addtUrl = (n) => `https://contents.kyobobook.co.kr/sih/fit-in/400x0/pdt/addt/${i}_${String(n).padStart(2, '0')}.jpg`;
+      const img = document.createElement('img'); img.alt = '표지';
+      let mIdx = 0, mainSrc = null, view = 0;   // view 0=원본 · 1..N=추가
+      const extra = [];                          // 존재 확인된 추가 이미지 URL(순서대로)
+      function onErr() {
+        if (view !== 0) return;                  // 추가 보기 중 오류는 무시(존재 확인된 것)
+        mIdx++;
+        if (mIdx < mainUrls.length) img.src = mainUrls[mIdx];
+        else { img.removeEventListener('error', onErr); img.remove(); coverEl.classList.add('sad-nocover'); }
+      }
+      img.addEventListener('error', onErr);
+      img.addEventListener('load', () => { if (view === 0) mainSrc = img.currentSrc || img.src; });
+      img.src = mainUrls[0];
+      coverEl.appendChild(img);
+      const updateBadge = () => { const b = coverEl.querySelector('.sad-more'); if (b) b.textContent = `⇄ ${view + 1}/${1 + extra.length}`; };
+      const ensureBadge = () => {
+        coverEl.classList.add('sad-toggle');
+        if (!coverEl.querySelector('.sad-more')) { const b = document.createElement('span'); b.className = 'sad-more'; coverEl.appendChild(b); }
+        updateBadge();
+      };
+      // 추가 이미지 _01, _02 … 를 순차 확인 → 처음 없는 번호에서 중단(교보는 연속 번호)
+      (function probe(n) {
+        if (n > 10) return;                      // 안전 상한
+        const p = new Image();
+        p.onload = () => { if (p.naturalWidth > 1) { extra.push(addtUrl(n)); ensureBadge(); probe(n + 1); } };
+        p.onerror = () => {};                     // 없으면 여기서 멈춤
+        p.src = addtUrl(n);
+      })(1);
+      coverEl.addEventListener('click', () => {
+        if (!extra.length || coverEl.classList.contains('sad-nocover')) return;
+        view = (view + 1) % (1 + extra.length);
+        img.src = view === 0 ? (mainSrc || mainUrls[0]) : extra[view - 1];
+        updateBadge();
+      });
     }
 
     // ── 오차 항목 상세(모바일): 표지 + 재고 + 서가 + 폴더지정 + 촬영저장 ──
