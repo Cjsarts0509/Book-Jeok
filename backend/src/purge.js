@@ -21,8 +21,29 @@ async function purgeOldTrash() {
     if (files.rowCount || folders.rowCount) {
       console.log(`[purge] 휴지통 영구삭제: 파일 ${files.rowCount}건, 폴더 ${folders.rowCount}건`);
     }
+    await purgeStaleBundles();
   } catch (err) {
     console.error('[purge] 실패:', err.message);
+  }
+}
+
+// 오래된 zip 번들 정리: 하루 지났고 유효한 공유가 없는 번들 삭제.
+// (기존엔 새 zip 생성 시에만 정리돼, 압축 활동이 없으면 디스크에 계속 쌓였음 → 스케줄러로 이관)
+async function purgeStaleBundles() {
+  try {
+    const bundleDir = path.join(config.storageRoot, '_bundles');
+    const r = await query(
+      `SELECT id, stored_name FROM zip_bundles b
+       WHERE b.created_at < now() - interval '1 day'
+         AND NOT EXISTS (SELECT 1 FROM share_links s WHERE s.bundle_id = b.id AND (s.expires_at IS NULL OR s.expires_at > now()))`
+    );
+    for (const b of r.rows) {
+      await fsp.unlink(path.join(bundleDir, b.stored_name)).catch(() => {});
+      await query('DELETE FROM zip_bundles WHERE id=$1', [b.id]);
+    }
+    if (r.rowCount > 0) console.log(`[purge] 만료 번들 정리: ${r.rowCount}건`);
+  } catch (err) {
+    console.error('[purge] 번들 정리 실패:', err.message);
   }
 }
 

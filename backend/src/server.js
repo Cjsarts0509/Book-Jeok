@@ -28,7 +28,7 @@ app.use(cors({
 }));
 
 app.use(express.json({ limit: '16mb' })); // 공지 리치텍스트(이미지 임베드) 대비
-app.use(express.urlencoded({ extended: true }));
+app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 app.use(cookieParser());
 
 // 전역 레이트 리밋

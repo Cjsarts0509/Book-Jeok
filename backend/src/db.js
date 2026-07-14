@@ -12,6 +12,9 @@ const pool = new Pool({
   max: config.db.max,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 5000,
+  // 폭주한 단일 쿼리가 풀(최대 10개)을 모두 점유해 전체 요청이 멈추는 것을 방지.
+  statement_timeout: 30000,                   // 서버측: 30초 넘는 쿼리는 중단
+  idle_in_transaction_session_timeout: 30000, // 열린 채 방치된 트랜잭션이 커넥션을 잡고 있지 않도록
 });
 
 pool.on('error', (err) => {
