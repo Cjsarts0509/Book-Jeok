@@ -851,6 +851,8 @@ th { background: var(--bg); font-weight: 700; color: var(--text-muted); font-siz
 .xfer-ic { flex: none; font-size: 13px; }
 .xfer-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; color: var(--text); }
 .xfer-pct { flex: none; font-size: 12px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.xfer-x { flex: none; border: none; background: none; color: var(--text-muted); cursor: pointer; font-size: 12px; line-height: 1; padding: 2px 4px; border-radius: 5px; }
+.xfer-x:hover { background: var(--danger); color: #fff; }
 .xfer-bar { height: 6px; background: var(--border); border-radius: 4px; overflow: hidden; margin-top: 5px; }
 .xfer-bar > span { display: block; height: 100%; width: 0; background: var(--secondary); border-radius: 4px; transition: width .2s ease; }
 .xfer-row.done .xfer-bar > span { background: var(--accent); }
