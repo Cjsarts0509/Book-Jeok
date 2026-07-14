@@ -34,6 +34,7 @@ const Admin = (() => {
             ${item('capacity', '📊', '용량')}
             ${item('report', '📧', '리포트')}
             ${item('db', '🗄️', 'DB')}
+            ${item('backup', '💾', '백업')}
             ${item('audit', '📜', '로그')}
             ${item('manual', '📖', '매뉴얼')}
             <a class="nav-item" href="index.html"><span class="ico">📁</span><span class="t">파일로</span></a>
@@ -63,8 +64,9 @@ const Admin = (() => {
     else if (tab === 'audit') loadAudit();
     else if (tab === 'capacity') loadCapacity();
     else if (tab === 'report') loadReport();
+    else if (tab === 'backup') loadBackup();
     else if (tab === 'manual') loadManual();
-    const titles = { dashboard: '대시보드', users: '계정 관리', branches: '영업점 관리', notices: '공지사항', ext: '허용 확장자', shares: '공유 통합 관리', trash: '휴지통', capacity: '용량 리포트', report: '주간 리포트', db: 'DB 상태', audit: '감사 로그', manual: '사용자 매뉴얼' };
+    const titles = { dashboard: '대시보드', users: '계정 관리', branches: '영업점 관리', notices: '공지사항', ext: '허용 확장자', shares: '공유 통합 관리', trash: '휴지통', capacity: '용량 리포트', report: '주간 리포트', db: 'DB 상태', backup: '백업 현황', audit: '감사 로그', manual: '사용자 매뉴얼' };
     document.getElementById('page-title').textContent = titles[tab];
   }
 
@@ -611,6 +613,44 @@ const Admin = (() => {
         </div>`;
     } catch (err) {
       view.innerHTML = `<div class="card"><div class="stat"><div class="k">연결 상태</div><div class="v"><span class="dot bad"></span>오류</div></div><p style="color:var(--danger);margin-top:8px">${UI.escapeHtml(err.message)}</p></div>`;
+    }
+  }
+
+  // ── 백업 현황 ──────────────────────────
+  async function loadBackup() {
+    const view = document.getElementById('view');
+    view.innerHTML = '<div class="empty"><div class="big">⏳</div>확인 중…</div>';
+    const ago = (iso) => { if (!iso) return '기록 없음'; const mi = Math.floor((Date.now() - new Date(iso).getTime()) / 60000); if (mi < 1) return '방금'; if (mi < 60) return mi + '분 전'; if (mi < 1440) return Math.floor(mi / 60) + '시간 전'; return Math.floor(mi / 1440) + '일 전'; };
+    const fresh = (iso, hrs) => iso && (Date.now() - new Date(iso).getTime()) < hrs * 3600000;
+    try {
+      const s = await API.backupStatus();
+      const db = s.db, files = s.files;
+      const dbDot = db ? (fresh(db.at, 26) ? 'ok' : 'warn') : 'bad';
+      const fDot = files ? (fresh(files.at, 8 * 24) ? 'ok' : 'warn') : 'bad';
+      view.innerHTML = `
+        <div class="stat-grid">
+          <div class="stat"><div class="k">DB 백업 (매일)</div><div class="v"><span class="dot ${dbDot}"></span>${ago(db && db.at)}</div></div>
+          <div class="stat"><div class="k">원격 업로드</div><div class="v">${db ? (db.remote ? '✅ 성공' : '⚠️ 실패') : '-'}</div></div>
+          <div class="stat"><div class="k">파일 백업 (주간)</div><div class="v"><span class="dot ${fDot}"></span>${ago(files && files.at)}</div></div>
+          <div class="stat"><div class="k">로컬 보관</div><div class="v">${db ? (db.localCount || 0) + '개' : '-'}</div></div>
+        </div>
+        <div class="card">
+          <h3 style="margin-bottom:10px">최근 DB 백업</h3>
+          ${db ? `<div class="table-wrap"><table><tbody>
+            <tr><td>시각</td><td>${new Date(db.at).toLocaleString('ko-KR')}</td></tr>
+            <tr><td>파일</td><td><span class="muted" style="font-family:monospace;font-size:12px">${UI.escapeHtml(db.file || '-')}</span></td></tr>
+            <tr><td>크기</td><td>${db.size ? UI.bytes(db.size) : '-'}</td></tr>
+            <tr><td>원격(오브젝트 스토리지)</td><td>${db.remote ? '업로드 성공' : '업로드 실패 또는 미설정'}</td></tr>
+          </tbody></table></div>` : '<p class="muted">아직 백업 상태 기록이 없습니다. 백업 스크립트가 한 번 실행되면 여기에 표시됩니다.</p>'}
+        </div>
+        <div class="card" style="margin-top:14px">
+          <h3 style="margin-bottom:8px">복원 방법</h3>
+          <p style="font-size:13px;color:var(--text-muted);margin:0 0 8px">안전을 위해 <b>복원은 서버 터미널</b>에서 진행합니다(웹 복원 버튼은 사고 위험이 커서 제공하지 않습니다). 아래 스크립트가 백업 목록을 보여주고, 확인 후 복원합니다(복원 전 현재 DB도 자동 백업):</p>
+          <pre class="pp-text" style="user-select:all;white-space:pre-wrap">cd ~/Book-Jeok && ./scripts/restore.sh</pre>
+          <p style="font-size:12px;color:var(--text-muted);margin-top:8px">※ DB(메타데이터)만 복원됩니다. 파일 15GB는 OCI 볼륨 스냅샷/백업에서 별도로 복원합니다.</p>
+        </div>`;
+    } catch (err) {
+      view.innerHTML = `<div class="card"><p style="color:var(--danger)">${UI.escapeHtml(err.message)}</p></div>`;
     }
   }
 

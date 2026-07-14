@@ -207,6 +207,13 @@ router.get('/db-status', wrap(async (req, res) => {
   }
 }));
 
+// GET /api/admin/backup-status  백업 현황(백업 크론이 남긴 상태 파일 읽기 · 읽기 전용)
+router.get('/backup-status', wrap(async (req, res) => {
+  const dir = path.join(config.storageRoot, '_backup-status');
+  const readJson = async (name) => { try { return JSON.parse(await fsp.readFile(path.join(dir, name), 'utf8')); } catch { return null; } };
+  res.json({ db: await readJson('db.json'), files: await readJson('files.json') });
+}));
+
 // GET /api/admin/audit  감사 로그
 router.get('/audit', wrap(async (req, res) => {
   const limit = Math.min(200, parseInt(req.query.limit || '50', 10));

@@ -121,6 +121,7 @@ const API = (() => {
     reportPreview: () => req('GET', '/admin/report/preview'),
     reportSend: () => req('POST', '/admin/report/send'),
     dbStatus: () => req('GET', '/admin/db-status'),
+    backupStatus: () => req('GET', '/admin/backup-status'),
     audit: (limit = 50) => req('GET', `/admin/audit?limit=${limit}`),
     // trash
     trash: () => req('GET', '/admin/trash'),
