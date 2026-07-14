@@ -3024,7 +3024,7 @@ const App = (() => {
   }
 
   function helpModal() {
-    const m = UI.modal(`${Manual.userHTML()}<div class="modal-actions"><button class="btn btn-primary" id="mclose">닫기</button></div>`);
+    const m = UI.modal(`${Manual.userHTML(state.user && state.user.role)}<div class="modal-actions"><button class="btn btn-primary" id="mclose">닫기</button></div>`);
     m.el.querySelector('.modal').classList.add('modal-help');
     m.q('#mclose').addEventListener('click', m.close);
   }
