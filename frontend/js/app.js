@@ -2404,6 +2404,14 @@ const App = (() => {
       const color = p >= 90 ? 'var(--danger)' : p >= 70 ? '#f0a500' : 'var(--accent)';
       return `<div class="ss-row"><div class="ss-head"><span>${label}</span><span class="num">${detail}</span></div><div class="ss-bar"><span style="width:${p}%;background:${color}"></span></div></div>`;
     };
+    // 무엇이 CPU·메모리를 쓰고 있는지(상위 프로세스)
+    const procHtml = (p) => {
+      if (!p) return '';
+      const cpu = (p.topCpu || []).filter((x) => x.cpu >= 0.1).map((x) => `<li><span class="pn">${UI.escapeHtml(x.name)}</span><span class="pv">${x.cpu.toFixed(1)}%</span></li>`).join('') || '<li class="pmuted">거의 유휴</li>';
+      const mem = (p.topMem || []).map((x) => `<li><span class="pn">${UI.escapeHtml(x.name)}</span><span class="pv">${UI.bytes(x.rss)}</span></li>`).join('');
+      const note = p.scope === 'container' ? '<div class="pnote">※ 현재 이 앱 컨테이너 기준입니다. 서버 전체를 보려면 배포 설정 반영이 필요합니다.</div>' : '';
+      return `<div class="ss-sec">무엇이 쓰고 있나</div><div class="ss-procs"><div><div class="ss-pt">🔥 CPU 상위</div><ul class="ss-plist">${cpu}</ul></div><div><div class="ss-pt">🧠 메모리 상위</div><ul class="ss-plist">${mem}</ul></div></div>${note}`;
+    };
     async function load() {
       if (!document.body.contains(m.el)) { stop(); return; } // 배경클릭·ESC 등으로 닫혔으면 폴링 종료
       try {
@@ -2417,7 +2425,8 @@ const App = (() => {
             <div><span class="muted">서버 가동</span><b>${dur(s.uptime.server)}</b></div>
             <div><span class="muted">서비스 가동</span><b>${dur(s.uptime.process)}</b></div>
             <div><span class="muted">데이터베이스</span><b style="color:${s.db.connected ? 'var(--accent)' : 'var(--danger)'}">${s.db.connected ? '정상' : '끊김'}</b></div>
-          </div>`;
+          </div>` +
+          procHtml(s.procs);
       } catch (e) { m.q('#ss-body').innerHTML = `<p class="muted" style="color:var(--danger)">${UI.escapeHtml(e.message)}</p>`; }
     }
     load();

@@ -836,6 +836,17 @@ th { background: var(--bg); font-weight: 700; color: var(--text-muted); font-siz
 .ss-meta { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 18px; padding-top: 15px; border-top: 1px solid var(--border); }
 .ss-meta > div { flex: 1 1 120px; display: flex; flex-direction: column; gap: 3px; font-size: 15px; }
 .ss-meta > div .muted { font-size: 12px; }
+.ss-sec { margin-top: 18px; font-size: 12px; font-weight: 700; letter-spacing: .04em; color: var(--text-muted); text-transform: uppercase; }
+.ss-procs { display: flex; gap: 14px; margin-top: 8px; }
+.ss-procs > div { flex: 1; min-width: 0; }
+.ss-pt { font-size: 12.5px; font-weight: 700; color: var(--text); margin-bottom: 6px; }
+.ss-plist { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.ss-plist li { display: flex; align-items: baseline; gap: 8px; font-size: 13px; padding: 4px 8px; border-radius: 6px; background: var(--bg); }
+.ss-plist .pn { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.ss-plist .pv { flex: none; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.ss-plist .pmuted { color: var(--text-muted); background: none; }
+.pnote { margin-top: 8px; font-size: 11px; color: var(--text-muted); }
+@media (max-width: 560px) { .ss-procs { flex-direction: column; gap: 10px; } }
 
 /* 전송(업로드/다운로드) 현황 패널 — 하단 고정 */
 #xfer-panel { position: fixed; right: 16px; bottom: 16px; width: 340px; max-width: calc(100vw - 24px); background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-lg); z-index: 60; overflow: hidden; }

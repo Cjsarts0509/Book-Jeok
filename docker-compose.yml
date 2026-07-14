@@ -77,5 +77,7 @@ services:
       # 파일 저장소도 독립 디스크에
       - ${DATA_ROOT:-/mnt/bookjeok-data}/storage:/data/storage
       - ./frontend:/app/frontend:ro
+      # 서버 상태(상위 프로세스 CPU·메모리) 표시용 — 호스트 프로세스 정보 읽기전용(이름만 사용)
+      - /proc:/host/proc:ro
     ports:
       - "127.0.0.1:4000:4000"   # Cloudflare Tunnel / nginx 뒤에 둠

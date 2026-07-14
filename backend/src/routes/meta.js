@@ -6,6 +6,7 @@ const fsp = require('fs/promises');
 const express = require('express');
 const { query } = require('../db');
 const { diskUsage } = require('../disk');
+const procstat = require('../procstat');
 const { authenticate } = require('../middleware/auth');
 const { wrap } = require('../util');
 
@@ -32,6 +33,9 @@ router.get('/server-status', wrap(async (req, res) => {
   const disk = await diskUsage();
   let dbOk = true;
   try { await query('SELECT 1'); } catch { dbOk = false; }
+  // CPU·메모리 상위 프로세스(무엇이 쓰고 있는지). /proc 접근 실패 시 생략.
+  let procs = null;
+  try { procs = await procstat.top(); } catch { procs = null; }
   const pct = (u, t) => (t > 0 ? Math.round((u / t) * 100) : 0);
   res.json({
     time: new Date().toISOString(),
@@ -40,6 +44,7 @@ router.get('/server-status', wrap(async (req, res) => {
     disk: { total: disk.total, used: disk.used, free: disk.avail, usedPct: pct(disk.used, disk.total) },
     uptime: { server: os.uptime(), process: process.uptime() },
     db: { connected: dbOk },
+    procs, // { topCpu:[{name,cpu}], topMem:[{name,rss}], scope:'host'|'container' } 또는 null
   });
 }));
 
