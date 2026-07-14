@@ -2518,7 +2518,7 @@ const App = (() => {
     let saCurrentFolder = state.folder || '/';  // 사진 저장·확인 대상 폴더
     let saPhotoStems = new Set();   // 현재 폴더에 이미 사진이 있는 ISBN
     let saSort = { col: null, dir: 1 };  // 정렬 열(0~9) · 방향(1 오름/-1 내림)
-    let saFilterField = '';         // 분야 필터('' = 전체)
+    let saFilterFields = new Set();  // 분야 필터(비어있으면 전체, 아니면 선택된 분야만)
     let saFilterPhoto = '';         // 사진 필터('' 전체 · 'has' 있음 · 'no' 없음)
     // 정렬용 열 정의(기본 10열) — key는 disc 필드, num이면 숫자 정렬
     const SA_COLS = [
@@ -2563,7 +2563,7 @@ const App = (() => {
     function sortedIndices() {
       let idx = disc.map((_, i) => i).filter((i) => {
         const d = disc[i];
-        if (saFilterField && String(d.field == null ? '' : d.field) !== saFilterField) return false;
+        if (saFilterFields.size && !saFilterFields.has(String(d.field == null ? '' : d.field))) return false;
         if (saFilterPhoto === 'has' && !saPhotoStems.has(d.isbn)) return false;
         if (saFilterPhoto === 'no' && saPhotoStems.has(d.isbn)) return false;
         return true;
@@ -2710,7 +2710,7 @@ const App = (() => {
           </div>
         </div>
         <div class="sad-shelves"><div class="lbl">서가번호 (실사수량)</div>${shelfChips}</div>
-        <div class="sad-folder"><span>저장 폴더</span><select id="sad-folder">${folderOptions(saCurrentFolder)}</select></div>
+        <div class="sad-folder"><span>저장 폴더</span><b class="sad-foldercur">${esc(saCurrentFolder === '/' ? '🏠 (최상위)' : saCurrentFolder)}</b><span class="muted" style="font-size:11px">· 목록에서 변경</span></div>
         <div id="sad-stage"></div>
         <div class="modal-actions"><button class="btn btn-ghost" id="sad-close">닫기</button><span style="flex:1"></span><button class="btn btn-primary" id="sad-shoot">📷 사진 촬영</button></div>
         <div class="scan-list" id="sad-saved" style="margin-top:10px"></div>`,
@@ -2718,7 +2718,6 @@ const App = (() => {
       dm.el.querySelector('.modal').classList.add('modal-wide');
       attachCover(dm.q('#sad-cover'), d.isbn);
       dm.q('#sad-close').addEventListener('click', dm.close);
-      dm.q('#sad-folder').addEventListener('change', (e) => setFolder(e.target.value));  // 폴더 바꾸면 목록 음영도 갱신
 
       let stageUrl = null;   // 미리보기 objectURL (저장/취소/닫기 시 해제)
       const cam = document.createElement('input');
@@ -2764,7 +2763,7 @@ const App = (() => {
         dm.q('#sad-cancel').addEventListener('click', clearStage);
         dm.q('#sad-save').addEventListener('click', async () => {
           const note = (dm.q('#sad-note').value || '').trim();
-          const folder = dm.q('#sad-folder').value || '/';
+          const folder = saCurrentFolder || '/';   // 맨 처음 모달에서 정한 저장 폴더를 그대로 사용
           const sv = dm.q('#sad-save'), cx = dm.q('#sad-cancel'); sv.disabled = true; cx.disabled = true;
           for (const t of targets) {
             const row = { isbn: t, status: 'saving' }; savedRows.push(row); renderSaved();
@@ -2809,15 +2808,20 @@ const App = (() => {
     function renderResult() {
       if (!disc.length) { m.q('#sa-result').innerHTML = '<p class="muted" style="padding:14px">오차 항목이 없습니다.</p>'; return; }
       // 필터 상태 초기화(새 목록/이어서 보기 시)
-      saSort = { col: null, dir: 1 }; saFilterField = ''; saFilterPhoto = '';
+      saSort = { col: null, dir: 1 }; saFilterFields = new Set(); saFilterPhoto = '';
       const matched = disc.filter((d) => d.shelves && d.shelves.length).length;
       const fields = [...new Set(disc.map((d) => String(d.field == null ? '' : d.field)).filter((x) => x !== ''))].sort((a, b) => a.localeCompare(b, 'ko'));
-      const fieldOpts = `<option value="">전체</option>${fields.map((f) => `<option value="${esc(f)}">${esc(f)}</option>`).join('')}`;
       m.q('#sa-result').innerHTML = `
         <div class="sa-resulthead">
           <div class="sa-summary">오차 항목 <b>${disc.length.toLocaleString()}건</b> · 서가 매칭 <b>${matched.toLocaleString()}건</b><span id="sa-photocount" class="muted" style="font-size:12px"></span><span id="sa-shown" class="muted" style="font-size:12px"></span> <span class="muted" style="font-size:12px">· 열 제목으로 정렬 · 행을 누르면 상세</span></div>
           <label class="sa-foldersel">📁 <select id="sa-folder">${folderOptions(saCurrentFolder)}</select></label>
-          <label class="sa-foldersel">분야 <select id="sa-ffield">${fieldOpts}</select></label>
+          <div class="sa-fielddd">
+            <button type="button" class="sa-fieldbtn" id="sa-ffield-btn">분야 <span id="sa-ffield-lbl">전체</span> <span class="sa-caret">▾</span></button>
+            <div class="sa-fieldpop" id="sa-ffield-pop" hidden>
+              <div class="sa-fieldpop-head"><button type="button" class="btn btn-ghost btn-sm" id="sa-ffield-all">전체선택</button><button type="button" class="btn btn-ghost btn-sm" id="sa-ffield-none">전체해제</button></div>
+              <div class="sa-fieldpop-list">${fields.map((f) => `<label class="sa-fieldopt"><input type="checkbox" value="${esc(f)}"> ${esc(f)}</label>`).join('')}</div>
+            </div>
+          </div>
           <label class="sa-foldersel">사진 <select id="sa-fphoto"><option value="">전체</option><option value="has">있음</option><option value="no">없음</option></select></label>
           ${window.ISBN ? '<button class="btn btn-secondary btn-sm" id="sa-scan">📷 바코드로 찾기</button>' : ''}
           <button class="btn btn-secondary btn-sm" id="sa-save">💾 저장</button>
@@ -2828,10 +2832,35 @@ const App = (() => {
       m.q('#sa-scan')?.addEventListener('click', scanFind);
       m.q('#sa-save')?.addEventListener('click', persist);
       m.q('#sa-folder')?.addEventListener('change', (e) => setFolder(e.target.value));
-      m.q('#sa-ffield')?.addEventListener('change', (e) => { saFilterField = e.target.value; renderTable(); });
       m.q('#sa-fphoto')?.addEventListener('change', (e) => { saFilterPhoto = e.target.value; renderTable(); });
+      wireFieldFilter(fields);
       renderTable();
       refreshPhotos();   // 선택된 폴더에 이미 사진이 있는 항목 음영 표시(+사진 필터 시 반영)
+    }
+
+    // 분야 다중선택 팝오버(전체선택/전체해제 포함)
+    function wireFieldFilter(fields) {
+      const btn = m.q('#sa-ffield-btn'), pop = m.q('#sa-ffield-pop'), lbl = m.q('#sa-ffield-lbl');
+      if (!btn || !pop) return;
+      const boxes = () => [...pop.querySelectorAll('.sa-fieldopt input')];
+      const updateLabel = () => {
+        const n = saFilterFields.size;
+        lbl.textContent = (n === 0 || n === fields.length) ? '전체' : (n === 1 ? [...saFilterFields][0] : `${n}개`);
+      };
+      const apply = () => { updateLabel(); renderTable(); };
+      const closePop = () => { pop.hidden = true; document.removeEventListener('click', onOutside, true); };
+      const onOutside = (e) => { if (!pop.contains(e.target) && e.target !== btn && !btn.contains(e.target)) closePop(); };
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (pop.hidden) { pop.hidden = false; setTimeout(() => document.addEventListener('click', onOutside, true)); }
+        else closePop();
+      });
+      boxes().forEach((cb) => cb.addEventListener('change', () => {
+        if (cb.checked) saFilterFields.add(cb.value); else saFilterFields.delete(cb.value);
+        apply();
+      }));
+      m.q('#sa-ffield-all')?.addEventListener('click', () => { saFilterFields = new Set(fields); boxes().forEach((cb) => { cb.checked = true; }); apply(); });
+      m.q('#sa-ffield-none')?.addEventListener('click', () => { saFilterFields = new Set(); boxes().forEach((cb) => { cb.checked = false; }); apply(); });
     }
 
     async function downloadXlsx() {
