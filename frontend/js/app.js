@@ -1108,49 +1108,61 @@ const App = (() => {
   }
 
   // ── 전송(업로드/다운로드) 현황 패널 ── 하단 고정, 다건·실시간 진행바·취소·실패사유 표시
+  // 진행률 갱신 시 전체를 다시 그리지 않고 각 행의 막대/퍼센트만 직접 수정(버튼 DOM 유지 → 클릭 안정)
   const Xfer = (() => {
-    let panel = null, listEl = null, items = [], seq = 0;
-    function cancel(it) {
-      if (it.status !== 'active') return;
-      it.status = 'canceled'; it.error = '취소됨';
-      try { if (it.aborter) it.aborter(); } catch (_) { /* noop */ }
-      render();
-      setTimeout(() => { items = items.filter((x) => x !== it); render(); }, 4000);
-    }
-    function ensure() {
+    let panel = null, listEl = null, countEl = null, activeCount = 0;
+    function ensurePanel() {
       if (panel) return;
       panel = document.createElement('div');
       panel.id = 'xfer-panel'; panel.className = 'hidden';
       panel.innerHTML = `<div class="xfer-head"><span class="xfer-title">전송 현황</span><span class="xfer-count" id="xfer-count"></span><div style="flex:1"></div><button class="xfer-btn" id="xfer-clear" title="완료·실패 항목 지우기">지우기</button><button class="xfer-btn" id="xfer-min" title="접기/펼치기">▾</button></div><div class="xfer-list" id="xfer-list"></div>`;
       document.body.appendChild(panel);
       listEl = panel.querySelector('#xfer-list');
-      panel.querySelector('#xfer-clear').addEventListener('click', () => { items = items.filter((i) => i.status === 'active'); render(); });
+      countEl = panel.querySelector('#xfer-count');
+      panel.querySelector('#xfer-clear').addEventListener('click', () => { [...listEl.children].forEach((el) => { if (!el.classList.contains('is-active')) el.remove(); }); refreshCount(); });
       panel.querySelector('#xfer-min').addEventListener('click', () => panel.classList.toggle('collapsed'));
-      listEl.addEventListener('click', (e) => { const b = e.target.closest('[data-cancel]'); if (!b) return; const it = items.find((x) => String(x.id) === b.dataset.cancel); if (it) cancel(it); });
     }
-    function render() {
-      ensure();
-      panel.classList.toggle('hidden', items.length === 0);
-      const active = items.filter((i) => i.status === 'active').length;
-      panel.querySelector('#xfer-count').textContent = active ? `· ${active}건 진행 중` : `· ${items.length}건`;
-      listEl.innerHTML = items.map((it) => {
-        const pct = it.total > 0 ? Math.min(100, Math.round((it.loaded / it.total) * 100)) : (it.status === 'done' ? 100 : 0);
-        const cls = it.status === 'done' ? 'done' : (it.status === 'error' || it.status === 'canceled') ? 'err' : '';
-        const right = it.status === 'canceled' ? '취소' : it.status === 'error' ? '실패' : it.status === 'done' ? '완료' : (it.total ? `${pct}%` : '…');
-        const cancelBtn = it.status === 'active' ? `<button class="xfer-x" data-cancel="${it.id}" title="취소">✕</button>` : '';
-        const errLine = (it.status === 'error' || it.status === 'canceled') && it.error ? `<div class="xfer-err" title="${UI.escapeHtml(it.error)}">${UI.escapeHtml(it.error)}</div>` : '';
-        return `<div class="xfer-row ${cls}"><div class="xfer-line"><span class="xfer-ic">${it.dir === 'up' ? '⬆️' : '⬇️'}</span><span class="xfer-name" title="${UI.escapeHtml(it.name)}">${UI.escapeHtml(it.name)}</span><span class="xfer-pct">${right}</span>${cancelBtn}</div><div class="xfer-bar"><span style="width:${pct}%"></span></div>${errLine}</div>`;
-      }).join('');
+    function refreshCount() {
+      const rows = listEl.children.length;
+      panel.classList.toggle('hidden', rows === 0);
+      countEl.textContent = activeCount ? `· ${activeCount}건 진행 중` : `· ${rows}건`;
     }
     function add(name, dir) {
-      const it = { id: ++seq, name, dir, loaded: 0, total: 0, status: 'active', error: '', aborter: null };
-      items.push(it); render();
+      ensurePanel();
+      const row = document.createElement('div');
+      row.className = 'xfer-row is-active';
+      row.innerHTML = `<div class="xfer-line"><span class="xfer-ic">${dir === 'up' ? '⬆️' : '⬇️'}</span><span class="xfer-name" title="${UI.escapeHtml(name)}">${UI.escapeHtml(name)}</span><span class="xfer-pct">…</span><button class="xfer-x" type="button" title="취소">✕</button></div><div class="xfer-bar"><span></span></div><div class="xfer-err" hidden></div>`;
+      listEl.appendChild(row);
+      const barEl = row.querySelector('.xfer-bar > span');
+      const pctEl = row.querySelector('.xfer-pct');
+      const errEl = row.querySelector('.xfer-err');
+      const xBtn = row.querySelector('.xfer-x');
+      let status = 'active', total = 0, aborter = null;
+      activeCount++; refreshCount();
+      function end(kind, label, errMsg) {
+        if (status !== 'active') return;
+        status = kind;
+        row.classList.remove('is-active');
+        row.classList.add(kind === 'done' ? 'done' : 'err');
+        pctEl.textContent = label;
+        if (errMsg) { errEl.textContent = errMsg; errEl.title = errMsg; errEl.hidden = false; }
+        xBtn.remove();
+        activeCount = Math.max(0, activeCount - 1); refreshCount();
+        setTimeout(() => { row.remove(); refreshCount(); }, 4000);
+      }
+      xBtn.addEventListener('click', () => { if (status !== 'active') return; try { if (aborter) aborter(); } catch (_) { /* noop */ } end('canceled', '취소', '취소됨'); });
       return {
-        update(loaded, total) { if (it.status !== 'active') return; it.loaded = loaded; if (total != null) it.total = total; render(); },
-        done() { if (it.status !== 'active') return; it.status = 'done'; it.loaded = it.total || it.loaded; render(); setTimeout(() => { items = items.filter((x) => x !== it); render(); }, 4000); },
-        fail(msg) { if (it.status !== 'active') return; it.status = 'error'; it.error = msg || '실패'; render(); },
-        setAbort(fn) { it.aborter = fn; },       // 실행 중인 요청을 중단할 함수 등록
-        canceled: () => it.status === 'canceled', // 취소되었는지 확인(루프 중단용)
+        update(loaded, tot) {
+          if (status !== 'active') return;
+          if (tot != null) total = tot;
+          const pct = total > 0 ? Math.min(100, Math.round((loaded / total) * 100)) : 0;
+          barEl.style.width = pct + '%';
+          pctEl.textContent = total > 0 ? pct + '%' : '…';
+        },
+        done() { if (status !== 'active') return; barEl.style.width = '100%'; end('done', '완료'); },
+        fail(msg) { if (status !== 'active') return; end('error', '실패', msg || '실패'); },
+        setAbort(fn) { aborter = fn; },
+        canceled: () => status === 'canceled',
       };
     }
     return { add };
