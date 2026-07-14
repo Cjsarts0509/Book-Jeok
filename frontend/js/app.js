@@ -2668,14 +2668,24 @@ const App = (() => {
         if (!coverEl.querySelector('.sad-more')) { const b = document.createElement('span'); b.className = 'sad-more'; coverEl.appendChild(b); }
         updateBadge();
       };
-      // 추가 이미지 _01, _02 … 를 순차 확인 → 처음 없는 번호에서 중단(교보는 연속 번호)
-      (function probe(n) {
-        if (n > 10) return;                      // 안전 상한
+      // 없는 번호도 교보가 '이미지 준비중' 기본 이미지(200)를 주므로, 먼저 존재할 수 없는 번호(_97)를
+      // 받아 그 크기를 '없음' 기준(placeholder)으로 삼는다. 이후 추가 이미지가 이 크기와 같으면 없는 것으로 간주.
+      let placeholderSig = null;
+      const ref = new Image();
+      ref.onload = () => { placeholderSig = ref.naturalWidth > 1 ? ref.naturalWidth + 'x' + ref.naturalHeight : null; probe(1); };
+      ref.onerror = () => { placeholderSig = null; probe(1); };   // 없으면 404 방식 → 크기 비교 불필요
+      ref.src = addtUrl(97);
+      // 추가 이미지 _01, _02 … 를 순차 확인 → 없는 번호(에러 또는 기본이미지)에서 중단(교보는 연속 번호)
+      function probe(n) {
+        if (n > 20) return;                       // 안전 상한
         const p = new Image();
-        p.onload = () => { if (p.naturalWidth > 1) { extra.push(addtUrl(n)); ensureBadge(); probe(n + 1); } };
+        p.onload = () => {
+          const sig = p.naturalWidth + 'x' + p.naturalHeight;
+          if (p.naturalWidth > 1 && sig !== placeholderSig) { extra.push(addtUrl(n)); ensureBadge(); probe(n + 1); }
+        };
         p.onerror = () => {};                     // 없으면 여기서 멈춤
         p.src = addtUrl(n);
-      })(1);
+      }
       coverEl.addEventListener('click', () => {
         if (!extra.length || coverEl.classList.contains('sad-nocover')) return;
         view = (view + 1) % (1 + extra.length);
