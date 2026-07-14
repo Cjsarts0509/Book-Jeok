@@ -169,7 +169,8 @@ const UI = (() => {
     function close() { doClose(false); }
     // 바깥 클릭으로는 닫히지 않음 (요구사항). X 버튼 / 취소·닫기 버튼 / ESC 로만 닫힘.
     backdrop.querySelector('.modal-x').addEventListener('click', close);
-    const onKey = (e) => { if (e.key === 'Escape') close(); };
+    // ESC 는 '맨 위' 모달만 닫는다(스택된 모달이 한꺼번에 닫히지 않도록)
+    const onKey = (e) => { if (e.key === 'Escape' && modalStack[modalStack.length - 1] === entry) { e.stopPropagation(); close(); } };
     document.addEventListener('keydown', onKey);
     const box = backdrop.querySelector('.modal');
     // 내용이 바뀌어 크기가 변할 때 높이를 부드럽게 애니메이션

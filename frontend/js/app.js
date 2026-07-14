@@ -170,6 +170,7 @@ const App = (() => {
     document.getElementById('expand-all').addEventListener('click', expandAll);
     document.getElementById('collapse-all').addEventListener('click', collapseAll);
     if (isPriv()) setupAccountSwitcher();
+    restoreLoc();   // 마지막 폴더로 복귀(모바일 재로딩 대비) — loadAll 전에 folder 설정
     loadAll();
     loadBranches();
     loadAllowedExt();
@@ -266,7 +267,23 @@ const App = (() => {
         .filter((f) => f && f.path)
         .map((f) => ({ ...f, name: f.name || f.path.split('/').filter(Boolean).pop() || '(이름없음)' }));
       state.files = list.files || []; state.usage = usage; state.selected.clear(); captureSeen(); renderContent();
+      saveLoc();
     } catch (err) { view.innerHTML = `<div class="empty"><div class="big">⚠️</div>${UI.escapeHtml(err.message)}</div>`; }
+  }
+
+  // ── 마지막 위치 기억: 모바일에서 앱이 재로딩돼도 하던 폴더로 돌아오게 ──
+  const LOC_KEY = 'bj_lastloc';
+  function saveLoc() {
+    try { localStorage.setItem(LOC_KEY, JSON.stringify({ folder: state.folder, ownerId: state.ownerId || null, uid: state.user && state.user.id, at: Date.now() })); } catch (_) {}
+  }
+  function restoreLoc() {
+    try {
+      const s = JSON.parse(localStorage.getItem(LOC_KEY) || 'null');
+      if (!s || s.uid !== (state.user && state.user.id)) return;   // 다른 사용자면 무시
+      if (Date.now() - (s.at || 0) > 60 * 60 * 1000) return;       // 1시간 지나면 홈에서 시작
+      if (s.ownerId) return;                                        // 다른 계정 열람 상태였으면 내 파일 홈에서 시작
+      if (s.folder && s.folder !== '/') { state.folder = s.folder; state.nav = { stack: [s.folder], idx: 0 }; state.expanded = pathChain(s.folder); }
+    } catch (_) {}
   }
 
   function buildTreeNodes(paths) {
@@ -324,7 +341,7 @@ const App = (() => {
           <button class="btn btn-primary btn-sm" id="upload-btn" title="허용: ${state.allowedExt.join(' · ')}">⬆️ <span class="label">업로드</span></button>
           <button class="btn btn-secondary btn-sm" id="smart-btn" title="파일명(지점·날짜)으로 폴더를 추천해 업로드">🧭 <span class="label">추천</span></button>
           <button class="btn btn-secondary btn-sm" id="new-folder">📂 <span class="label">새 폴더</span></button>
-          <button class="btn btn-ghost btn-sm" id="refresh-btn" title="목록 새로고침">🔄 <span class="label">새로고침</span></button>
+          <button class="btn btn-secondary btn-sm" id="refresh-btn" title="목록 새로고침">🔄 <span class="label">새로고침</span></button>
           <input type="file" id="file-input" multiple hidden accept="${state.allowedExt.map((e) => '.' + e).join(',')}">
           <input type="file" id="cam-input" accept="image/*" capture="environment" multiple hidden>
           <div class="tools-break"></div>
