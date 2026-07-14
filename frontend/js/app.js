@@ -105,6 +105,7 @@ const App = (() => {
             <div class="nav-item" data-nav="trash"><span class="ico">🗑️</span><span class="t">휴지통</span></div>
             <div class="nav-item nav-bell" data-nav="notif"><span class="ico">🔔</span><span class="t">알림</span><span class="notif-badge hidden" id="notif-badge">0</span></div>
             ${admin ? '<a class="nav-item" href="admin.html"><span class="ico">🛡️</span><span class="t">관리자</span></a>' : ''}
+            ${(state.user.role === 'branch' || admin) ? '<div class="nav-item" data-nav="stockaudit"><span class="ico">📊</span><span class="t">재고조사 오차체크</span></div>' : ''}
             <div class="nav-item" data-nav="serverstatus"><span class="ico">🖥️</span><span class="t">서버 상태</span></div>
             <div class="nav-item" data-nav="help"><span class="ico">❓</span><span class="t">도움말</span></div>
             <div class="nav-item" data-nav="settings"><span class="ico">⚙️</span><span class="t">설정</span></div>
@@ -151,7 +152,7 @@ const App = (() => {
     root().querySelectorAll('.appbar-nav [data-nav]').forEach((el) => el.addEventListener('click', () => {
       const n = el.dataset.nav;
       closeNavMenu();
-      if (n === 'logout') doLogout(); else if (n === 'settings') settingsModal(); else if (n === 'files') resetToOwn(); else if (n === 'help') helpModal(); else if (n === 'trash') trashModal(); else if (n === 'shares') shareManageModal(); else if (n === 'notif') notifModal(); else if (n === 'serverstatus') serverStatusModal();
+      if (n === 'logout') doLogout(); else if (n === 'settings') settingsModal(); else if (n === 'files') resetToOwn(); else if (n === 'help') helpModal(); else if (n === 'trash') trashModal(); else if (n === 'shares') shareManageModal(); else if (n === 'notif') notifModal(); else if (n === 'serverstatus') serverStatusModal(); else if (n === 'stockaudit') stockAuditModal();
     }));
     // 모바일: 상단바 메뉴(햄버거) → 텍스트 리스트 드롭다운
     const navMenuBtn = document.getElementById('nav-menu-toggle');
@@ -2481,6 +2482,88 @@ const App = (() => {
     }
     load();
     const timer = setInterval(load, 4000);
+  }
+
+  // ── 재고조사 오차체크(영업점) : 두 엑셀 → 오차 추출 + 서가별 실사수량 병합 표 ──────────
+  const SA_MAX_SHELF = 10;
+  function stockAuditModal() {
+    const m = UI.modal(`<h3>📊 재고조사 오차체크</h3>
+      <p class="muted" style="font-size:12px;margin:-6px 0 12px">두 엑셀을 올리면 오차 항목(예외 제외·차이≠0)을 뽑아 서가별 실사수량과 함께 표로 보여줍니다.</p>
+      <div class="sa-inputs">
+        <label class="sa-file"><span class="sa-lbl">① 결과확인리스트</span><input type="file" id="sa-f1" accept=".xlsx,.xls"><span class="sa-name" id="sa-n1">파일 선택…</span></label>
+        <label class="sa-file"><span class="sa-lbl">② 서가별스캔데이터</span><input type="file" id="sa-f2" accept=".xlsx,.xls"><span class="sa-name" id="sa-n2">파일 선택…</span></label>
+      </div>
+      <div class="modal-actions"><span class="muted" id="sa-status" style="flex:1;font-size:12px"></span><button class="btn btn-ghost" id="sa-close">닫기</button><button class="btn btn-primary" id="sa-run">분석</button></div>
+      <div id="sa-result" style="margin-top:12px"></div>`);
+    m.el.querySelector('.modal').classList.add('modal-help');
+    m.q('#sa-close').addEventListener('click', m.close);
+    const status = (t) => { m.q('#sa-status').textContent = t || ''; };
+    m.q('#sa-f1').addEventListener('change', (e) => { m.q('#sa-n1').textContent = e.target.files[0]?.name || '파일 선택…'; });
+    m.q('#sa-f2').addEventListener('change', (e) => { m.q('#sa-n2').textContent = e.target.files[0]?.name || '파일 선택…'; });
+
+    const num = (v) => { const n = Number(String(v == null ? '' : v).replace(/[^\d.-]/g, '')); return isNaN(n) ? 0 : n; };
+    async function readSheet(XLSX, file) {
+      const wb = XLSX.read(await file.arrayBuffer(), { type: 'array' });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      return XLSX.utils.sheet_to_json(ws, { header: 1, blankrows: false, defval: '' });
+    }
+
+    m.q('#sa-run').addEventListener('click', async () => {
+      const f1 = m.q('#sa-f1').files[0], f2 = m.q('#sa-f2').files[0];
+      if (!f1 || !f2) return UI.toast('두 파일을 모두 선택하세요', 'error');
+      const btn = m.q('#sa-run'); btn.disabled = true;
+      try {
+        status('엑셀 라이브러리 로드 중…'); const XLSX = await ensureXLSX();
+        status('① 결과확인리스트 읽는 중… (수십 초 걸릴 수 있어요)'); await new Promise((r) => setTimeout(r));
+        const r1 = await readSheet(XLSX, f1);
+        status('② 서가별스캔데이터 읽는 중…'); await new Promise((r) => setTimeout(r));
+        const r2 = await readSheet(XLSX, f2);
+        status('오차 계산 중…'); await new Promise((r) => setTimeout(r));
+
+        // ① 오차 추출: 예외≠Y · 차이≠0 · (실재고-스캔재고)≠0
+        // 칼럼: ISBN0 도서명1 분야2 출판사3 전산재고4 실재고5 누락재고6 예외여부7 스캔재고8 차이9
+        const disc = [];
+        for (let i = 1; i < r1.length; i++) {
+          const r = r1[i]; if (!r || r[0] == null || r[0] === '') continue;
+          if (String(r[7] || '').trim().toUpperCase() === 'Y') continue;
+          if (num(r[9]) === 0) continue;
+          if (num(r[5]) - num(r[8]) === 0) continue;
+          disc.push({ isbn: String(r[0]).trim(), name: r[1], field: r[2], pub: r[3], sys: r[4], real: r[5], miss: r[6], exc: r[7], scan: r[8], diff: r[9] });
+        }
+        // ② 서가별 실사수량 합산: ISBN0 … 서가번호4 실사수량5
+        const shelfMap = new Map();
+        for (let i = 1; i < r2.length; i++) {
+          const r = r2[i]; if (!r || r[0] == null || r[0] === '') continue;
+          const isbn = String(r[0]).trim(), shelf = String(r[4] == null ? '' : r[4]).trim();
+          if (!shelf) continue;
+          const qty = num(r[5]) || 1;
+          if (!shelfMap.has(isbn)) shelfMap.set(isbn, new Map());
+          const mm = shelfMap.get(isbn); mm.set(shelf, (mm.get(shelf) || 0) + qty);
+        }
+        // 서가번호 숫자 정렬 + 최대 10칸
+        let matched = 0;
+        for (const d of disc) {
+          const mm = shelfMap.get(d.isbn);
+          d.shelves = mm ? [...mm.entries()].sort((a, b) => Number(a[0]) - Number(b[0])).slice(0, SA_MAX_SHELF) : [];
+          if (d.shelves.length) matched++;
+        }
+
+        const base = ['분야', 'ISBN', '도서명', '출판사', '전산재고', '실재고', '누락재고', '예외여부', '스캔재고', '차이'];
+        const shelfHead = Array.from({ length: SA_MAX_SHELF }, (_, i) => `서가${i + 1}`);
+        const thead = `<thead><tr>${[...base, ...shelfHead].map((h) => `<th>${h}</th>`).join('')}</tr></thead>`;
+        const tbody = disc.map((d) => {
+          const cells = [d.field, d.isbn, d.name, d.pub, d.sys, d.real, d.miss, d.exc, d.scan, d.diff];
+          for (let i = 0; i < SA_MAX_SHELF; i++) { const s = d.shelves[i]; cells.push(s ? `${s[0]} (${s[1]})` : ''); }
+          return `<tr>${cells.map((c, idx) => `<td class="${idx >= base.length ? 'sa-shelf' : ''}">${UI.escapeHtml(String(c == null ? '' : c))}</td>`).join('')}</tr>`;
+        }).join('');
+        status('');
+        m.q('#sa-result').innerHTML = `
+          <div class="sa-summary">오차 항목 <b>${disc.length.toLocaleString()}건</b> · 서가 데이터 매칭 <b>${matched.toLocaleString()}건</b></div>
+          ${disc.length ? `<div class="table-wrap sa-tablewrap"><table class="sa-table">${thead}<tbody>${tbody}</tbody></table></div>` : '<p class="muted" style="padding:14px">오차 항목이 없습니다.</p>'}`;
+      } catch (err) {
+        status(''); m.q('#sa-result').innerHTML = `<p class="muted" style="color:var(--danger)">${UI.escapeHtml(err.message)}</p>`;
+      } finally { btn.disabled = false; }
+    });
   }
 
   function usageReportModal() {
