@@ -882,6 +882,12 @@ th { background: var(--bg); font-weight: 700; color: var(--text-muted); font-siz
 .sa-table tbody tr { cursor: pointer; }
 .sa-table tbody tr:hover { background: var(--hover); }
 .sa-table td.sa-isbn { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--primary-dark); font-weight: 700; }
+.sa-table tbody tr.sa-has td { background: rgba(16,185,129,.14); }
+.sa-table tbody tr.sa-has:hover td { background: rgba(16,185,129,.24); }
+.sa-table tbody tr.sa-has td.sa-isbn::after { content: ' 📷'; }
+.sa-foldersel { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--text-muted); }
+.sa-foldersel select { padding: 5px 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); font-size: 12px; max-width: 190px; }
+.sa-resume { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: -2px 0 12px; padding: 10px 12px; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-sm); font-size: 13px; }
 
 /* 재고조사 — 항목 상세(모바일) */
 .sad-top { display: flex; gap: 14px; margin-bottom: 12px; }

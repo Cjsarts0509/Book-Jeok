@@ -2486,9 +2486,11 @@ const App = (() => {
 
   // ── 재고조사 오차체크(영업점) : 두 엑셀 → 오차 추출 + 서가별 실사수량 병합 표 ──────────
   const SA_MAX_SHELF = 10;
+  const SA_STORE_KEY = 'bj_stockaudit_v1';
   function stockAuditModal() {
     const m = UI.modal(`<h3>📊 재고조사 오차체크</h3>
       <p class="muted" style="font-size:12px;margin:-6px 0 12px">두 엑셀을 올리면 오차 항목(예외 제외·차이≠0)을 뽑아 서가별 실사수량과 함께 표로 보여줍니다.</p>
+      <div id="sa-resume"></div>
       <div class="sa-inputs">
         <label class="sa-file"><span class="sa-lbl">① 결과확인리스트</span><input type="file" id="sa-f1" accept=".xlsx,.xls"><span class="sa-name" id="sa-n1">파일 선택…</span></label>
         <label class="sa-file"><span class="sa-lbl">② 서가별스캔데이터</span><input type="file" id="sa-f2" accept=".xlsx,.xls"><span class="sa-name" id="sa-n2">파일 선택…</span></label>
@@ -2514,6 +2516,42 @@ const App = (() => {
     const shelfHead = Array.from({ length: SA_MAX_SHELF }, (_, i) => `서가${i + 1}`);
     let disc = [];                 // 오차 항목(상세·바코드검색·다운로드 공용)
     let isbnSet = new Set();        // 리스트에 있는 ISBN 집합(빠른 조회)
+    let saCurrentFolder = state.folder || '/';  // 사진 저장·확인 대상 폴더
+    let saPhotoStems = new Set();   // 현재 폴더에 이미 사진이 있는 ISBN
+
+    // ── 목록 저장/불러오기(브라우저 보관 — 재업로드 없이 이어서 작업) ──
+    function persist() {
+      try {
+        localStorage.setItem(SA_STORE_KEY, JSON.stringify({ savedAt: Date.now(), ownerId: state.ownerId || null, disc }));
+        UI.toast(`목록 저장됨 (${disc.length.toLocaleString()}건) — 다음에 이어서 볼 수 있어요`, 'success');
+      } catch (_) { UI.toast('저장 실패(브라우저 저장 용량 초과일 수 있어요)', 'error'); }
+    }
+    function loadStored() { try { return JSON.parse(localStorage.getItem(SA_STORE_KEY) || 'null'); } catch (_) { return null; } }
+
+    // ── 폴더 사진 유무 확인 → 표에 음영 표시 ──
+    const stem = (name) => String(name || '').replace(/\.[^.]+$/, '');
+    async function refreshPhotos() {
+      try {
+        const list = await API.listFiles(saCurrentFolder, state.ownerId);
+        const s = new Set();
+        for (const f of (list.files || [])) { const st = stem(f.name); if (isbnSet.has(st)) s.add(st); }
+        saPhotoStems = s;
+      } catch (_) { saPhotoStems = new Set(); }
+      applyShade();
+    }
+    function applyShade() {
+      let n = 0;
+      m.el.querySelectorAll('.sa-table tbody tr').forEach((tr) => {
+        const d = disc[+tr.dataset.ri]; const has = !!(d && saPhotoStems.has(d.isbn));
+        tr.classList.toggle('sa-has', has); if (has) n++;
+      });
+      const c = m.q('#sa-photocount'); if (c) c.textContent = n ? ` · 📷 사진있음 ${n.toLocaleString()}건` : '';
+    }
+    async function setFolder(f) {
+      saCurrentFolder = f || '/';
+      const ls = m.q('#sa-folder'); if (ls && ls.value !== saCurrentFolder) ls.value = saCurrentFolder;
+      await refreshPhotos();
+    }
 
     // ── 저장 폴더 옵션 / 이미지 다운스케일 / 파일 저장 ──
     function folderOptions(sel) {
@@ -2572,12 +2610,13 @@ const App = (() => {
           </div>
         </div>
         <div class="sad-shelves"><div class="lbl">서가번호 (실사수량)</div>${shelfChips}</div>
-        <div class="sad-folder"><span>저장 폴더</span><select id="sad-folder">${folderOptions(state.folder)}</select></div>
+        <div class="sad-folder"><span>저장 폴더</span><select id="sad-folder">${folderOptions(saCurrentFolder)}</select></div>
         <div class="modal-actions"><button class="btn btn-ghost" id="sad-close">닫기</button><span style="flex:1"></span><button class="btn btn-primary" id="sad-shoot">📷 사진 촬영·저장</button></div>
         <div class="scan-list" id="sad-saved" style="margin-top:10px"></div>`);
       dm.el.querySelector('.modal').classList.add('modal-wide');
       attachCover(dm.q('#sad-cover'), d.isbn);
       dm.q('#sad-close').addEventListener('click', dm.close);
+      dm.q('#sad-folder').addEventListener('change', (e) => setFolder(e.target.value));  // 폴더 바꾸면 목록 음영도 갱신
 
       const cam = document.createElement('input');
       cam.type = 'file'; cam.accept = 'image/*'; cam.capture = 'environment'; cam.style.display = 'none';
@@ -2603,8 +2642,10 @@ const App = (() => {
           const blob = await downscale(file, 1600, 0.85);
           for (const t of targets) {
             const row = { isbn: t, status: 'saving' }; savedRows.push(row); renderSaved();
-            row.status = (await saveOne(blob, t, folder)) ? 'done' : 'error'; renderSaved();
+            const ok = await saveOne(blob, t, folder); row.status = ok ? 'done' : 'error'; renderSaved();
+            if (ok && folder === saCurrentFolder) saPhotoStems.add(t);   // 뒤 목록 음영 즉시 반영
           }
+          applyShade();
           const extra = targets.size - 1;
           UI.toast(`${targets.size}건 저장${extra ? ` (추가 바코드 ${extra}건)` : ''}${skipped ? ` · 리스트에 없는 ${skipped}건 제외` : ''}`, 'success');
         } catch (_) { UI.toast('저장 실패', 'error'); }
@@ -2639,7 +2680,8 @@ const App = (() => {
       try { cam.click(); } catch (_) {}
     }
 
-    function renderResult(matched) {
+    function renderResult() {
+      const matched = disc.filter((d) => d.shelves && d.shelves.length).length;
       const thead = `<thead><tr>${[...base, ...shelfHead].map((h) => `<th>${h}</th>`).join('')}</tr></thead>`;
       const tbody = disc.map((d, ri) => {
         const cells = [d.field, d.isbn, d.name, d.pub, d.sys, d.real, d.miss, d.exc, d.scan, d.diff];
@@ -2648,8 +2690,10 @@ const App = (() => {
       }).join('');
       m.q('#sa-result').innerHTML = disc.length ? `
         <div class="sa-resulthead">
-          <div class="sa-summary">오차 항목 <b>${disc.length.toLocaleString()}건</b> · 서가 데이터 매칭 <b>${matched.toLocaleString()}건</b> <span class="muted" style="font-size:12px">· 행을 누르면 상세</span></div>
+          <div class="sa-summary">오차 항목 <b>${disc.length.toLocaleString()}건</b> · 서가 매칭 <b>${matched.toLocaleString()}건</b><span id="sa-photocount" class="muted" style="font-size:12px"></span> <span class="muted" style="font-size:12px">· 행을 누르면 상세</span></div>
+          <label class="sa-foldersel">📁 <select id="sa-folder">${folderOptions(saCurrentFolder)}</select></label>
           ${window.ISBN ? '<button class="btn btn-secondary btn-sm" id="sa-scan">📷 바코드로 찾기</button>' : ''}
+          <button class="btn btn-secondary btn-sm" id="sa-save">💾 저장</button>
           <button class="btn btn-primary btn-sm" id="sa-dl">⬇ 엑셀 다운로드</button>
         </div>
         <div class="table-wrap sa-tablewrap"><table class="sa-table">${thead}<tbody>${tbody}</tbody></table></div>`
@@ -2657,7 +2701,10 @@ const App = (() => {
       if (!disc.length) return;
       m.q('#sa-dl')?.addEventListener('click', downloadXlsx);
       m.q('#sa-scan')?.addEventListener('click', scanFind);
+      m.q('#sa-save')?.addEventListener('click', persist);
+      m.q('#sa-folder')?.addEventListener('change', (e) => setFolder(e.target.value));
       m.el.querySelectorAll('.sa-table tbody tr').forEach((tr) => tr.addEventListener('click', () => openDetail(disc[+tr.dataset.ri])));
+      refreshPhotos();   // 선택된 폴더에 이미 사진이 있는 항목 음영 표시
     }
 
     async function downloadXlsx() {
@@ -2675,6 +2722,22 @@ const App = (() => {
         XLSX.writeFile(wb, `재고오차_${dt.getFullYear()}${p2(dt.getMonth() + 1)}${p2(dt.getDate())}_${p2(dt.getHours())}${p2(dt.getMinutes())}.xlsx`);
       } catch (e) { UI.toast(e.message || '다운로드 실패', 'error'); }
     }
+
+    // 저장된 목록이 있으면(같은 계정) 재업로드 없이 이어서 볼 수 있게 안내
+    (function showResume() {
+      const st = loadStored();
+      if (!st || !Array.isArray(st.disc) || !st.disc.length || (st.ownerId || null) !== (state.ownerId || null)) return;
+      const dt = new Date(st.savedAt || 0); const p2 = (x) => String(x).padStart(2, '0');
+      const when = st.savedAt ? `${dt.getFullYear()}-${p2(dt.getMonth() + 1)}-${p2(dt.getDate())} ${p2(dt.getHours())}:${p2(dt.getMinutes())}` : '';
+      const box = m.q('#sa-resume');
+      box.innerHTML = `<div class="sa-resume">💾 저장된 목록 <b>${st.disc.length.toLocaleString()}건</b>${when ? ` <span class="muted">(${when})</span>` : ''}<span style="flex:1"></span><button class="btn btn-sm btn-primary" id="sa-resume-go">이어서 보기</button><button class="btn btn-sm btn-ghost" id="sa-resume-del">삭제</button></div>`;
+      m.q('#sa-resume-go').addEventListener('click', () => {
+        disc = st.disc.map((d) => ({ ...d, shelves: d.shelves || [] }));
+        isbnSet = new Set(disc.map((d) => d.isbn));
+        box.innerHTML = ''; status(''); renderResult();
+      });
+      m.q('#sa-resume-del').addEventListener('click', () => { try { localStorage.removeItem(SA_STORE_KEY); } catch (_) {} box.innerHTML = ''; });
+    })();
 
     m.q('#sa-run').addEventListener('click', async () => {
       const f1 = m.q('#sa-f1').files[0], f2 = m.q('#sa-f2').files[0];
@@ -2718,7 +2781,7 @@ const App = (() => {
           if (d.shelves.length) matched++;
         }
         status('');
-        renderResult(matched);
+        renderResult();
       } catch (err) {
         status(''); m.q('#sa-result').innerHTML = `<p class="muted" style="color:var(--danger)">${esc(err.message)}</p>`;
       } finally { btn.disabled = false; }
