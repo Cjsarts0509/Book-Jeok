@@ -615,7 +615,8 @@ th { background: var(--bg); font-weight: 700; color: var(--text-muted); font-siz
 .modal-x:hover { background: var(--bg); color: var(--text); transform: rotate(90deg); }
 .modal h3 { font-size: 18px; margin-bottom: 16px; padding-right: 28px; }
 .modal.modal-wide { max-width: 720px; }
-@media (max-width: 768px) { .modal.modal-wide { max-width: 100%; } }
+.modal.modal-help { max-width: 960px; }  /* 도움말·매뉴얼: 텍스트가 두 줄로 접히지 않게 더 넓게 */
+@media (max-width: 768px) { .modal.modal-wide, .modal.modal-help { max-width: 100%; } }
 
 /* 경로 칼럼 (윈도우식 위치 표시) + 이름 칼럼 축소 */
 .filetable { table-layout: fixed; width: 100%; }
