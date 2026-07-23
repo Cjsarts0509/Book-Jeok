@@ -3046,10 +3046,12 @@ const App = (() => {
     } catch {}
     checkStale(); // 같은 계정을 다른 곳에서 변경했는지 함께 확인
   }
+  // 폴링은 '화면에 보일 때만' 돈다(백그라운드 탭의 불필요한 트래픽 제거).
+  function pollResume() { if (notifTimer) return; refreshNotifBadge(); notifTimer = setInterval(refreshNotifBadge, 30000); }
+  function pollPause() { if (notifTimer) { clearInterval(notifTimer); notifTimer = null; } }
   function startNotifPolling() {
-    if (notifTimer) clearInterval(notifTimer);
-    notifTimer = setInterval(refreshNotifBadge, 30000);      // 알림 배지 30초 폴링(목록 자동 새로고침은 없음)
-    if (!visHooked) { visHooked = true; document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') refreshNotifBadge(); }); }
+    if (document.visibilityState === 'visible') pollResume(); else pollPause();  // 알림 배지 30초 폴링(보일 때만)
+    if (!visHooked) { visHooked = true; document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') pollResume(); else pollPause(); }); }
     if (!resizeHooked) {
       resizeHooked = true; lastMobile = isMobile();
       window.addEventListener('resize', () => {
