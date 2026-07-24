@@ -220,6 +220,7 @@ router.get('/backup-status', wrap(async (req, res) => {
   res.json({
     db: await readJson('db.json'), files: await readJson('files.json'), offsite: await readJson('offsite.json'),
     dbList: (await readJson('db-list.json')) || [], filesList: (await readJson('files-list.json')) || [],
+    days: require('../report').backupDays(7),   // 최근 7일 일자별 성공 여부
   });
 }));
 

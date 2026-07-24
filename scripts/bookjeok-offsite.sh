@@ -28,10 +28,12 @@ HC_URL="${BOOKJEOK_OFFSITE_HC_URL:-}"
 API_CONTAINER="${API_CONTAINER:-bookjeok-api}"
 hc() { [ -n "$HC_URL" ] && curl -fsS -m 15 --retry 2 "${HC_URL}${1:-}" >/dev/null 2>&1 || true; }
 # 결과를 앱이 읽는 위치(_backup-status/offsite.json)에 기록 → 주간 리포트/관리자 탭에서 표시
+# + 일자별 성공 여부 이력(offsite-history.jsonl, 최근 60줄 유지)도 함께 남긴다.
 write_status() { # $1=ok(true/false)
-  local ts; ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  local ts day; ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"; day="$(date +%F)"
   printf '{"at":"%s","ok":%s}' "$ts" "$1" \
     | docker exec -i "$API_CONTAINER" sh -c 'mkdir -p /data/storage/_backup-status && cat > /data/storage/_backup-status/offsite.json' 2>/dev/null || true
+  docker exec -i "$API_CONTAINER" sh -c 'H=/data/storage/_backup-status/offsite-history.jsonl; printf "%s\n" "'"{\"date\":\"$day\",\"ok\":$1}"'" >> "$H"; tail -n 60 "$H" > "$H.tmp" && mv "$H.tmp" "$H"' 2>/dev/null || true
 }
 trap 'write_status false; hc /fail' ERR
 hc /start

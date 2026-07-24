@@ -627,7 +627,18 @@ const Admin = (() => {
     const when = (iso) => (iso ? new Date(iso).toLocaleString('ko-KR') : '-');
     try {
       const s = await API.backupStatus();
-      const { db, offsite, dbList = [] } = s;
+      const { db, offsite, dbList = [], days = { db: [], offsite: [] } } = s;
+      const dayCell = (ok) => `<td style="text-align:center;padding:4px 7px">${ok === true ? '✅' : ok === false ? '<span style="color:var(--danger)">❌</span>' : '<span class="muted">–</span>'}</td>`;
+      const dayHdr = days.db.map((x) => `<th style="padding:3px 7px;font-size:11px;color:var(--text-muted);font-weight:600">${x.date.slice(5).replace('-', '/')}</th>`).join('');
+      const daysCard = days.db.length ? `<div class="card" style="margin-bottom:14px">
+          <h3 style="margin-bottom:8px">📅 최근 7일 일자별 백업</h3>
+          <div class="table-wrap"><table style="font-size:13px;border-collapse:collapse">
+            <tr><td></td>${dayHdr}</tr>
+            <tr><td style="white-space:nowrap;padding:3px 10px 3px 0">DB (일간)</td>${days.db.map((x) => dayCell(x.ok)).join('')}</tr>
+            <tr><td style="white-space:nowrap;padding:3px 10px 3px 0">계정 밖 (구글)</td>${days.offsite.map((x) => dayCell(x.ok)).join('')}</tr>
+          </table></div>
+          <p class="muted" style="font-size:11px;margin-top:6px">✅ 성공 · ❌ 실패/누락 · – 기록 없음</p>
+        </div>` : '';
       const dbDot = db ? (fresh(db.at, 26) ? 'ok' : 'warn') : 'bad';
       const oDot = offsite ? (fresh(offsite.at, 50) ? 'ok' : 'warn') : 'bad';   // 오프사이트=매일 → 50h 이내면 정상
       const dbRows = dbList.length ? dbList.map((x) => `<tr>
@@ -645,6 +656,7 @@ const Admin = (() => {
           <div class="stat"><div class="k">로컬 DB 보관</div><div class="v">${db ? (db.localCount || 0) + '개' : '-'}</div></div>
           <div class="stat"><div class="k">DB 오라클 오브젝트</div><div class="v">${remoteTxt}</div></div>
         </div>
+        ${daysCard}
         <div class="card">
           <h3 style="margin-bottom:10px">🗄️ 일간 DB 백업 <span class="muted" style="font-size:13px;font-weight:400">· 복구할 백업을 고르세요</span></h3>
           <div class="table-wrap"><table><thead><tr><th>시각</th><th>파일</th><th style="text-align:right">크기</th><th></th></tr></thead><tbody>${dbRows}</tbody></table></div>

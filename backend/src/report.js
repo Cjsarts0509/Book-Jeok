@@ -8,13 +8,35 @@ const config = require('./config');
 const { query } = require('./db');
 const { diskTotalBytes, allocatedBytes } = require('./disk');
 
-// 백업 상태 파일(_backup-status/*.json) 읽기 — 스크립트가 실행 결과를 여기에 기록한다.
+// 백업 상태 파일(_backup-status/*) 읽기 — 스크립트가 실행 결과를 여기에 기록한다.
+const bkDir = () => path.join(config.storageRoot, '_backup-status');
+const readJsonFile = (name) => { try { return JSON.parse(fs.readFileSync(path.join(bkDir(), name), 'utf8')); } catch { return null; } };
 function readBackupStatus() {
-  const dir = path.join(config.storageRoot, '_backup-status');
-  const read = (name) => { try { return JSON.parse(fs.readFileSync(path.join(dir, name), 'utf8')); } catch { return null; } };
-  return { db: read('db.json'), files: read('files.json'), offsite: read('offsite.json') };
+  return { db: readJsonFile('db.json'), files: readJsonFile('files.json'), offsite: readJsonFile('offsite.json') };
 }
 const ageHours = (iso) => { const t = iso ? new Date(iso).getTime() : 0; return t ? (Date.now() - t) / 3600000 : Infinity; };
+const KST = (t) => new Date(t + 9 * 3600000).toISOString().slice(0, 10);   // KST 기준 YYYY-MM-DD
+function readOffsiteHistory() {
+  try {
+    return fs.readFileSync(path.join(bkDir(), 'offsite-history.jsonl'), 'utf8')
+      .trim().split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+  } catch { return []; }
+}
+// 최근 numDays일(오늘 포함)의 일자별 백업 성공 여부.
+//  db: 날짜별 덤프 존재 여부(있으면 성공). offsite: 이력(true/false), 없으면 null(모름).
+function backupDays(numDays = 7) {
+  const dbHave = new Set();
+  for (const x of (readJsonFile('db-list.json') || [])) { const m = /bookjeok-db-(\d{4}-\d{2}-\d{2})_/.exec(x.name || ''); if (m) dbHave.add(m[1]); }
+  const offHave = new Map();
+  for (const h of readOffsiteHistory()) { if (h && h.date) offHave.set(h.date, h.ok !== false); }
+  const db = [], offsite = [];
+  for (let i = numDays - 1; i >= 0; i--) {
+    const key = KST(Date.now() - i * 86400000);
+    db.push({ date: key, ok: dbHave.has(key) });
+    offsite.push({ date: key, ok: offHave.has(key) ? offHave.get(key) : null });
+  }
+  return { db, offsite };
+}
 
 function fmtBytes(n) {
   n = Number(n) || 0;
@@ -69,17 +91,22 @@ async function collect() {
   if (blocked > 0) anomalies.push(`업로드 차단 ${blocked}건 (형식위장/악성패턴) — 아래 계정별 실패 이력 참고`);
   if ((acts.login_failed || 0) >= 10) anomalies.push(`로그인 실패 ${acts.login_failed}건 — 비정상 접근 가능성 점검`);
 
-  // 백업 상태 → 실패/오래됨이면 특이사항에 올린다.
-  // 백업 방침: DB 일간(로컬+선택적 오브젝트) + 계정 밖(구글 드라이브) 매일이 DB·파일의 주 오프사이트.
+  // 백업 상태 → 일자별 성공 여부로 판정, 실패/누락이면 특이사항에 올린다.
+  // 방침: DB 일간(로컬) + 계정 밖(구글 드라이브) 매일이 DB·파일의 주 오프사이트.
   const backup = readBackupStatus();
-  if (!backup.db) anomalies.push('DB 백업 기록이 없습니다 — 스케줄 확인 필요');
-  else if (ageHours(backup.db.at) > 48) anomalies.push(`DB 백업이 ${Math.floor(ageHours(backup.db.at) / 24)}일째 갱신 안 됨 — 확인 필요`);
+  const days = backupDays(7);
+  const dbOkCnt = days.db.filter((x) => x.ok).length;
+  if (dbOkCnt === 0) anomalies.push('DB 백업 기록이 없습니다 — 스케줄 확인 필요');
+  else { const miss = days.db.filter((x) => !x.ok).length; if (miss > 0) anomalies.push(`최근 7일 중 DB 백업 누락 ${miss}일 — 확인 필요`); }
   if (!backup.offsite) anomalies.push('계정 밖(구글 드라이브) 백업 기록이 없습니다 — 설정/스케줄 확인');
-  else if (backup.offsite.ok === false) anomalies.push('계정 밖 백업 실패 — 확인 필요');
-  else if (ageHours(backup.offsite.at) > 50) anomalies.push(`계정 밖 백업이 ${Math.floor(ageHours(backup.offsite.at) / 24)}일째 갱신 안 됨`);
+  else {
+    const offFail = days.offsite.filter((x) => x.ok === false).length;
+    if (offFail > 0) anomalies.push(`최근 7일 중 계정 밖 백업 실패 ${offFail}일 — 확인 필요`);
+    else if (ageHours(backup.offsite.at) > 50) anomalies.push(`계정 밖 백업이 ${Math.floor(ageHours(backup.offsite.at) / 24)}일째 갱신 안 됨`);
+  }
 
   return {
-    backup,
+    backup, backupDays: days,
     range: '최근 7일',
     storage: { total, used, alloc, available: Math.max(0, total - alloc), usedPct: diskPct, allocPct },
     activity: {
@@ -116,20 +143,18 @@ function render(d) {
     ? `<ul style="margin:6px 0 0;padding-left:18px">${d.anomalies.map((a) => `<li style="margin:3px 0">${esc(a)}</li>`).join('')}</ul>`
     : '<p style="color:#0a0;margin:6px 0 0">특이사항 없음 ✅</p>';
 
-  // 백업 상태 표
-  const bkRow = (label, st, freshH, extraBad) => {
-    if (!st) return `<tr><td style="padding:4px 8px">${label}</td><td style="padding:4px 8px;color:#EA4B54">기록 없음</td><td></td></tr>`;
-    const stale = ageHours(st.at) > freshH; const bad = st.ok === false || extraBad;
-    const when = st.at ? new Date(st.at).toLocaleString('ko-KR') : '?';
-    const status = bad ? '⚠️ 실패/부분' : stale ? '⚠️ 오래됨' : '✅ 정상';
-    const color = (bad || stale) ? '#EA4B54' : '#0a0';
-    return `<tr><td style="padding:4px 8px">${label}</td><td style="padding:4px 8px;color:${color}">${status}</td><td style="padding:4px 8px;text-align:right;color:#666;font-size:12px">${esc(when)}</td></tr>`;
-  };
+  // 백업: 최근 7일 일자별 성공 여부 그리드
   const b = d.backup || {};
-  const backupTable = `<table style="width:100%;border-collapse:collapse;font-size:14px">
-    ${bkRow('DB (일간)', b.db, 48)}
-    ${b.offsite ? bkRow('계정 밖 · 구글드라이브 (매일)', b.offsite, 50) : '<tr><td style="padding:4px 8px;color:#EA4B54">계정 밖(구글 드라이브)</td><td style="padding:4px 8px;color:#EA4B54">미설정</td><td></td></tr>'}
-  </table>`;
+  const dd = d.backupDays || { db: [], offsite: [] };
+  const cell = (ok) => `<td style="text-align:center;padding:4px 5px">${ok === true ? '✅' : ok === false ? '<span style="color:#EA4B54">❌</span>' : '<span style="color:#bbb">–</span>'}</td>`;
+  const dayHdr = dd.db.map((x) => `<th style="padding:3px 5px;font-size:11px;color:#888;font-weight:600">${esc(x.date.slice(5).replace('-', '/'))}</th>`).join('');
+  const lastRun = (st) => (st && st.at ? new Date(st.at).toLocaleString('ko-KR') : '기록 없음');
+  const backupTable = `<table style="border-collapse:collapse;font-size:13px">
+      <tr><td></td>${dayHdr}</tr>
+      <tr><td style="padding:3px 8px 3px 0;white-space:nowrap">DB (일간)</td>${dd.db.map((x) => cell(x.ok)).join('')}</tr>
+      <tr><td style="padding:3px 8px 3px 0;white-space:nowrap">계정 밖 (구글드라이브)</td>${dd.offsite.map((x) => cell(x.ok)).join('')}</tr>
+    </table>
+    <p style="color:#888;font-size:11px;margin:6px 0 0">✅ 성공 · ❌ 실패/누락 · – 기록 없음 &nbsp;|&nbsp; 최근 실행 — DB ${esc(lastRun(b.db))} · 계정 밖 ${b.offsite ? esc(lastRun(b.offsite)) : '미설정'}</p>`;
 
   const html = `<div style="font-family:-apple-system,'Malgun Gothic',sans-serif;max-width:720px;margin:0 auto;color:#222">
     <div style="background:#FFD166;padding:18px 20px;border-radius:12px 12px 0 0">
@@ -145,7 +170,7 @@ function render(d) {
         <tr><td style="padding:4px 8px">할당 합계</td><td style="padding:4px 8px;text-align:right">${fmtBytes(s.alloc)} (${s.allocPct}%)</td>
             <td style="padding:4px 8px">할당 가능</td><td style="padding:4px 8px;text-align:right">${fmtBytes(s.available)}</td></tr>
       </table>
-      <h3 style="margin:20px 0 8px">🛟 백업</h3>${backupTable}
+      <h3 style="margin:20px 0 8px">🛟 백업 (최근 7일 일자별)</h3>${backupTable}
       <h3 style="margin:20px 0 8px">📊 최근 7일 활동</h3>
       <table style="width:100%;border-collapse:collapse;font-size:14px;text-align:center">
         <tr style="color:#666;font-size:12px"><td>업로드</td><td>다운로드</td><td>차단(형식/악성)</td><td>로그인 실패</td></tr>
@@ -163,9 +188,9 @@ function render(d) {
     `북적북적 주간 리포트 (${d.range})`, '',
     '[특이사항]', ...(d.anomalies.length ? d.anomalies.map((a) => ' - ' + a) : [' - 없음']), '',
     `[디스크] 사용 ${fmtBytes(s.used)}/${fmtBytes(s.total)} (${s.usedPct}%), 할당 ${fmtBytes(s.alloc)} (${s.allocPct}%), 가능 ${fmtBytes(s.available)}`, '',
-    '[백업]',
-    ` - DB(일간): ${b.db ? (ageHours(b.db.at) > 48 ? '⚠️ 오래됨' : '정상') + ' · ' + (b.db.at ? new Date(b.db.at).toLocaleString('ko-KR') : '?') : '기록 없음'}`,
-    ` - 계정밖(구글드라이브,매일): ${b.offsite ? (b.offsite.ok === false ? '⚠️ 실패' : (ageHours(b.offsite.at) > 50 ? '⚠️ 오래됨' : '정상')) + ' · ' + (b.offsite.at ? new Date(b.offsite.at).toLocaleString('ko-KR') : '?') : '미설정'}`, '',
+    '[백업 · 최근 7일] (✅성공 ❌실패/누락 –기록없음)',
+    ` - DB(일간):    ${dd.db.map((x) => x.date.slice(5) + ' ' + (x.ok ? '✅' : '❌')).join('  ')}`,
+    ` - 계정밖(매일): ${dd.offsite.map((x) => x.date.slice(5) + ' ' + (x.ok === true ? '✅' : x.ok === false ? '❌' : '–')).join('  ')}`, '',
     `[7일 활동] 업로드 ${d.activity.uploads} · 다운로드 ${d.activity.downloads} · 차단 ${d.activity.blocked} · 로그인실패 ${d.activity.loginFailed}`, '',
     '[계정별 사용량]',
     ...d.accounts.map((a) => ` - ${a.displayName}(@${a.username}): ${fmtBytes(a.used)}${a.quota > 0 ? '/' + fmtBytes(a.quota) + ' (' + a.pct + '%)' : ''} · ${a.files}개`),
@@ -179,4 +204,4 @@ async function buildWeekly() {
   return { ...render(data), data };
 }
 
-module.exports = { buildWeekly, collect, render };
+module.exports = { buildWeekly, collect, render, backupDays };
