@@ -6,6 +6,7 @@ const fsp = require('fs/promises');
 const config = require('./config');
 const { query } = require('./db');
 const { trashRetentionDays } = require('./settings');
+const officePdf = require('./officePdf');
 
 async function purgeOldTrash() {
   try {
@@ -14,6 +15,7 @@ async function purgeOldTrash() {
     const files = await query('SELECT id, owner_id, stored_name FROM files WHERE deleted_at IS NOT NULL AND deleted_at < $1', [cutoff]);
     for (const f of files.rows) {
       await fsp.unlink(path.join(config.storageRoot, String(f.owner_id), f.stored_name)).catch(() => {});
+      await officePdf.dropCache(f.stored_name);   // 그 파일의 변환 PDF 캐시도 함께 제거
     }
     if (files.rowCount > 0) await query('DELETE FROM files WHERE id = ANY($1::bigint[])', [files.rows.map((f) => f.id)]);
     // 만료된 폴더 행 삭제
@@ -23,6 +25,7 @@ async function purgeOldTrash() {
     }
     await purgeStaleBundles();
     await purgeStaleChunks();
+    await purgeOrphanPdfCache();
   } catch (err) {
     console.error('[purge] 실패:', err.message);
   }
@@ -64,6 +67,26 @@ async function purgeStaleBundles() {
     if (r.rowCount > 0) console.log(`[purge] 만료 번들 정리: ${r.rowCount}건`);
   } catch (err) {
     console.error('[purge] 번들 정리 실패:', err.message);
+  }
+}
+
+// 고아 PDF 캐시 정리: files 에 더 이상 없는 stored_name 의 _pdfcache/*.pdf 제거
+// (dropCache 를 못 탄 과거 삭제분·크래시 케이스까지 회수 → 무한증가로 볼륨 채우는 것 방지)
+async function purgeOrphanPdfCache() {
+  try {
+    let entries;
+    try { entries = await fsp.readdir(officePdf.CACHE_DIR, { withFileTypes: true }); } catch { return; }
+    const pdfs = entries.filter((e) => e.isFile() && e.name.endsWith('.pdf'));
+    if (!pdfs.length) return;
+    const live = new Set((await query('SELECT stored_name FROM files')).rows.map((r) => r.stored_name));
+    let removed = 0;
+    for (const e of pdfs) {
+      const key = e.name.slice(0, -4); // stored_name (확장자 .pdf 제거)
+      if (!live.has(key)) { await fsp.unlink(path.join(officePdf.CACHE_DIR, e.name)).catch(() => {}); removed++; }
+    }
+    if (removed > 0) console.log(`[purge] 고아 PDF 캐시 정리: ${removed}건`);
+  } catch (err) {
+    console.error('[purge] PDF 캐시 정리 실패:', err.message);
   }
 }
 

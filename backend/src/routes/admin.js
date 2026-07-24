@@ -4,7 +4,7 @@ const express = require('express');
 const path = require('path');
 const fsp = require('fs/promises');
 const config = require('../config');
-const { query, healthStats } = require('../db');
+const { query, healthStats, withTransaction } = require('../db');
 const { hashPassword, encryptSecret, decryptSecret, generatePassword } = require('../crypto');
 const { authenticate, requireAdmin } = require('../middleware/auth');
 const { audit, wrap } = require('../util');
@@ -274,10 +274,13 @@ router.post('/trash/folder/:id/restore', wrap(async (req, res) => {
   }
   await ensureFolder(fo.owner_id, newPath.slice(0, newPath.lastIndexOf('/')) || '/');
   const cut = String(fo.path.length + 1); const oldLike = fo.path + '/%';
-  // 폴더들 복원 + 경로 치환
-  await query(`UPDATE folders SET deleted_at=NULL, path=$4 || substring(path from $5::int) WHERE owner_id=$1 AND deleted_at IS NOT NULL AND (path=$2 OR path LIKE $3)`, [fo.owner_id, fo.path, oldLike, newPath, cut]);
-  // 그 폴더로 삭제됐던 파일들 복원 + 경로 치환 (삭제 시 deleted_with_folder=최상위 폴더 경로로 통일됨)
-  await query(`UPDATE files SET deleted_at=NULL, deleted_with_folder=NULL, folder=$3 || substring(folder from $4::int), updated_at=now() WHERE owner_id=$1 AND deleted_with_folder=$2`, [fo.owner_id, fo.path, newPath, cut]);
+  // 폴더 복원과 그 안 파일 복원을 원자적으로(둘 중 하나만 성공해 split-brain 되지 않도록)
+  await withTransaction(async (client) => {
+    // 폴더들 복원 + 경로 치환
+    await client.query(`UPDATE folders SET deleted_at=NULL, path=$4 || substring(path from $5::int) WHERE owner_id=$1 AND deleted_at IS NOT NULL AND (path=$2 OR path LIKE $3)`, [fo.owner_id, fo.path, oldLike, newPath, cut]);
+    // 그 폴더로 삭제됐던 파일들 복원 + 경로 치환 (삭제 시 deleted_with_folder=최상위 폴더 경로로 통일됨)
+    await client.query(`UPDATE files SET deleted_at=NULL, deleted_with_folder=NULL, folder=$3 || substring(folder from $4::int), updated_at=now() WHERE owner_id=$1 AND deleted_with_folder=$2`, [fo.owner_id, fo.path, newPath, cut]);
+  });
   await audit(req, 'restore_folder', `${fo.path} -> ${newPath}`);
   res.json({ ok: true, path: newPath });
 }));

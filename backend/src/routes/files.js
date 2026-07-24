@@ -14,6 +14,7 @@ const { generateToken, hashPassword } = require('../crypto');
 const filetype = require('../filetype');
 const yara = require('../yara');
 const officePdf = require('../officePdf');
+const { diskUsage } = require('../disk');
 const notify = require('../notify');
 const { isAllowed, allowedLabel, getAllowedExtensions, trashRetentionDays, shareQrEnabled } = require('../settings');
 const QRCode = require('qrcode');
@@ -107,6 +108,20 @@ async function resolveOwner(req, res, next) {
     if (!(await canAccessOwner(req.user, requested))) return res.status(403).json({ error: '해당 계정의 파일에 접근할 수 없습니다.' });
     req.targetOwnerId = Number(requested);
   } else req.targetOwnerId = req.user.id;
+  next();
+}
+
+// 저장 볼륨(=pgdata 공용) 여유공간 가드: 임계치 이하로 떨어지면 새 쓰기를 거절해
+// 디스크 풀로 Postgres 가 죽는 것을 막는다. statfs 실패 시엔 통과(기존 동작 유지).
+const DISK_HEADROOM = 2 * 1024 * 1024 * 1024; // 최소 2GB 여유 확보
+async function diskGate(req, res, next) {
+  try {
+    const { avail, total } = await diskUsage();
+    const headroom = Math.max(DISK_HEADROOM, Math.floor(total * 0.03)); // 2GB 또는 3% 중 큰 값
+    if (total > 0 && avail < headroom) {
+      return res.status(507).json({ error: '서버 저장 공간이 부족합니다. 관리자에게 문의하세요.' });
+    }
+  } catch (_) { /* 측정 실패 → 통과 */ }
   next();
 }
 
@@ -295,22 +310,41 @@ router.get('/', authenticate, wrap(resolveOwner), wrap(async (req, res) => {
   );
   const childPaths = new Set();
   for (const r of rows.rows) { const rest = r.path.slice(prefix.length); if (rest) childPaths.add(prefix + rest.split('/')[0]); }
-  // 각 폴더가 folders 테이블에 존재하도록 백필 후 note/id/크기/등록일 조회
+  const childList = [...childPaths].sort();
+  // N+1 제거: 백필/메타/집계를 각각 한 번의 쿼리로(폴더 수와 무관하게 3쿼리)
   const folders = [];
-  for (const p of [...childPaths].sort()) {
-    await query('INSERT INTO folders (owner_id, path) VALUES ($1,$2) ON CONFLICT (owner_id, path) DO NOTHING', [req.targetOwnerId, p]);
-    const fr = await query('SELECT id, note, note_updated_at, created_at, icon, color, cover_file_id FROM folders WHERE owner_id=$1 AND path=$2', [req.targetOwnerId, p]);
-    const agg = await query(
-      'SELECT COALESCE(SUM(size_bytes),0) AS s, COUNT(*)::int AS c FROM files WHERE owner_id=$1 AND deleted_at IS NULL AND (folder=$2 OR folder LIKE $3)',
-      [req.targetOwnerId, p, p + '/%']
+  if (childList.length) {
+    // 1) 없는 폴더 한 번에 백필
+    await query(
+      'INSERT INTO folders (owner_id, path) SELECT $1, unnest($2::text[]) ON CONFLICT (owner_id, path) DO NOTHING',
+      [req.targetOwnerId, childList]
     );
-    folders.push({
-      id: fr.rows[0]?.id, path: p, name: p.split('/').pop(),
-      note: fr.rows[0]?.note || '', noteUpdatedAt: fr.rows[0]?.note_updated_at || null,
-      createdAt: fr.rows[0]?.created_at || null,
-      icon: fr.rows[0]?.icon || '', color: fr.rows[0]?.color || '', cover: fr.rows[0]?.cover_file_id || null,
-      size: Number(agg.rows[0].s), fileCount: agg.rows[0].c, fav: false,
-    });
+    // 2) 폴더 메타 한 번에
+    const meta = await query(
+      'SELECT id, path, note, note_updated_at, created_at, icon, color, cover_file_id FROM folders WHERE owner_id=$1 AND path = ANY($2::text[])',
+      [req.targetOwnerId, childList]
+    );
+    const metaByPath = new Map(meta.rows.map((r) => [r.path, r]));
+    // 3) 하위 트리 크기/개수 한 번에: 파일 경로에서 prefix 뒤 '첫 세그먼트'로 버킷팅해 GROUP BY
+    const agg = await query(
+      `SELECT $2 || split_part(substr(folder, char_length($2) + 1), '/', 1) AS bucket,
+              COALESCE(SUM(size_bytes),0) AS s, COUNT(*)::int AS c
+       FROM files WHERE owner_id=$1 AND deleted_at IS NULL AND folder LIKE $3
+       GROUP BY 1`,
+      [req.targetOwnerId, prefix, prefix + '%']
+    );
+    const aggByPath = new Map(agg.rows.map((r) => [r.bucket, { s: Number(r.s), c: r.c }]));
+    for (const p of childList) {
+      const fr = metaByPath.get(p) || {};
+      const a = aggByPath.get(p) || { s: 0, c: 0 };
+      folders.push({
+        id: fr.id, path: p, name: p.split('/').pop(),
+        note: fr.note || '', noteUpdatedAt: fr.note_updated_at || null,
+        createdAt: fr.created_at || null,
+        icon: fr.icon || '', color: fr.color || '', cover: fr.cover_file_id || null,
+        size: a.s, fileCount: a.c, fav: false,
+      });
+    }
   }
   const fileList = files.rows.map(fileRow);
   await attachMeta(req.user.id, req.targetOwnerId, fileList, folders);
@@ -318,7 +352,7 @@ router.get('/', authenticate, wrap(resolveOwner), wrap(async (req, res) => {
 }));
 
 // ── 업로드 ──────────
-router.post('/upload', authenticate, wrap(resolveOwner), upload.array('file', 30), wrap(async (req, res) => {
+router.post('/upload', authenticate, wrap(resolveOwner), wrap(diskGate), upload.array('file', 30), wrap(async (req, res) => {
   const folder = normalizeFolder(req.body.folder);
   if (!req.files || req.files.length === 0) return res.status(400).json({ error: '업로드할 파일이 없습니다.' });
   const owner = await query('SELECT quota_bytes, role, upload_conflict FROM users WHERE id=$1', [req.targetOwnerId]);
@@ -410,7 +444,7 @@ router.post('/upload/init', authenticate, wrap(resolveOwner), wrap(async (req, r
 }));
 
 // 청크 수신: 조각 하나를 임시폴더에 저장. 소유자·보안 검사는 완료(complete) 시점에 수행하므로 인증만.
-router.post('/upload/chunk', authenticate, chunkUpload.single('chunk'), wrap(async (req, res) => {
+router.post('/upload/chunk', authenticate, wrap(diskGate), chunkUpload.single('chunk'), wrap(async (req, res) => {
   const uploadId = String(req.body.uploadId || '');
   const index = parseInt(req.body.index, 10);
   if (!UPLOAD_ID_RE.test(uploadId) || !Number.isInteger(index) || index < 0 || index > 100000 || !req.file) {
@@ -424,7 +458,7 @@ router.post('/upload/chunk', authenticate, chunkUpload.single('chunk'), wrap(asy
 }));
 
 // 완료: 조각을 순서대로 합쳐 최종 파일 생성 → 매직바이트·YARA·할당량 검사 후 저장. (단일 업로드와 동일 정책)
-router.post('/upload/complete', authenticate, wrap(resolveOwner), wrap(async (req, res) => {
+router.post('/upload/complete', authenticate, wrap(resolveOwner), wrap(diskGate), wrap(async (req, res) => {
   const uploadId = String(req.body.uploadId || '');
   const totalChunks = parseInt(req.body.totalChunks, 10);
   const folder = normalizeFolder(req.body.folder);
@@ -706,7 +740,7 @@ async function cleanupBundles() {
 }
 
 // 선택 항목을 압축해 번들로 임시 저장 → { bundleId, name, size }
-router.post('/bulk/zip', authenticate, wrap(resolveOwner), wrap(async (req, res) => {
+router.post('/bulk/zip', authenticate, wrap(resolveOwner), wrap(diskGate), wrap(async (req, res) => {
   const owner = req.targetOwnerId;
   const base = normalizeFolder(req.body.folder || '/');
   const ids = (Array.isArray(req.body.ids) ? req.body.ids : []).map(Number).filter(Boolean);
@@ -927,8 +961,11 @@ router.post('/trash/folder/:id(\\d+)/restore', authenticate, wrap(resolveOwner),
   }
   await ensureFolder(fo.owner_id, newPath.slice(0, newPath.lastIndexOf('/')) || '/');
   const cut = String(fo.path.length + 1); const oldLike = fo.path + '/%';
-  await query(`UPDATE folders SET deleted_at=NULL, path=$4 || substring(path from $5::int) WHERE owner_id=$1 AND deleted_at IS NOT NULL AND (path=$2 OR path LIKE $3)`, [fo.owner_id, fo.path, oldLike, newPath, cut]);
-  await query(`UPDATE files SET deleted_at=NULL, deleted_with_folder=NULL, folder=$3 || substring(folder from $4::int), updated_at=now() WHERE owner_id=$1 AND deleted_with_folder=$2`, [fo.owner_id, fo.path, newPath, cut]);
+  // 폴더 복원과 그 안 파일 복원을 원자적으로(둘 중 하나만 성공해 split-brain 되지 않도록)
+  await withTransaction(async (client) => {
+    await client.query(`UPDATE folders SET deleted_at=NULL, path=$4 || substring(path from $5::int) WHERE owner_id=$1 AND deleted_at IS NOT NULL AND (path=$2 OR path LIKE $3)`, [fo.owner_id, fo.path, oldLike, newPath, cut]);
+    await client.query(`UPDATE files SET deleted_at=NULL, deleted_with_folder=NULL, folder=$3 || substring(folder from $4::int), updated_at=now() WHERE owner_id=$1 AND deleted_with_folder=$2`, [fo.owner_id, fo.path, newPath, cut]);
+  });
   await audit(req, 'self_restore_folder', `${fo.path} -> ${newPath}`);
   res.json({ ok: true, path: newPath });
 }));
