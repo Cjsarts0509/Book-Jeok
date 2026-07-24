@@ -624,36 +624,53 @@ const Admin = (() => {
     view.innerHTML = '<div class="empty"><div class="big">⏳</div>확인 중…</div>';
     const ago = (iso) => { if (!iso) return '기록 없음'; const mi = Math.floor((Date.now() - new Date(iso).getTime()) / 60000); if (mi < 1) return '방금'; if (mi < 60) return mi + '분 전'; if (mi < 1440) return Math.floor(mi / 60) + '시간 전'; return Math.floor(mi / 1440) + '일 전'; };
     const fresh = (iso, hrs) => iso && (Date.now() - new Date(iso).getTime()) < hrs * 3600000;
+    const when = (iso) => (iso ? new Date(iso).toLocaleString('ko-KR') : '-');
     try {
       const s = await API.backupStatus();
-      const db = s.db, files = s.files;
+      const { db, offsite, dbList = [] } = s;
       const dbDot = db ? (fresh(db.at, 26) ? 'ok' : 'warn') : 'bad';
-      const fDot = files ? (fresh(files.at, 8 * 24) ? 'ok' : 'warn') : 'bad';
+      const oDot = offsite ? (fresh(offsite.at, 50) ? 'ok' : 'warn') : 'bad';   // 오프사이트=매일 → 50h 이내면 정상
+      const dbRows = dbList.length ? dbList.map((x) => `<tr>
+          <td style="white-space:nowrap">${when(x.at)}</td>
+          <td><span class="muted" style="font-family:monospace;font-size:12px">${UI.escapeHtml(x.name)}</span></td>
+          <td style="text-align:right">${x.size ? UI.bytes(x.size) : '-'}</td>
+          <td style="text-align:right"><button class="btn btn-ghost btn-sm" data-restore="${UI.escapeHtml(x.name)}">↩ 이 백업으로 복구</button></td>
+        </tr>`).join('') : '<tr><td colspan="4" class="muted">목록 없음 — 백업이 한 번 실행되면 표시됩니다.</td></tr>';
+      const remoteTxt = db ? (db.remote === true ? '✅ 성공' : db.remote === false ? '⚠️ 실패' : '— 미설정') : '-';
+
       view.innerHTML = `
         <div class="stat-grid">
           <div class="stat"><div class="k">DB 백업 (매일)</div><div class="v"><span class="dot ${dbDot}"></span>${ago(db && db.at)}</div></div>
-          <div class="stat"><div class="k">원격 업로드</div><div class="v">${db ? (db.remote ? '✅ 성공' : '⚠️ 실패') : '-'}</div></div>
-          <div class="stat"><div class="k">파일 백업 (주간)</div><div class="v"><span class="dot ${fDot}"></span>${ago(files && files.at)}</div></div>
-          <div class="stat"><div class="k">로컬 보관</div><div class="v">${db ? (db.localCount || 0) + '개' : '-'}</div></div>
+          <div class="stat"><div class="k">계정 밖 · 구글드라이브 (매일)</div><div class="v">${offsite ? `<span class="dot ${oDot}"></span>${ago(offsite.at)}` : '<span class="muted">미설정</span>'}</div></div>
+          <div class="stat"><div class="k">로컬 DB 보관</div><div class="v">${db ? (db.localCount || 0) + '개' : '-'}</div></div>
+          <div class="stat"><div class="k">DB 오라클 오브젝트</div><div class="v">${remoteTxt}</div></div>
         </div>
         <div class="card">
-          <h3 style="margin-bottom:10px">최근 DB 백업</h3>
-          ${db ? `<div class="table-wrap"><table><tbody>
-            <tr><td>시각</td><td>${new Date(db.at).toLocaleString('ko-KR')}</td></tr>
-            <tr><td>파일</td><td><span class="muted" style="font-family:monospace;font-size:12px">${UI.escapeHtml(db.file || '-')}</span></td></tr>
-            <tr><td>크기</td><td>${db.size ? UI.bytes(db.size) : '-'}</td></tr>
-            <tr><td>원격(오브젝트 스토리지)</td><td>${db.remote ? '업로드 성공' : '업로드 실패 또는 미설정'}</td></tr>
-          </tbody></table></div>` : '<p class="muted">아직 백업 상태 기록이 없습니다. 백업 스크립트가 한 번 실행되면 여기에 표시됩니다.</p>'}
+          <h3 style="margin-bottom:10px">🗄️ 일간 DB 백업 <span class="muted" style="font-size:13px;font-weight:400">· 복구할 백업을 고르세요</span></h3>
+          <div class="table-wrap"><table><thead><tr><th>시각</th><th>파일</th><th style="text-align:right">크기</th><th></th></tr></thead><tbody>${dbRows}</tbody></table></div>
         </div>
         <div class="card" style="margin-top:14px">
-          <h3 style="margin-bottom:8px">복원 방법</h3>
-          <p style="font-size:13px;color:var(--text-muted);margin:0 0 8px">안전을 위해 <b>복원은 서버 터미널</b>에서 진행합니다(웹 복원 버튼은 사고 위험이 커서 제공하지 않습니다). 아래 스크립트가 백업 목록을 보여주고, 확인 후 복원합니다(복원 전 현재 DB도 자동 백업):</p>
-          <pre class="pp-text" style="user-select:all;white-space:pre-wrap">cd ~/Book-Jeok && ./scripts/restore.sh</pre>
-          <p style="font-size:12px;color:var(--text-muted);margin-top:8px">※ DB(메타데이터)만 복원됩니다. 파일 15GB는 OCI 볼륨 스냅샷/백업에서 별도로 복원합니다.</p>
+          <h3 style="margin-bottom:8px">🛟 계정 밖 백업 (구글 드라이브 · 매일)</h3>
+          <p style="font-size:13px;color:var(--text-muted);margin:0 0 8px">DB와 <b>파일 전체</b>를 매일 구글 드라이브로 올립니다(오라클 계정이 통째로 사라져도 복구 가능). 마지막 실행: <b>${offsite ? when(offsite.at) + (offsite.ok === false ? ' · ⚠️ 실패' : ' · ✅ 정상') : '기록 없음(미설정)'}</b></p>
+          <p class="muted" style="font-size:12px;margin:0">파일 복원은 드라이브에서 되받습니다(터미널): <code style="font-family:monospace">rclone copy gdrive:bookjeok-backup/storage /mnt/bookjeok-data/storage</code></p>
         </div>`;
+      view.querySelectorAll('[data-restore]').forEach((b) => b.addEventListener('click', () => restoreCmdModal(b.dataset.restore)));
     } catch (err) {
       view.innerHTML = `<div class="card"><p style="color:var(--danger)">${UI.escapeHtml(err.message)}</p></div>`;
     }
+  }
+
+  // 선택한 DB 백업으로 복구 — 웹에서 직접 실행하지 않고(자기 DB 덮어쓰기 위험), 그 백업 전용 명령을 뽑아준다.
+  function restoreCmdModal(name) {
+    const cmd = `cd ~/Book-Jeok && BOOKJEOK_RESTORE_FILE=${name} ./scripts/restore.sh`;
+    const m = UI.modal(`<h3>↩ DB 복구</h3>
+      <p style="font-size:13px;color:var(--text-muted);margin:0 0 6px">선택: <b style="font-family:monospace">${UI.escapeHtml(name)}</b></p>
+      <p style="font-size:13px;color:var(--text-muted);margin:0 0 8px">안전을 위해 <b>서버 터미널</b>에서 아래 명령을 실행하세요. 스크립트가 <b>복원 동안 API를 자동 정지</b>하고, <b>RESTORE</b> 입력 확인 후 복원하며, <b>복원 전 현재 DB도 자동 백업</b>합니다.</p>
+      <pre class="pp-text" style="user-select:all;white-space:pre-wrap">${UI.escapeHtml(cmd)}</pre>
+      <p style="font-size:12px;color:var(--text-muted);margin-top:8px">※ DB(메타데이터)만 복원됩니다. 파일은 OCI 볼륨 백업에서 별도 복원.</p>
+      <div class="modal-actions"><button class="btn btn-ghost" id="cp">📋 명령 복사</button><button class="btn btn-primary" id="ok">닫기</button></div>`);
+    m.q('#ok').addEventListener('click', m.close);
+    m.q('#cp').addEventListener('click', () => { try { navigator.clipboard.writeText(cmd); UI.toast('명령을 복사했습니다', 'success'); } catch (_) { UI.toast('복사 실패 — 직접 선택해 복사하세요', 'error'); } });
   }
 
   // ── 감사 로그 ──────────────────────────

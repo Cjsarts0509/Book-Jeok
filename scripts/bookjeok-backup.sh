@@ -18,7 +18,7 @@ API_CONTAINER="${API_CONTAINER:-bookjeok-api}"
 STAMP="$(date +%F_%H%M)"
 NAME="bookjeok-db-${STAMP}.sql.gz"
 FILE="${LOCAL_DIR}/${NAME}"
-REMOTE=false
+REMOTE=null   # PAR 미설정=null · 설정했는데 실패=false · 성공=true
 
 mkdir -p "$LOCAL_DIR"
 
@@ -29,6 +29,7 @@ echo "$(date '+%F %T') 덤프 생성: $NAME ($(du -h "$FILE" | cut -f1))"
 
 # 2) 오브젝트 스토리지 업로드(PAR 설정 시)
 if [ -n "${BOOKJEOK_BACKUP_PAR:-}" ]; then
+  REMOTE=false
   if curl -fsS --retry 3 --retry-delay 5 -X PUT -T "$FILE" "${BOOKJEOK_BACKUP_PAR}${NAME}"; then
     REMOTE=true; echo "$(date '+%F %T') 업로드 완료 → 오브젝트 스토리지: $NAME"
   else
@@ -44,6 +45,16 @@ LOCALCOUNT="$(ls -1 "$LOCAL_DIR"/bookjeok-db-*.sql.gz 2>/dev/null | wc -l | tr -
 TS="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 STATUS=$(printf '{"at":"%s","file":"%s","size":%s,"remote":%s,"localCount":%s}' "$TS" "$NAME" "$SIZE_BYTES" "$REMOTE" "$LOCALCOUNT")
 printf '%s' "$STATUS" | docker exec -i "$API_CONTAINER" sh -c 'mkdir -p /data/storage/_backup-status && cat > /data/storage/_backup-status/db.json' 2>/dev/null || true
+
+# 4-1) 로컬 DB 백업 '목록'도 기록 → 관리자 백업탭에서 복구 대상 선택용 (최신순)
+LIST="["; FIRST=1
+for f in $(ls -1 "$LOCAL_DIR"/bookjeok-db-*.sql.gz 2>/dev/null | sort -r); do
+  n=$(basename "$f"); sz=$(stat -c%s "$f" 2>/dev/null || echo 0); ts=$(date -u -d "@$(stat -c%Y "$f")" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo "")
+  [ "$FIRST" -eq 0 ] && LIST="$LIST,"; FIRST=0
+  LIST="$LIST{\"name\":\"$n\",\"size\":$sz,\"at\":\"$ts\"}"
+done
+LIST="$LIST]"
+printf '%s' "$LIST" | docker exec -i "$API_CONTAINER" sh -c 'cat > /data/storage/_backup-status/db-list.json' 2>/dev/null || true
 
 echo "$(date '+%F %T') 완료. 로컬 보관: ${LOCALCOUNT}개"
 

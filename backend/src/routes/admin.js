@@ -217,7 +217,10 @@ router.get('/db-status', wrap(async (req, res) => {
 router.get('/backup-status', wrap(async (req, res) => {
   const dir = path.join(config.storageRoot, '_backup-status');
   const readJson = async (name) => { try { return JSON.parse(await fsp.readFile(path.join(dir, name), 'utf8')); } catch { return null; } };
-  res.json({ db: await readJson('db.json'), files: await readJson('files.json') });
+  res.json({
+    db: await readJson('db.json'), files: await readJson('files.json'), offsite: await readJson('offsite.json'),
+    dbList: (await readJson('db-list.json')) || [], filesList: (await readJson('files-list.json')) || [],
+  });
 }));
 
 // GET /api/admin/audit  감사 로그

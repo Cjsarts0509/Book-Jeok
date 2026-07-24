@@ -220,7 +220,9 @@ chmod +x ~/Book-Jeok/scripts/bookjeok-backup.sh
 ```
 (로컬은 `~/bookjeok-backups`에 14일 보관, 상태는 관리자 '백업' 탭에 표시)
 
-### 9-2. 파일 볼륨 주간 증분 백업 → OCI CLI
+### 9-2. 파일 볼륨 백업 → OCI CLI  ⚠️ 선택(무료 한도 주의)
+> **주의**: OCI 볼륨 백업은 오브젝트 스토리지를 차지합니다. **Always Free는 20GB 한도**라, 저장소가 커지면 넘어가 과금될 수 있습니다.
+> 파일은 아래 **9-6 계정 밖(구글 드라이브) 매일 백업**이 이미 커버하므로, **볼륨 백업은 안 써도 됩니다**(권장: 미사용 또는 저장소가 작을 때만).
 ```bash
 # OCI CLI 설치 (~/bin/oci 로)
 bash -c "$(curl -L https://raw.githubusercontent.com/oracle/oci-cli/master/scripts/install/install.sh)"
@@ -238,12 +240,15 @@ chmod +x ~/Book-Jeok/scripts/bookjeok-files-backup.sh
 crontab -e
 ```
 ```cron
-# DB 매일 03:00
-0 3 * * *  /home/ubuntu/Book-Jeok/scripts/bookjeok-backup.sh       >> /home/ubuntu/bookjeok-backup.log 2>&1
-# 파일 볼륨 매주 일요일 04:00
-0 4 * * 0  /home/ubuntu/Book-Jeok/scripts/bookjeok-files-backup.sh >> /home/ubuntu/bookjeok-files-backup.log 2>&1
+# DB 매일 03:00 (로컬 + 선택적 오브젝트스토리지)
+0 3 * * *  /home/ubuntu/Book-Jeok/scripts/bookjeok-backup.sh   >> /home/ubuntu/bookjeok-backup.log 2>&1
+# 계정 밖(구글 드라이브) 매일 05:00 — DB + 파일 전체 (권장 주 백업)
+0 5 * * *  /home/ubuntu/Book-Jeok/scripts/bookjeok-offsite.sh  >> /home/ubuntu/bookjeok-offsite.log 2>&1
+# (선택) 파일 볼륨 백업 — Always Free 20GB 한도 주의. 안 쓰면 이 줄은 넣지 않는다.
+# 0 4 * * 0  /home/ubuntu/Book-Jeok/scripts/bookjeok-files-backup.sh >> /home/ubuntu/bookjeok-files-backup.log 2>&1
 ```
-- **복원**은 터미널에서 `~/Book-Jeok/scripts/restore.sh` (백업 목록에서 선택, 복원 전 자동 백업 + **복원 동안 API 자동 정지/재시작**).
+- **복원**은 터미널에서 `~/Book-Jeok/scripts/restore.sh` (백업 목록에서 선택, 복원 전 자동 백업 + **복원 동안 API 자동 정지/재시작**). 특정 백업을 바로: `BOOKJEOK_RESTORE_FILE=<파일명> ./scripts/restore.sh`
+- 파일 복원(구글 드라이브에서): `rclone copy gdrive:bookjeok-backup/storage /mnt/bookjeok-data/storage`
 
 ### 9-4. 백업 실패 알림 (강력 권장)
 백업이 조용히 실패하면 정작 복원할 때 발견합니다. **dead-man's-switch** 방식으로 감시하세요.

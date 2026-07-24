@@ -69,21 +69,14 @@ async function collect() {
   if (blocked > 0) anomalies.push(`업로드 차단 ${blocked}건 (형식위장/악성패턴) — 아래 계정별 실패 이력 참고`);
   if ((acts.login_failed || 0) >= 10) anomalies.push(`로그인 실패 ${acts.login_failed}건 — 비정상 접근 가능성 점검`);
 
-  // 백업 상태 → 실패/오래됨이면 특이사항에 올린다
+  // 백업 상태 → 실패/오래됨이면 특이사항에 올린다.
+  // 백업 방침: DB 일간(로컬+선택적 오브젝트) + 계정 밖(구글 드라이브) 매일이 DB·파일의 주 오프사이트.
   const backup = readBackupStatus();
-  if (!backup.db) anomalies.push('DB 백업 기록이 없습니다 — 백업 스케줄 확인 필요');
-  else {
-    if (ageHours(backup.db.at) > 48) anomalies.push(`DB 백업이 ${Math.floor(ageHours(backup.db.at) / 24)}일째 갱신 안 됨 — 확인 필요`);
-    if (backup.db.remote === false) anomalies.push('DB 오프사이트(오브젝트스토리지) 업로드 실패 — 로컬 백업만 존재');
-  }
-  if (!backup.files) anomalies.push('파일 볼륨 백업 기록이 없습니다 — 스케줄 확인 필요');
-  else if (backup.files.ok === false) anomalies.push('파일 볼륨 백업 실패 — 확인 필요');
-  else if (ageHours(backup.files.at) > 9 * 24) anomalies.push(`파일 볼륨 백업이 ${Math.floor(ageHours(backup.files.at) / 24)}일째 갱신 안 됨`);
-  // 계정 밖(오프사이트)은 설정된 경우(기록 존재)에만 검사
-  if (backup.offsite) {
-    if (backup.offsite.ok === false) anomalies.push('계정 밖(오프사이트) 백업 실패 — 확인 필요');
-    else if (ageHours(backup.offsite.at) > 35 * 24) anomalies.push(`계정 밖 백업이 ${Math.floor(ageHours(backup.offsite.at) / 24)}일째 갱신 안 됨`);
-  }
+  if (!backup.db) anomalies.push('DB 백업 기록이 없습니다 — 스케줄 확인 필요');
+  else if (ageHours(backup.db.at) > 48) anomalies.push(`DB 백업이 ${Math.floor(ageHours(backup.db.at) / 24)}일째 갱신 안 됨 — 확인 필요`);
+  if (!backup.offsite) anomalies.push('계정 밖(구글 드라이브) 백업 기록이 없습니다 — 설정/스케줄 확인');
+  else if (backup.offsite.ok === false) anomalies.push('계정 밖 백업 실패 — 확인 필요');
+  else if (ageHours(backup.offsite.at) > 50) anomalies.push(`계정 밖 백업이 ${Math.floor(ageHours(backup.offsite.at) / 24)}일째 갱신 안 됨`);
 
   return {
     backup,
@@ -134,9 +127,8 @@ function render(d) {
   };
   const b = d.backup || {};
   const backupTable = `<table style="width:100%;border-collapse:collapse;font-size:14px">
-    ${bkRow('DB (일간)', b.db, 48, b.db && b.db.remote === false)}
-    ${bkRow('파일 볼륨 (주간)', b.files, 9 * 24)}
-    ${b.offsite ? bkRow('계정 밖 (오프사이트)', b.offsite, 35 * 24) : '<tr><td style="padding:4px 8px;color:#888">계정 밖(오프사이트)</td><td style="padding:4px 8px;color:#888">미설정</td><td></td></tr>'}
+    ${bkRow('DB (일간)', b.db, 48)}
+    ${b.offsite ? bkRow('계정 밖 · 구글드라이브 (매일)', b.offsite, 50) : '<tr><td style="padding:4px 8px;color:#EA4B54">계정 밖(구글 드라이브)</td><td style="padding:4px 8px;color:#EA4B54">미설정</td><td></td></tr>'}
   </table>`;
 
   const html = `<div style="font-family:-apple-system,'Malgun Gothic',sans-serif;max-width:720px;margin:0 auto;color:#222">
@@ -172,9 +164,8 @@ function render(d) {
     '[특이사항]', ...(d.anomalies.length ? d.anomalies.map((a) => ' - ' + a) : [' - 없음']), '',
     `[디스크] 사용 ${fmtBytes(s.used)}/${fmtBytes(s.total)} (${s.usedPct}%), 할당 ${fmtBytes(s.alloc)} (${s.allocPct}%), 가능 ${fmtBytes(s.available)}`, '',
     '[백업]',
-    ` - DB(일간): ${b.db ? (b.db.remote === false ? '⚠️ 오프사이트 업로드 실패' : (ageHours(b.db.at) > 48 ? '⚠️ 오래됨' : '정상')) + ' · ' + (b.db.at ? new Date(b.db.at).toLocaleString('ko-KR') : '?') : '기록 없음'}`,
-    ` - 파일볼륨(주간): ${b.files ? (b.files.ok === false ? '⚠️ 실패' : (ageHours(b.files.at) > 9 * 24 ? '⚠️ 오래됨' : '정상')) + ' · ' + (b.files.at ? new Date(b.files.at).toLocaleString('ko-KR') : '?') : '기록 없음'}`,
-    ` - 계정밖(오프사이트): ${b.offsite ? (b.offsite.ok === false ? '⚠️ 실패' : (ageHours(b.offsite.at) > 35 * 24 ? '⚠️ 오래됨' : '정상')) + ' · ' + (b.offsite.at ? new Date(b.offsite.at).toLocaleString('ko-KR') : '?') : '미설정'}`, '',
+    ` - DB(일간): ${b.db ? (ageHours(b.db.at) > 48 ? '⚠️ 오래됨' : '정상') + ' · ' + (b.db.at ? new Date(b.db.at).toLocaleString('ko-KR') : '?') : '기록 없음'}`,
+    ` - 계정밖(구글드라이브,매일): ${b.offsite ? (b.offsite.ok === false ? '⚠️ 실패' : (ageHours(b.offsite.at) > 50 ? '⚠️ 오래됨' : '정상')) + ' · ' + (b.offsite.at ? new Date(b.offsite.at).toLocaleString('ko-KR') : '?') : '미설정'}`, '',
     `[7일 활동] 업로드 ${d.activity.uploads} · 다운로드 ${d.activity.downloads} · 차단 ${d.activity.blocked} · 로그인실패 ${d.activity.loginFailed}`, '',
     '[계정별 사용량]',
     ...d.accounts.map((a) => ` - ${a.displayName}(@${a.username}): ${fmtBytes(a.used)}${a.quota > 0 ? '/' + fmtBytes(a.quota) + ' (' + a.pct + '%)' : ''} · ${a.files}개`),

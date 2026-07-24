@@ -44,4 +44,11 @@ for id in $OLD; do
   $OCI bv backup delete --volume-backup-id "$id" --force >/dev/null 2>&1 && echo "  오래된 백업 삭제: $id"
 done
 echo "$(date '+%F %T') 정리 완료"
+
+# 파일 볼륨 백업 '목록' 기록 → 관리자 백업탭 표시용(최신순)
+FLIST=$($OCI bv backup list --compartment-id "$COMPARTMENT" --volume-id "$VOL" --all \
+  --query "sort_by(data[?starts_with(\"display-name\",'bookjeok-files-')], &\"time-created\")[::-1].{name:\"display-name\",state:\"lifecycle-state\",at:\"time-created\"}" \
+  2>/dev/null || echo "[]")
+printf '%s' "$FLIST" | docker exec -i "$API_CONTAINER" sh -c 'cat > /data/storage/_backup-status/files-list.json' 2>/dev/null || true
+
 hc            # 성공 핑

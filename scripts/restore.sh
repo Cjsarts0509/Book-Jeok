@@ -10,17 +10,23 @@ DB_USER="${DB_USER:-bookjeok}"
 DB_NAME="${DB_NAME:-bookjeok}"
 
 echo "=== 북적북적 DB 복원 ==="
-mapfile -t files < <(ls -1t "$DIR"/bookjeok-db-*.sql.gz 2>/dev/null || true)
-if [ "${#files[@]}" -eq 0 ]; then echo "백업 파일이 없습니다: $DIR"; exit 1; fi
-
-echo "복원 가능한 백업(최신순):"
-for i in "${!files[@]}"; do
-  printf "  [%d] %s  (%s)\n" "$i" "$(basename "${files[$i]}")" "$(du -h "${files[$i]}" | cut -f1)"
-done
-echo
-read -rp "복원할 백업 번호: " idx
-[[ "$idx" =~ ^[0-9]+$ ]] && [ "$idx" -lt "${#files[@]}" ] || { echo "잘못된 번호입니다."; exit 1; }
-SEL="${files[$idx]}"
+# 특정 백업을 바로 지정(관리자 백업탭이 뽑아주는 명령):  BOOKJEOK_RESTORE_FILE=<파일명> ./restore.sh
+if [ -n "${BOOKJEOK_RESTORE_FILE:-}" ]; then
+  SEL="$DIR/${BOOKJEOK_RESTORE_FILE##*/}"      # basename 만 사용(경로 조작 방지)
+  [ -f "$SEL" ] || { echo "지정한 백업이 없습니다: $SEL"; exit 1; }
+  echo "지정된 백업: $(basename "$SEL")  ($(du -h "$SEL" | cut -f1))"
+else
+  mapfile -t files < <(ls -1t "$DIR"/bookjeok-db-*.sql.gz 2>/dev/null || true)
+  if [ "${#files[@]}" -eq 0 ]; then echo "백업 파일이 없습니다: $DIR"; exit 1; fi
+  echo "복원 가능한 백업(최신순):"
+  for i in "${!files[@]}"; do
+    printf "  [%d] %s  (%s)\n" "$i" "$(basename "${files[$i]}")" "$(du -h "${files[$i]}" | cut -f1)"
+  done
+  echo
+  read -rp "복원할 백업 번호: " idx
+  [[ "$idx" =~ ^[0-9]+$ ]] && [ "$idx" -lt "${#files[@]}" ] || { echo "잘못된 번호입니다."; exit 1; }
+  SEL="${files[$idx]}"
+fi
 
 echo
 echo "⚠️  현재 DB('$DB_NAME')를 아래 백업으로 완전히 덮어씁니다. 이 백업 이후의 변경분은 사라집니다."
