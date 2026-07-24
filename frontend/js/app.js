@@ -718,7 +718,7 @@ const App = (() => {
     // 확장자 필터
     const efb = document.getElementById('extfilter-btn'), panel = document.getElementById('extfilter-panel');
     efb.addEventListener('click', (e) => { e.stopPropagation(); if (panel.classList.contains('hidden')) buildExtFilterPanel(); panel.classList.toggle('hidden'); });
-    document.addEventListener('click', (e) => { if (!e.target.closest('#extfilter')) panel.classList.add('hidden'); });
+    // 바깥 클릭 시 패널 닫기 핸들러는 setupGlobal 에서 '한 번만' 위임 등록(렌더마다 누적 방지)
   }
 
   // ── 확장자·즐겨찾기·태그 필터 ──────────────────────────
@@ -843,6 +843,11 @@ const App = (() => {
     const touchSA = () => { try { const s = saSessionLoad(); if (s && !s.closed && Array.isArray(s.disc) && s.disc.length) saSessionSave({ at: Date.now() }); } catch (_) {} };
     document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') touchSA(); });
     window.addEventListener('pagehide', touchSA);
+    // 확장자 필터 패널: 바깥 클릭 시 닫기(위임 · 한 번만 등록 → 렌더마다 리스너 누적 방지)
+    document.addEventListener('click', (e) => {
+      const panel = document.getElementById('extfilter-panel');
+      if (panel && !panel.classList.contains('hidden') && !e.target.closest('#extfilter')) panel.classList.add('hidden');
+    });
     let dragDepth = 0;
     const overlay = () => document.getElementById('drop-overlay');
     const hasFiles = (e) => Array.from(e.dataTransfer?.types || []).includes('Files');

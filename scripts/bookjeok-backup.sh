@@ -5,6 +5,13 @@ set -euo pipefail
 
 [ -f "$HOME/.bookjeok-backup.env" ] && . "$HOME/.bookjeok-backup.env"
 
+# 백업 모니터링(선택): BOOKJEOK_HC_URL 에 dead-man's-switch/웹훅 URL(예: healthchecks.io) 설정 시
+#  시작(/start)·성공·실패(/fail)를 핑한다. 성공 핑이 예정대로 안 오면 모니터링 서비스가 알림.
+HC_URL="${BOOKJEOK_HC_URL:-}"
+hc() { [ -n "$HC_URL" ] && curl -fsS -m 10 --retry 2 "${HC_URL}${1:-}" >/dev/null 2>&1 || true; }
+trap 'hc /fail' ERR                 # 덤프 등 예기치 못한 실패 시 실패 핑
+hc /start
+
 LOCAL_DIR="$HOME/bookjeok-backups"
 KEEP_DAYS=14
 API_CONTAINER="${API_CONTAINER:-bookjeok-api}"
@@ -39,3 +46,11 @@ STATUS=$(printf '{"at":"%s","file":"%s","size":%s,"remote":%s,"localCount":%s}' 
 printf '%s' "$STATUS" | docker exec -i "$API_CONTAINER" sh -c 'mkdir -p /data/storage/_backup-status && cat > /data/storage/_backup-status/db.json' 2>/dev/null || true
 
 echo "$(date '+%F %T') 완료. 로컬 보관: ${LOCALCOUNT}개"
+
+# 5) 모니터링 핑: PAR 설정했는데 오프사이트 업로드가 실패했으면 '실패'로 알린다(로컬만으론 반쪽 백업)
+if [ -n "${BOOKJEOK_BACKUP_PAR:-}" ] && [ "$REMOTE" != true ]; then
+  echo "$(date '+%F %T') [경고] 오프사이트 업로드 실패 → 모니터링 알림(/fail)" >&2
+  hc /fail
+else
+  hc            # 성공 핑
+fi

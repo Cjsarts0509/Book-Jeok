@@ -8,6 +8,7 @@ const cors = require('cors');
 const cookieParser = require('cookie-parser');
 const rateLimit = require('express-rate-limit');
 const config = require('./config');
+const { rateKey } = require('./util');
 
 const app = express();
 app.set('trust proxy', 1); // Cloudflare / nginx 프록시 뒤에서 실제 IP 인식
@@ -31,12 +32,13 @@ app.use(express.json({ limit: '16mb' })); // 공지 리치텍스트(이미지 �
 app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 app.use(cookieParser());
 
-// 전역 레이트 리밋
+// 전역 레이트 리밋 (실제 클라이언트 IP 기준 — 터널 뒤 전역버킷화 방지)
 app.use('/api/', rateLimit({
   windowMs: 60 * 1000,
   max: 300,
   standardHeaders: true,
   legacyHeaders: false,
+  keyGenerator: rateKey,
 }));
 
 // ── 라우트 ──────────────────────────────────────────

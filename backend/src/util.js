@@ -11,6 +11,10 @@ function clientIp(req) {
   );
 }
 
+// 레이트리밋 키: 감사/이상로그와 동일한 '실제 클라이언트 IP'(cf-connecting-ip) 기준.
+// 이게 없으면 터널/프록시 홉의 req.ip 로 폴백(그래도 전역버킷화보다는 나음).
+function rateKey(req) { return clientIp(req) || req.ip || 'unknown'; }
+
 async function audit(req, action, detail = '') {
   try {
     await query(
@@ -42,4 +46,4 @@ async function canAccessOwner(requester, ownerId) {
   return false;
 }
 
-module.exports = { clientIp, audit, wrap, canAccessOwner };
+module.exports = { clientIp, rateKey, audit, wrap, canAccessOwner };

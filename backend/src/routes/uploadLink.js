@@ -12,7 +12,7 @@ const crypto = require('crypto');
 const rateLimit = require('express-rate-limit');
 const config = require('../config');
 const { query } = require('../db');
-const { wrap } = require('../util');
+const { wrap, rateKey } = require('../util');
 const { verifyPassword } = require('../crypto');
 const { isAllowed, allowedLabel, getAllowedExtensions } = require('../settings');
 const filetype = require('../filetype');
@@ -63,9 +63,9 @@ router.get('/:token', wrap(async (req, res) => {
   });
 }));
 
-const uploadLimiter = rateLimit({ windowMs: 10 * 60 * 1000, max: 40, standardHeaders: true, legacyHeaders: false, message: { error: '요청이 너무 많습니다. 잠시 후 다시 시도하세요.' } });
+const uploadLimiter = rateLimit({ windowMs: 10 * 60 * 1000, max: 40, standardHeaders: true, legacyHeaders: false, keyGenerator: rateKey, message: { error: '요청이 너무 많습니다. 잠시 후 다시 시도하세요.' } });
 // 비밀번호 무차별 대입 방어: 실패(4xx/5xx)만 카운트
-const attemptLimiter = rateLimit({ windowMs: 10 * 60 * 1000, max: 15, skipSuccessfulRequests: true, standardHeaders: true, legacyHeaders: false, message: { error: '시도가 너무 많습니다. 잠시 후 다시 시도하세요.' } });
+const attemptLimiter = rateLimit({ windowMs: 10 * 60 * 1000, max: 15, skipSuccessfulRequests: true, standardHeaders: true, legacyHeaders: false, keyGenerator: rateKey, message: { error: '시도가 너무 많습니다. 잠시 후 다시 시도하세요.' } });
 
 // 검증(존재·상태·비밀번호)을 multer 이전에 수행
 async function gate(req, res, next) {

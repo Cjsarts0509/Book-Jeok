@@ -243,7 +243,19 @@ crontab -e
 # 파일 볼륨 매주 일요일 04:00
 0 4 * * 0  /home/ubuntu/Book-Jeok/scripts/bookjeok-files-backup.sh >> /home/ubuntu/bookjeok-files-backup.log 2>&1
 ```
-- **복원**은 터미널에서 `~/Book-Jeok/scripts/restore.sh` (백업 목록에서 선택, 복원 전 자동 백업).
+- **복원**은 터미널에서 `~/Book-Jeok/scripts/restore.sh` (백업 목록에서 선택, 복원 전 자동 백업 + **복원 동안 API 자동 정지/재시작**).
+
+### 9-4. 백업 실패 알림 (강력 권장)
+백업이 조용히 실패하면 정작 복원할 때 발견합니다. **dead-man's-switch** 방식으로 감시하세요.
+1. 무료 모니터링(예: [healthchecks.io](https://healthchecks.io))에서 체크를 2개 만듭니다(DB 일간 / 파일 주간). 각 체크의 **ping URL**을 복사.
+2. `~/.bookjeok-backup.env` 에 추가(두 스크립트가 함께 읽습니다):
+   ```bash
+   BOOKJEOK_HC_URL="https://hc-ping.com/<your-uuid>"
+   ```
+   (스크립트가 시작 시 `/start`, 성공 시 그대로, 실패 시 `/fail` 을 핑합니다. **성공 핑이 예정 시각에 안 오면 서비스가 이메일/푸시로 알림**.)
+   - 두 스크립트에 서로 다른 URL을 쓰려면 각 스크립트 실행 앞에 `BOOKJEOK_HC_URL=... ` 를 붙여 cron에 넣으면 됩니다.
+   - 미설정 시 아무 동작 안 함(기존과 동일). Slack/Discord 웹훅 등 다른 URL도 사용 가능.
+> 특히 **PAR(오프사이트 업로드) 실패**는 로컬 백업만 성공해도 `/fail` 로 알립니다(반쪽 백업 방지). PAR은 만료되니 만료 전 갱신도 잊지 마세요.
 
 ---
 

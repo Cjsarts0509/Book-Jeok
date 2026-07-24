@@ -5,6 +5,7 @@ set -euo pipefail
 
 DIR="${BOOKJEOK_BACKUP_DIR:-$HOME/bookjeok-backups}"
 DB_CONTAINER="${DB_CONTAINER:-bookjeok-db}"
+API_CONTAINER="${API_CONTAINER:-bookjeok-api}"
 DB_USER="${DB_USER:-bookjeok}"
 DB_NAME="${DB_NAME:-bookjeok}"
 
@@ -33,9 +34,19 @@ PRE="$DIR/bookjeok-db-pre-restore-$(date +%F_%H%M).sql.gz"
 echo "→ 복원 전 현재 DB 백업 생성: $(basename "$PRE")"
 docker exec "$DB_CONTAINER" pg_dump -U "$DB_USER" --clean --if-exists "$DB_NAME" | gzip > "$PRE"
 
+# API 가 DB 에 연결된 채 --clean 을 부으면 락/부분적용 위험 → 복원 동안 API 정지
+API_WAS_UP=false
+if docker ps --format '{{.Names}}' | grep -qx "$API_CONTAINER"; then
+  API_WAS_UP=true
+  echo "→ 복원 동안 API 정지: $API_CONTAINER"
+  docker stop "$API_CONTAINER" >/dev/null
+fi
+# 무슨 일이 있어도(오류·중단) API 를 다시 살린다
+restore_api() { if [ "$API_WAS_UP" = true ]; then echo "→ API 재시작: $API_CONTAINER"; docker start "$API_CONTAINER" >/dev/null || true; fi; }
+trap restore_api EXIT
+
 echo "→ 복원 실행 중…"
 gunzip -c "$SEL" | docker exec -i "$DB_CONTAINER" psql -U "$DB_USER" -q "$DB_NAME"
 
 echo "✅ 복원 완료: $(basename "$SEL")"
 echo "   문제가 있으면 방금 만든 백업으로 되돌릴 수 있습니다: $(basename "$PRE")"
-echo "   API 재시작을 권장합니다:  docker compose restart api"

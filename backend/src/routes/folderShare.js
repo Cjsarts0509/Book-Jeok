@@ -9,12 +9,12 @@ const fs = require('fs');
 const rateLimit = require('express-rate-limit');
 const config = require('../config');
 const { query } = require('../db');
-const { wrap } = require('../util');
+const { wrap, rateKey } = require('../util');
 const { verifyPassword } = require('../crypto');
 const notify = require('../notify');
 
 const router = express.Router();
-const attemptLimiter = rateLimit({ windowMs: 10 * 60 * 1000, max: 30, skipSuccessfulRequests: true, standardHeaders: true, legacyHeaders: false, message: { error: '시도가 너무 많습니다. 잠시 후 다시 시도하세요.' } });
+const attemptLimiter = rateLimit({ windowMs: 10 * 60 * 1000, max: 30, skipSuccessfulRequests: true, standardHeaders: true, legacyHeaders: false, keyGenerator: rateKey, message: { error: '시도가 너무 많습니다. 잠시 후 다시 시도하세요.' } });
 
 const normFolder = (p) => (!p || p === '/') ? '/' : '/' + String(p).split('/').filter(Boolean).join('/');
 const withinScope = (base, target) => base === '/' ? true : (target === base || target.startsWith(base + '/'));

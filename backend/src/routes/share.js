@@ -8,14 +8,14 @@ const fs = require('fs');
 const rateLimit = require('express-rate-limit');
 const config = require('../config');
 const { query } = require('../db');
-const { wrap } = require('../util');
+const { wrap, rateKey } = require('../util');
 const { verifyPassword } = require('../crypto');
 const notify = require('../notify');
 
 const router = express.Router();
 
 // 비밀번호 무차별 대입 방어: 실패한 요청(4xx/5xx)만 카운트 → 정상 다운로드는 제한 없음
-const attemptLimiter = rateLimit({ windowMs: 10 * 60 * 1000, max: 15, skipSuccessfulRequests: true, standardHeaders: true, legacyHeaders: false, message: { error: '시도가 너무 많습니다. 잠시 후 다시 시도하세요.' } });
+const attemptLimiter = rateLimit({ windowMs: 10 * 60 * 1000, max: 15, skipSuccessfulRequests: true, standardHeaders: true, legacyHeaders: false, keyGenerator: rateKey, message: { error: '시도가 너무 많습니다. 잠시 후 다시 시도하세요.' } });
 
 async function resolveShare(token) {
   const r = await query(

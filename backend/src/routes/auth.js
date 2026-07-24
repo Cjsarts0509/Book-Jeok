@@ -7,7 +7,7 @@ const config = require('../config');
 const { query } = require('../db');
 const { hashPassword, verifyPassword, encryptSecret, decryptSecret } = require('../crypto');
 const { authenticate } = require('../middleware/auth');
-const { audit, wrap, clientIp } = require('../util');
+const { audit, wrap, clientIp, rateKey } = require('../util');
 const { shareQrEnabled } = require('../settings');
 const notify = require('../notify');
 const totp = require('../totp');
@@ -52,6 +52,7 @@ const loginLimiter = rateLimit({
   skipSuccessfulRequests: true,
   standardHeaders: true,
   legacyHeaders: false,
+  keyGenerator: rateKey,
   message: { error: '로그인 실패가 너무 많습니다. 15분 후 다시 시도하세요.' },
 });
 
