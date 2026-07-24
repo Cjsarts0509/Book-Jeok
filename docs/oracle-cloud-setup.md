@@ -267,7 +267,28 @@ VM이 털리면 백업까지 지워지는 걸 막으려면, 백업용 OCI 키/PA
   ```
   - 삭제(`bv backup delete`)까지 이 키로 하지 말고, **보존은 OCI 볼륨백업 정책(lifecycle)** 에 맡기면 VM이 털려도 백업을 지울 수 없습니다.
 - **DB 백업 PAR**: *쓰기만* 허용(읽기·삭제 없음). 버킷에 **버전관리(Object Versioning)** 또는 **Retention Rule** 을 켜면 덮어쓰기·삭제로 과거 백업이 사라지지 않습니다.
-- 이렇게 하면 8. 의 "계정 밖 사본"과 별개로, **한 서버 침해가 곧 백업 전멸**로 이어지는 경로를 끊습니다.
+- 이렇게 하면 아래 "계정 밖 사본"과 별개로, **한 서버 침해가 곧 백업 전멸**로 이어지는 경로를 끊습니다.
+
+### 9-6. 계정 밖 콜드카피 (월 1회, 강력 권장)
+9-1·9-2 백업은 전부 **같은 OCI 계정 안**에 있어, 계정 정지/자격증명 유출/컴파트먼트 삭제 한 번에 원본+백업이 동시에 사라집니다. **다른 신뢰 경계**(다른 클라우드/로컬)로 사본 하나를 두면 이 구멍이 메워집니다.
+1. rclone 설치·원격 설정:
+   ```bash
+   curl https://rclone.org/install.sh | sudo bash
+   rclone config      # 원하는 원격 하나 생성 (예: Backblaze B2·Google Drive·S3 호환 등)
+   ```
+2. `~/.bookjeok-backup.env` 에 추가:
+   ```bash
+   BOOKJEOK_OFFSITE_REMOTE="myremote:bookjeok"          # rclone 원격:경로
+   BOOKJEOK_OFFSITE_HC_URL="https://hc-ping.com/<id>"   # (선택) 이 작업 전용 모니터링
+   ```
+3. 수동 1회 테스트 → cron(매월 1일 05:00):
+   ```bash
+   ~/Book-Jeok/scripts/bookjeok-offsite.sh
+   crontab -e
+   # 0 5 1 * *  /home/ubuntu/Book-Jeok/scripts/bookjeok-offsite.sh >> /home/ubuntu/bookjeok-offsite.log 2>&1
+   ```
+   - DB 덤프는 **날짜별 히스토리 보존**(rclone copy), 파일은 **증분 미러**(rclone sync, 임시/캐시 폴더 제외).
+   - 미설정 시 아무 동작 안 함. 40GB 첫 전송만 오래 걸리고, 이후엔 바뀐 것만 올라갑니다.
 
 ---
 
