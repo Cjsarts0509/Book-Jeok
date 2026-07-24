@@ -285,15 +285,19 @@ VM이 털리면 백업까지 지워지는 걸 막으려면, 백업용 OCI 키/PA
    ```bash
    BOOKJEOK_OFFSITE_REMOTE="myremote:bookjeok"          # rclone 원격:경로
    BOOKJEOK_OFFSITE_HC_URL="https://hc-ping.com/<id>"   # (선택) 이 작업 전용 모니터링
+   BOOKJEOK_OFFSITE_ARCHIVE_DAYS=60                      # (선택) 파일 아카이브 보관 일수(기본 60)
    ```
-3. 수동 1회 테스트 → cron(매월 1일 05:00):
+3. 수동 1회 테스트 → cron(**매일** 05:00 — 이제 일간 백업의 주 소스):
    ```bash
    ~/Book-Jeok/scripts/bookjeok-offsite.sh
    crontab -e
-   # 0 5 1 * *  /home/ubuntu/Book-Jeok/scripts/bookjeok-offsite.sh >> /home/ubuntu/bookjeok-offsite.log 2>&1
+   # 0 5 * * *  /home/ubuntu/Book-Jeok/scripts/bookjeok-offsite.sh >> /home/ubuntu/bookjeok-offsite.log 2>&1
    ```
-   - DB 덤프는 **날짜별 히스토리 보존**(rclone copy), 파일은 **증분 미러**(rclone sync, 임시/캐시 폴더 제외).
-   - 미설정 시 아무 동작 안 함. 40GB 첫 전송만 오래 걸리고, 이후엔 바뀐 것만 올라갑니다.
+   - DB 덤프는 **날짜별 히스토리 보존**(rclone copy).
+   - 파일은 `storage/`=**최신 미러**(rclone sync, 임시/캐시 폴더 제외) + `storage-archive/<날짜>/`=**그날 삭제·변경된 예전 버전**을 60일 보관 → 실수삭제/손상 시 그 날짜 폴더에서 point-in-time 복구.
+     - 이 날 사라진/바뀐 파일 확인: `rclone lsf myremote:bookjeok/storage-archive/<날짜>/ -R`
+     - 그 예전 버전 되받기: `rclone copy myremote:bookjeok/storage-archive/<날짜>/ /mnt/bookjeok-data/storage`
+   - 미설정 시 아무 동작 안 함. 첫 전송만 오래 걸리고, 이후엔 바뀐 것만 올라갑니다.
 
 ---
 

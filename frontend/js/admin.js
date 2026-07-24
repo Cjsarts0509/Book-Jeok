@@ -734,9 +734,14 @@ const Admin = (() => {
         } else {
           dbBlock = `<p class="muted" style="margin:0">이 날 백업 기록이 없습니다.</p>`;
         }
-        // 파일 복원 — 파일 저장소는 '날짜별 스냅샷'이 아니라 매일 최신 상태로 미러된다(정직하게 안내).
+        // 파일 복원 — storage/=최신 미러, storage-archive/<날짜>/=그날 삭제·변경된 예전 버전(60일 보관)
         const fileBlock = `<h4 style="margin:16px 0 4px">📁 이 날짜 파일 복원</h4>
-          <p class="muted" style="font-size:12px;margin:0">파일은 구글 드라이브에 <b>최신 상태로 미러</b>됩니다(날짜별 스냅샷 아님). 전체 파일 되받기:</p>
+          <p class="muted" style="font-size:12px;margin:0"><b>${selDate}</b>에 삭제·변경된 예전 파일은 <code style="font-family:monospace">storage-archive/${selDate}/</code>에 60일간 보관됩니다.</p>
+          <p class="muted" style="font-size:12px;margin:8px 0 0">① 이 날 사라진/바뀐 파일 목록 보기</p>
+          ${cmdPre(`rclone lsf gdrive:bookjeok-backup/storage-archive/${selDate}/ -R`)}
+          <p class="muted" style="font-size:12px;margin:8px 0 0">② 그 예전 버전을 되받기(제자리로)</p>
+          ${cmdPre(`rclone copy gdrive:bookjeok-backup/storage-archive/${selDate}/ /mnt/bookjeok-data/storage`)}
+          <p class="muted" style="font-size:12px;margin:8px 0 0">전체 파일을 최신 상태로 되받기(계정 통째 복구용)</p>
           ${cmdPre('rclone copy gdrive:bookjeok-backup/storage /mnt/bookjeok-data/storage')}`;
         $detail.innerHTML = `<h3 style="margin-bottom:10px">🗄️ ${selDate} 백업 <span class="muted" style="font-size:13px;font-weight:400">${selDate === latestKey ? '· 최근 백업' : ''}</span></h3>${dbBlock}<div style="border-top:1px solid var(--border,#eee);margin-top:14px"></div>${fileBlock}`;
         $detail.querySelectorAll('[data-restore]').forEach((b) => b.addEventListener('click', () => restoreCmdModal(b.dataset.restore)));

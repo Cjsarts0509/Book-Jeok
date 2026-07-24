@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # 북적북적 '계정 밖' 콜드카피 — OCI 테넌시와 다른 신뢰 경계(다른 클라우드/로컬)로
-# DB 덤프 히스토리 + 파일 저장소를 rclone 으로 복사한다. (월 1회 권장)
+# DB 덤프 히스토리 + 파일 저장소를 rclone 으로 복사한다. (매일 실행 — 일간 백업의 주 소스)
+# 파일은 storage/=최신 미러 + storage-archive/<날짜>/=변경·삭제분 보존(기본 60일)으로 point-in-time 복구 가능.
 #
 # 왜? 기존 백업(오브젝트스토리지 PAR·볼륨백업)은 모두 같은 OCI 계정 안에 있어,
 #     계정 정지/자격증명 유출/컴파트먼트 삭제 한 번에 원본+백업이 동시에 사라진다.
@@ -12,6 +13,7 @@
 #   3) ~/.bookjeok-backup.env 에 추가:
 #        BOOKJEOK_OFFSITE_REMOTE="myremote:bookjeok"        # rclone 원격:경로
 #        BOOKJEOK_OFFSITE_HC_URL="https://hc-ping.com/<id>"  # (선택) 이 작업 전용 모니터링 URL
+#        BOOKJEOK_OFFSITE_ARCHIVE_DAYS=60                     # (선택) 파일 아카이브 보관 일수(기본 60)
 set -euo pipefail
 
 [ -f "$HOME/.bookjeok-backup.env" ] && . "$HOME/.bookjeok-backup.env"
@@ -53,12 +55,33 @@ docker exec "$DB_CONTAINER" pg_dump -U "${DB_USER:-bookjeok}" --clean --if-exist
 echo "$(date '+%F %T') [offsite] DB 덤프 → $REMOTE/db 복사"
 rclone copy "$LOCAL_DB" "$REMOTE/db" --include 'bookjeok-db-*.sql.gz' --transfers 4 --retries 3
 
-# 3) 파일 저장소는 'sync'(증분 미러) — 임시/캐시 폴더는 제외
-echo "$(date '+%F %T') [offsite] 파일 저장소 → $REMOTE/storage 동기화"
+# 3) 파일 저장소는 'sync'(증분 미러) — 임시/캐시 폴더는 제외.
+#    삭제·덮어쓰기로 사라질 '예전 버전'은 날짜별 아카이브로 옮겨 보존한다(실수삭제/손상 대비
+#    point-in-time 복구). storage/=항상 최신, storage-archive/<날짜>/=그날 바뀌거나 지워진 것만.
+ARCHIVE_DAYS="${BOOKJEOK_OFFSITE_ARCHIVE_DAYS:-60}"   # 아카이브 보관 일수(초과분 자동 정리)
+ARCHIVE_DAY="$(date +%F)"
+echo "$(date '+%F %T') [offsite] 파일 저장소 → $REMOTE/storage 동기화 (변경/삭제분 → storage-archive/$ARCHIVE_DAY)"
 rclone sync "$STORAGE" "$REMOTE/storage" \
   --exclude '_chunks/**' --exclude '_bundles/**' --exclude '_pdfcache/**' \
   --exclude '_staging/**' --exclude '_backup-status/**' \
+  --backup-dir "$REMOTE/storage-archive/$ARCHIVE_DAY" \
   --transfers 8 --checkers 16 --retries 3 --fast-list
+
+# 3-1) 오래된 아카이브(기본 60일 초과) 정리 — 날짜 폴더명 기준(파일 modtime은 원본 유지라 폴더명으로 판단)
+CUTOFF="$(date -d "${ARCHIVE_DAYS} days ago" +%F 2>/dev/null || echo '')"
+if [ -n "$CUTOFF" ]; then
+  ARC_DIRS="$(rclone lsf "$REMOTE/storage-archive" --dirs-only 2>/dev/null || true)"
+  for d in $ARC_DIRS; do
+    d="${d%/}"
+    case "$d" in
+      [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9])
+        if [[ "$d" < "$CUTOFF" ]]; then
+          echo "$(date '+%F %T') [offsite] 오래된 아카이브 정리(>${ARCHIVE_DAYS}일): storage-archive/$d"
+          rclone purge "$REMOTE/storage-archive/$d" 2>/dev/null || true
+        fi ;;
+    esac
+  done
+fi
 
 # 4) 방금 만든 오프사이트 덤프는 로컬에선 오래 두지 않는다(일간 덤프와 구분·용량 절약)
 find "$LOCAL_DB" -name 'bookjeok-db-offsite-*.sql.gz' -mtime +2 -delete
