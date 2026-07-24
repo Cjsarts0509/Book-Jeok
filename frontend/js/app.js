@@ -217,7 +217,7 @@ const App = (() => {
   function toggleTree() { document.getElementById('tree-sidebar').classList.toggle('open'); document.getElementById('tree-backdrop').classList.toggle('show'); }
   function closeNavMenu() { document.getElementById('appbar-nav')?.classList.remove('open'); }
   const isMobile = () => window.matchMedia('(max-width: 640px)').matches;
-  function resetToOwn() { state.ownerId = null; state.ownerName = null; state.folder = '/'; state.selected.clear(); resetNav(); const sw = document.getElementById('account-switcher'); if (sw) sw.value = ''; loadAll(); }
+  function resetToOwn() { state.ownerId = null; state.ownerName = null; state.folder = '/'; state.selected.clear(); resetNav(); const sw = document.getElementById('account-switcher'); if (sw) sw.value = ''; thumbClear(); loadAll(); }
 
   async function setupAccountSwitcher() {
     try {
@@ -228,12 +228,12 @@ const App = (() => {
       sw.addEventListener('change', () => {
         if (!sw.value) return resetToOwn();
         const a = state.accounts.find((x) => String(x.id) === sw.value);
-        state.ownerId = a.id; state.ownerName = a.displayName; state.folder = '/'; state.selected.clear(); resetNav(); loadAll();
+        state.ownerId = a.id; state.ownerName = a.displayName; state.folder = '/'; state.selected.clear(); resetNav(); thumbClear(); loadAll();
       });
     } catch {}
   }
 
-  async function doLogout() { try { await API.logout(); } catch {} API.setToken(null); state.user = null; renderLogin(); }
+  async function doLogout() { try { await API.logout(); } catch {} thumbClear(); API.setToken(null); state.user = null; renderLogin(); }
 
   async function loadAll() { await Promise.all([loadTree(), loadFiles(), loadTags()]); markFresh(); }
 
@@ -1579,6 +1579,7 @@ const App = (() => {
   // ── 카메라(사진) 업로드: 촬영 → 각 사진 제목·비고 입력 → 업로드 ──────────
   function cameraReviewModal(files) {
     const urls = files.map((f) => URL.createObjectURL(f));
+    const cleanup = () => urls.forEach((u) => { try { URL.revokeObjectURL(u); } catch (_) {} });
     const rows = files.map((f, i) => `
       <div class="cam-item" data-i="${i}">
         <img class="cam-thumb" src="${urls[i]}" alt="">
@@ -1592,9 +1593,9 @@ const App = (() => {
     const m = UI.modal(`<h3>📷 촬영 업로드 <span class="muted" style="font-size:13px;font-weight:400">· ${files.length}장 → ${UI.escapeHtml(loc)}</span></h3>
       <p class="muted" style="font-size:12px;margin-bottom:10px">각 사진의 제목·비고를 입력하고 업로드하세요. (제목 비우면 자동 이름) · 바코드로 ISBN 파일을 만들려면 <b>📷 바코드 다건 촬영</b>을 이용하세요.</p>
       <div id="cam-list">${rows}</div>
-      <div class="modal-actions"><button class="btn btn-ghost" id="cam-cancel">취소</button><button class="btn btn-primary" id="cam-go">⬆️ ${files.length}장 업로드</button></div>`);
+      <div class="modal-actions"><button class="btn btn-ghost" id="cam-cancel">취소</button><button class="btn btn-primary" id="cam-go">⬆️ ${files.length}장 업로드</button></div>`,
+      { onClose: cleanup });   // ✕·ESC·뒤로가기로 닫아도 objectURL 해제
     m.el.querySelector('.modal').classList.add('modal-wide');
-    const cleanup = () => urls.forEach((u) => URL.revokeObjectURL(u));
     const kept = new Set(files.map((_, i) => i));
     const itemEl = (i) => m.el.querySelector(`.cam-item[data-i="${i}"]`);
 
@@ -1745,7 +1746,15 @@ const App = (() => {
   }
 
   // ── 이미지 썸네일 (그리드 뷰, 지연 로딩) ──────────
-  const thumbCache = new Map(); // fileId -> objectURL
+  // objectURL 은 원본 blob 을 잡아둠 → LRU 상한 + 폐기 시 revoke, 계정전환·로그아웃 시 전체 해제(메모리 누수 방지)
+  const thumbCache = new Map(); // fileId -> objectURL (삽입순 = LRU)
+  const THUMB_MAX = 120;
+  function thumbGet(id) { if (!thumbCache.has(id)) return null; const u = thumbCache.get(id); thumbCache.delete(id); thumbCache.set(id, u); return u; } // 최근 사용을 뒤로
+  function thumbPut(id, url) {
+    thumbCache.set(id, url);
+    while (thumbCache.size > THUMB_MAX) { const oldest = thumbCache.keys().next().value; const ou = thumbCache.get(oldest); thumbCache.delete(oldest); try { URL.revokeObjectURL(ou); } catch (_) {} }
+  }
+  function thumbClear() { for (const u of thumbCache.values()) { try { URL.revokeObjectURL(u); } catch (_) {} } thumbCache.clear(); }
   const isImage = (name) => ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg', 'ico'].includes((name.split('.').pop() || '').toLowerCase());
   function loadThumbsIn(root) {
     const els = (root || document).querySelectorAll('[data-thumb]'); if (!els.length || !('IntersectionObserver' in window)) return;
@@ -1753,9 +1762,9 @@ const App = (() => {
     const io = new IntersectionObserver((ents) => {
       ents.forEach((en) => {
         if (!en.isIntersecting) return; const el = en.target; io.unobserve(el); const id = el.dataset.thumb;
-        if (thumbCache.has(id)) return setImg(el, thumbCache.get(id));
+        const cached = thumbGet(id); if (cached) return setImg(el, cached);
         fetch(API.downloadUrl(id), { headers: { Authorization: 'Bearer ' + API.getToken() }, credentials: 'include' })
-          .then((r) => r.ok ? r.blob() : Promise.reject()).then((b) => { const u = URL.createObjectURL(b); thumbCache.set(id, u); setImg(el, u); }).catch(() => {});
+          .then((r) => r.ok ? r.blob() : Promise.reject()).then((b) => { const u = URL.createObjectURL(b); thumbPut(id, u); setImg(el, u); }).catch(() => {});
       });
     }, { rootMargin: '150px' });
     els.forEach((el) => io.observe(el));
@@ -2647,12 +2656,7 @@ const App = (() => {
       wrap.innerHTML = order.length
         ? `<table class="sa-table">${thead}<tbody>${tbody}</tbody></table>`
         : '<p class="muted" style="padding:14px">조건에 맞는 항목이 없습니다.</p>';
-      wrap.querySelectorAll('.sa-sortable').forEach((th) => th.addEventListener('click', () => {
-        const c = +th.dataset.col;
-        if (saSort.col === c) saSort.dir = -saSort.dir; else { saSort.col = c; saSort.dir = 1; }
-        renderTable();
-      }));
-      wrap.querySelectorAll('tbody tr').forEach((tr) => tr.addEventListener('click', () => openDetail(disc[+tr.dataset.ri])));
+      // 정렬/행 클릭은 renderResult 에서 wrap 에 위임 1회 등록(여기서 1000+ 개별 바인딩하지 않음)
       applyShade();
       const sh = m.q('#sa-shown'); if (sh) sh.textContent = order.length !== disc.length ? ` · 표시 ${order.length.toLocaleString()}건` : '';
     }
@@ -2880,6 +2884,17 @@ const App = (() => {
       m.q('#sa-save')?.addEventListener('click', persist);
       m.q('#sa-folder')?.addEventListener('change', (e) => setFolder(e.target.value));
       m.q('#sa-fphoto')?.addEventListener('change', (e) => { saFilterPhoto = e.target.value; renderTable(); });
+      // 정렬 헤더·행 클릭을 wrap 에 위임 1회 등록(renderTable 마다 1000+ 개별 바인딩 안 함)
+      m.q('#sa-tablewrap')?.addEventListener('click', (e) => {
+        const th = e.target.closest('.sa-sortable');
+        if (th && th.dataset.col != null) {
+          const c = +th.dataset.col;
+          if (saSort.col === c) saSort.dir = -saSort.dir; else { saSort.col = c; saSort.dir = 1; }
+          renderTable(); return;
+        }
+        const tr = e.target.closest('tbody tr[data-ri]');
+        if (tr) openDetail(disc[+tr.dataset.ri]);
+      });
       wireFieldFilter(fields);
       renderTable();
       refreshPhotos();   // 선택된 폴더에 이미 사진이 있는 항목 음영 표시(+사진 필터 시 반영)
