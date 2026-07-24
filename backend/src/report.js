@@ -27,12 +27,16 @@ function readOffsiteHistory() {
 //  → 소스 둘 중 하나라도 성공이면 ✅. (기록이 아예 없는 날은 맵에 없음 = 모름/–)
 function backupDayMap() {
   const map = new Map();
-  // 1) 로컬 DB 덤프가 존재하는 날짜(일간·오프사이트 덤프 모두) → 성공
-  for (const x of (readJsonFile('db-list.json') || [])) {
-    const m = /bookjeok-db-(?:offsite-)?(\d{4}-\d{2}-\d{2})_/.exec(x.name || '');
-    if (m) map.set(m[1], true);
-  }
-  // 2) 구글 드라이브(계정 밖) 일간 이력 — DB 일간 백업의 주 소스
+  const dateOf = (name) => { const m = /(\d{4}-\d{2}-\d{2})/.exec(name || ''); return m ? m[1] : null; };
+  // 1) 최신 단일 상태(db.json) — 목록/이력 파일이 아직 없어도 '오늘 백업'이 보이도록
+  const db = readJsonFile('db.json');
+  if (db) { const k = dateOf(db.file) || (db.at ? KST(new Date(db.at).getTime()) : null); if (k) map.set(k, true); }
+  // 2) 로컬 DB 덤프 목록이 있으면 그 날짜들도 성공
+  for (const x of (readJsonFile('db-list.json') || [])) { const k = dateOf(x.name); if (k) map.set(k, true); }
+  // 3) 구글 드라이브(계정 밖) 최신 상태(offsite.json)
+  const off = readJsonFile('offsite.json');
+  if (off && off.at) { const k = KST(new Date(off.at).getTime()); if (off.ok !== false) map.set(k, true); else if (!map.has(k)) map.set(k, false); }
+  // 4) 구글 드라이브 일자별 이력 — DB 일간 백업의 주 소스
   for (const h of readOffsiteHistory()) {
     if (!h || !h.date) continue;
     if (h.ok !== false) map.set(h.date, true);

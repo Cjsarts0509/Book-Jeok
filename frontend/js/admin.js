@@ -635,10 +635,13 @@ const Admin = (() => {
       const s = await API.backupStatus();
       const { db, offsite, dbList = [], dayMap = {} } = s;
 
+      // 로컬 목록이 아직 없으면(구버전 스크립트) 최신 단일 상태(db.json)로 1건이라도 채운다
+      let list = dbList.slice();
+      if (!list.length && db && db.file) list = [{ name: db.file, size: db.size, at: db.at }];
       // 날짜별 로컬 DB 덤프 묶기(그리드에서 일자 클릭 시 상세로 사용)
       const byDate = {};
-      for (const x of dbList) { const m = /(\d{4}-\d{2}-\d{2})/.exec(x.name || ''); const k = m ? m[1] : (x.at ? dkey(new Date(x.at)) : null); if (k) (byDate[k] = byDate[k] || []).push(x); }
-      const latestKey = (dbList[0] && (/(\d{4}-\d{2}-\d{2})/.exec(dbList[0].name || '') || [])[1])
+      for (const x of list) { const m = /(\d{4}-\d{2}-\d{2})/.exec(x.name || ''); const k = m ? m[1] : (x.at ? dkey(new Date(x.at)) : null); if (k) (byDate[k] = byDate[k] || []).push(x); }
+      const latestKey = (list[0] && (/(\d{4}-\d{2}-\d{2})/.exec(list[0].name || '') || [])[1])
         || Object.keys(dayMap).filter((k) => dayMap[k] === true).sort().pop()
         || dkey(new Date());
 
@@ -650,7 +653,7 @@ const Admin = (() => {
         <div class="stat-grid">
           <div class="stat"><div class="k">일간 백업 · 구글 드라이브</div><div class="v">${offsite ? `<span class="dot ${oDot}"></span>${ago(offsite.at)}${offsite.ok === false ? ' · ⚠️ 실패' : ''}` : '<span class="dot bad"></span><span class="muted">미설정</span>'}</div></div>
           <div class="stat"><div class="k">로컬 DB 덤프 (복구용)</div><div class="v"><span class="dot ${dbDot}"></span>${ago(db && db.at)}</div></div>
-          <div class="stat"><div class="k">로컬 DB 덤프 보관</div><div class="v">${db ? (db.localCount || dbList.length || 0) + '개' : dbList.length + '개'}</div></div>
+          <div class="stat"><div class="k">로컬 DB 덤프 보관</div><div class="v">${db ? (db.localCount || list.length || 0) + '개' : list.length + '개'}</div></div>
         </div>
         <div class="card" style="margin-bottom:14px">
           <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:10px">
@@ -662,17 +665,12 @@ const Admin = (() => {
           <div id="bkGrid"></div>
           <p class="muted" style="font-size:11px;margin-top:8px">✅ 성공 · ❌ 실패/누락 · – 기록 없음 &nbsp;|&nbsp; 일자를 누르면 아래에 그 날 백업이 표시됩니다. 일간 백업(DB+파일)은 구글 드라이브로 올라갑니다.</p>
         </div>
-        <div class="card" id="bkDetail"></div>
-        <div class="card" style="margin-top:14px">
-          <h3 style="margin-bottom:8px">🛟 파일 복원 (구글 드라이브)</h3>
-          <p style="font-size:13px;color:var(--text-muted);margin:0 0 8px">파일 저장소는 매일 구글 드라이브로 미러됩니다. 오라클 계정이 통째로 사라져도 아래 명령으로 파일 전체를 되받습니다(서버 터미널).</p>
-          <pre class="pp-text" style="user-select:all;white-space:pre-wrap;font-family:monospace;font-size:12px">rclone copy gdrive:bookjeok-backup/storage /mnt/bookjeok-data/storage</pre>
-        </div>`;
+        <div class="card" id="bkDetail"></div>`;
 
       const now = new Date();
       const yearsSet = new Set([now.getFullYear()]);
       Object.keys(dayMap).forEach((k) => yearsSet.add(+k.slice(0, 4)));
-      dbList.forEach((x) => { const m = /(\d{4})-/.exec(x.name || ''); if (m) yearsSet.add(+m[1]); });
+      list.forEach((x) => { const m = /(\d{4})-/.exec(x.name || ''); if (m) yearsSet.add(+m[1]); });
       const years = [...yearsSet].sort((a, b) => b - a);
       const state = { y: now.getFullYear(), m0: now.getMonth(), wIdx: 0 };
 
@@ -710,12 +708,17 @@ const Admin = (() => {
         $grid.querySelectorAll('[data-day]').forEach((c) => c.addEventListener('click', () => { selDate = c.dataset.day; renderGrid(); renderDetail(); }));
       }
 
+      // 복사 가능한 명령어 블록(선택한 날짜 맥락)
+      const cmdPre = (cmd) => `<div style="display:flex;gap:6px;align-items:flex-start;margin-top:6px">
+          <pre class="pp-text" style="flex:1;user-select:all;white-space:pre-wrap;font-family:monospace;font-size:12px;margin:0">${UI.escapeHtml(cmd)}</pre>
+          <button class="btn btn-ghost btn-sm" data-copy="${UI.escapeHtml(cmd)}">📋</button></div>`;
+
       function renderDetail() {
         const entries = byDate[selDate] || [];
         const okState = Object.prototype.hasOwnProperty.call(dayMap, selDate) ? dayMap[selDate] : null;
-        let body;
+        let dbBlock;
         if (entries.length) {
-          body = `<div class="table-wrap"><table><thead><tr><th>시각</th><th>파일</th><th style="text-align:right">크기</th><th></th></tr></thead><tbody>${entries.map((x) => `<tr>
+          dbBlock = `<div class="table-wrap"><table><thead><tr><th>시각</th><th>파일</th><th style="text-align:right">크기</th><th></th></tr></thead><tbody>${entries.map((x) => `<tr>
               <td style="white-space:nowrap">${when(x.at)}</td>
               <td><span class="muted" style="font-family:monospace;font-size:12px">${UI.escapeHtml(x.name)}</span></td>
               <td style="text-align:right">${x.size ? UI.bytes(x.size) : '-'}</td>
@@ -723,15 +726,21 @@ const Admin = (() => {
             </tr>`).join('')}</tbody></table></div>
             <p class="muted" style="font-size:12px;margin-top:8px">로컬 덤프로 빠르게 복구합니다. 구글 드라이브에도 같은 덤프가 보관됩니다.</p>`;
         } else if (okState === true) {
-          body = `<p style="font-size:13px;color:var(--text-muted);margin:0">이 날은 <b>구글 드라이브 백업만</b> 있습니다(로컬 덤프 없음). 구글에서 해당 날짜 덤프를 받아 복구하세요:</p>
-            <pre class="pp-text" style="user-select:all;white-space:pre-wrap;font-family:monospace;font-size:12px;margin-top:6px">rclone copy gdrive:bookjeok-backup/db ~/bookjeok-backups --include 'bookjeok-db-*${selDate}*'</pre>`;
+          dbBlock = `<p style="font-size:13px;color:var(--text-muted);margin:0">이 날은 <b>구글 드라이브 백업만</b> 있습니다(로컬 덤프 없음). 구글에서 이 날짜 덤프를 받아 복구하세요:</p>
+            ${cmdPre(`rclone copy gdrive:bookjeok-backup/db ~/bookjeok-backups --include 'bookjeok-db-*${selDate}*'`)}
+            ${cmdPre(`cd ~/Book-Jeok && BOOKJEOK_RESTORE_FILE=$(ls -t ~/bookjeok-backups/bookjeok-db-*${selDate}* | head -1 | xargs -n1 basename) ./scripts/restore.sh`)}`;
         } else if (okState === false) {
-          body = `<p style="color:var(--danger);margin:0">이 날 백업이 <b>실패</b>로 기록되었습니다. 스케줄/로그를 확인하세요.</p>`;
+          dbBlock = `<p style="color:var(--danger);margin:0">이 날 백업이 <b>실패</b>로 기록되었습니다. 스케줄/로그를 확인하세요.</p>`;
         } else {
-          body = `<p class="muted" style="margin:0">이 날 백업 기록이 없습니다.</p>`;
+          dbBlock = `<p class="muted" style="margin:0">이 날 백업 기록이 없습니다.</p>`;
         }
-        $detail.innerHTML = `<h3 style="margin-bottom:10px">🗄️ ${selDate} DB 백업 <span class="muted" style="font-size:13px;font-weight:400">${selDate === latestKey ? '· 최근 백업' : ''}</span></h3>${body}`;
+        // 파일 복원 — 파일 저장소는 '날짜별 스냅샷'이 아니라 매일 최신 상태로 미러된다(정직하게 안내).
+        const fileBlock = `<h4 style="margin:16px 0 4px">📁 이 날짜 파일 복원</h4>
+          <p class="muted" style="font-size:12px;margin:0">파일은 구글 드라이브에 <b>최신 상태로 미러</b>됩니다(날짜별 스냅샷 아님). 전체 파일 되받기:</p>
+          ${cmdPre('rclone copy gdrive:bookjeok-backup/storage /mnt/bookjeok-data/storage')}`;
+        $detail.innerHTML = `<h3 style="margin-bottom:10px">🗄️ ${selDate} 백업 <span class="muted" style="font-size:13px;font-weight:400">${selDate === latestKey ? '· 최근 백업' : ''}</span></h3>${dbBlock}<div style="border-top:1px solid var(--border,#eee);margin-top:14px"></div>${fileBlock}`;
         $detail.querySelectorAll('[data-restore]').forEach((b) => b.addEventListener('click', () => restoreCmdModal(b.dataset.restore)));
+        $detail.querySelectorAll('[data-copy]').forEach((b) => b.addEventListener('click', () => { try { navigator.clipboard.writeText(b.dataset.copy); UI.toast('명령을 복사했습니다', 'success'); } catch (_) { UI.toast('복사 실패 — 직접 선택해 복사하세요', 'error'); } }));
       }
 
       let selDate = latestKey;   // 상세 기본값 = 최근 백업 날짜
