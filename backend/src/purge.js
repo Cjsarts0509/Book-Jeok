@@ -26,6 +26,8 @@ async function purgeOldTrash() {
     await purgeStaleBundles();
     await purgeStaleChunks();
     await purgeOrphanPdfCache();
+    await purgeOrphanUploads();
+    await purgeOldLogs();
   } catch (err) {
     console.error('[purge] 실패:', err.message);
   }
@@ -87,6 +89,44 @@ async function purgeOrphanPdfCache() {
     if (removed > 0) console.log(`[purge] 고아 PDF 캐시 정리: ${removed}건`);
   } catch (err) {
     console.error('[purge] PDF 캐시 정리 실패:', err.message);
+  }
+}
+
+// 고아 업로드 파일 회수: 크래시 등으로 DB insert 전에 죽으면 userDir 에 UUID 파일만 남는다.
+// files.stored_name 에 없고 6시간 이상 지난(진행 중 업로드와의 경합 방지) 파일을 삭제.
+async function purgeOrphanUploads() {
+  try {
+    const root = config.storageRoot;
+    let dirs;
+    try { dirs = await fsp.readdir(root, { withFileTypes: true }); } catch { return; }
+    const ownerDirs = dirs.filter((d) => d.isDirectory() && /^\d+$/.test(d.name)); // 숫자(=owner id) 디렉터리만
+    if (!ownerDirs.length) return;
+    const live = new Set((await query('SELECT stored_name FROM files')).rows.map((r) => r.stored_name)); // 활성+휴지통 모두
+    const cutoff = Date.now() - 6 * 3600000;
+    let removed = 0;
+    for (const d of ownerDirs) {
+      const dir = path.join(root, d.name);
+      let entries; try { entries = await fsp.readdir(dir, { withFileTypes: true }); } catch { continue; }
+      for (const e of entries) {
+        if (!e.isFile() || live.has(e.name)) continue;
+        const p = path.join(dir, e.name);
+        try { const st = await fsp.stat(p); if (st.mtimeMs < cutoff) { await fsp.unlink(p); removed++; } } catch { /* skip */ }
+      }
+    }
+    if (removed > 0) console.log(`[purge] 고아 업로드 파일 회수: ${removed}건`);
+  } catch (err) {
+    console.error('[purge] 고아 업로드 정리 실패:', err.message);
+  }
+}
+
+// 오래된 감사로그/로그인이벤트 정리(무한증가 방지). 보안 추적용이라 넉넉히 보관.
+async function purgeOldLogs() {
+  try {
+    const a = await query("DELETE FROM audit_log WHERE created_at < now() - interval '365 days'");
+    const l = await query("DELETE FROM login_events WHERE created_at < now() - interval '180 days'");
+    if (a.rowCount || l.rowCount) console.log(`[purge] 오래된 로그 정리: 감사 ${a.rowCount}건, 로그인 ${l.rowCount}건`);
+  } catch (err) {
+    console.error('[purge] 로그 정리 실패:', err.message);
   }
 }
 

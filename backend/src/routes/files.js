@@ -45,15 +45,15 @@ async function ensureFolder(ownerId, folder) {
   }
 }
 
-// 폴더/파일 이름 충돌 시 " (n)" 붙여 유니크한 이름 생성
-async function uniqueFileName(ownerId, folder, name) {
+// 폴더/파일 이름 충돌 시 " (n)" 붙여 유니크한 이름 생성 (트랜잭션 내에선 q=client.query 전달)
+async function uniqueFileName(ownerId, folder, name, q = query) {
   const dot = name.lastIndexOf('.');
   const base = dot > 0 ? name.slice(0, dot) : name;
   const ext = dot > 0 ? name.slice(dot) : '';
   let candidate = name, n = 1;
   // eslint-disable-next-line no-constant-condition
   while (true) {
-    const r = await query(
+    const r = await q(
       'SELECT 1 FROM files WHERE owner_id=$1 AND folder=$2 AND original_name=$3 AND deleted_at IS NULL',
       [ownerId, folder, candidate]
     );
@@ -356,63 +356,65 @@ router.post('/upload', authenticate, wrap(resolveOwner), wrap(diskGate), upload.
   const folder = normalizeFolder(req.body.folder);
   if (!req.files || req.files.length === 0) return res.status(400).json({ error: '업로드할 파일이 없습니다.' });
   const owner = await query('SELECT quota_bytes, role, upload_conflict FROM users WHERE id=$1', [req.targetOwnerId]);
+  const isAdmin = owner.rows[0].role === 'admin';
   const overwrite = owner.rows[0].upload_conflict === 'overwrite'; // 동일 이름: 덮어쓰기(이전 파일은 휴지통) vs 번호 붙이기
-  // 관리자는 무제한, 그 외는 할당량 적용(0=미할당이므로 업로드 불가)
-  if (owner.rows[0].role !== 'admin') {
-    const quota = Number(owner.rows[0].quota_bytes);
-    const used = await query('SELECT COALESCE(SUM(size_bytes),0) AS s FROM files WHERE owner_id=$1 AND deleted_at IS NULL', [req.targetOwnerId]);
-    const incoming = req.files.reduce((s, f) => s + f.size, 0);
-    if (Number(used.rows[0].s) + incoming > quota) {
-      await Promise.all(req.files.map((f) => fsp.unlink(f.path).catch(() => {})));
-      const msg = quota === 0 ? '디스크가 할당되지 않은 계정입니다. 관리자에게 문의하세요.' : '저장 용량 할당량을 초과했습니다.';
-      return res.status(413).json({ error: msg });
-    }
-  }
+  const quota = Number(owner.rows[0].quota_bytes);
   await ensureFolder(req.targetOwnerId, folder);
   // 업로드 시 파일별 제목/비고(선택) — 카메라 업로드 등에서 index로 정렬해 전달
   const titles = req.body.titles !== undefined ? [].concat(req.body.titles) : [];
   const notes = req.body.notes !== undefined ? [].concat(req.body.notes) : [];
   const saved = []; const rejected = [];
-  const savedPaths = new Set(); // DB 저장까지 끝난 파일의 디스크 경로(정리 대상에서 제외)
   try {
-  for (let i = 0; i < req.files.length; i++) {
-    const f = req.files[i];
-    // 경로 구분자·제어문자 제거 (zip-slip/헤더 주입 방어)
-    let originalName = Buffer.from(f.originalname, 'latin1').toString('utf8')
-      .replace(/[/\\]/g, '_').replace(/[\x00-\x1f]/g, '').trim() || 'file';
-    // 사용자가 제목을 직접 입력했으면 확장자는 유지한 채 파일명 교체
-    const title = String(titles[i] || '').replace(/[/\\]/g, '_').replace(/[\x00-\x1f]/g, '').trim();
-    if (title) {
-      const ext = originalName.includes('.') ? originalName.slice(originalName.lastIndexOf('.')) : '';
-      originalName = title.toLowerCase().endsWith(ext.toLowerCase()) ? title : title + ext;
-    }
-    const note = String(notes[i] || '').slice(0, 2000).trim();
-    // 매직바이트 검증: 실행파일 위장·확장자-내용 불일치 차단 (데몬 불필요)
-    const ft = await filetype.verify(f.path, originalName);
-    if (!ft.ok) { await fsp.unlink(f.path).catch(() => {}); rejected.push({ name: originalName, reason: ft.reason }); await audit(req, 'file_blocked', `${originalName} (${ft.reason})`); continue; }
-    // YARA 악성 패턴 검사(로컬, 오프라인). 매칭되면 저장하지 않고 삭제.
-    const mal = await yara.scanFile(f.path);
-    if (!mal.ok) { await fsp.unlink(f.path).catch(() => {}); rejected.push({ name: originalName, reason: `악성 패턴 감지(${mal.rule})` }); await audit(req, 'malware_blocked', `${originalName} (${mal.rule})`); continue; }
-    let name;
-    if (overwrite) {
-      // 덮어쓰기: 같은 이름 기존 파일을 휴지통으로 보내고(30일 복원 가능) 원래 이름 유지
-      await query('UPDATE files SET deleted_at=now() WHERE owner_id=$1 AND folder=$2 AND original_name=$3 AND deleted_at IS NULL', [req.targetOwnerId, folder, originalName]);
-      name = originalName;
-    } else {
-      name = await uniqueFileName(req.targetOwnerId, folder, originalName);
-    }
-    const row = await query(
-      `INSERT INTO files (owner_id, folder, original_name, stored_name, size_bytes, mime_type, note, note_updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,${note ? 'now()' : 'NULL'}) RETURNING id`,
-      [req.targetOwnerId, folder, name, path.basename(f.path), f.size, f.mimetype, note]
-    );
-    saved.push({ id: row.rows[0].id, name, size: f.size, folder });
-    savedPaths.add(f.path);
-  }
+    // 동시 업로드 쿼터 경합(TOCTOU) 방지: 소유자별 어드바이저리 락 + 쿼터 재확인 + 저장을 한 트랜잭션에서
+    await withTransaction(async (client) => {
+      await client.query('SELECT pg_advisory_xact_lock($1)', [req.targetOwnerId]);
+      // 관리자는 무제한, 그 외는 할당량 적용(0=미할당이므로 업로드 불가)
+      if (!isAdmin) {
+        const used = await client.query('SELECT COALESCE(SUM(size_bytes),0) AS s FROM files WHERE owner_id=$1 AND deleted_at IS NULL', [req.targetOwnerId]);
+        const incoming = req.files.reduce((s, f) => s + f.size, 0);
+        if (Number(used.rows[0].s) + incoming > quota) {
+          const e = new Error(quota === 0 ? '디스크가 할당되지 않은 계정입니다. 관리자에게 문의하세요.' : '저장 용량 할당량을 초과했습니다.');
+          e.status = 413; throw e;
+        }
+      }
+      for (let i = 0; i < req.files.length; i++) {
+        const f = req.files[i];
+        // 경로 구분자·제어문자 제거 (zip-slip/헤더 주입 방어)
+        let originalName = Buffer.from(f.originalname, 'latin1').toString('utf8')
+          .replace(/[/\\]/g, '_').replace(/[\x00-\x1f]/g, '').trim() || 'file';
+        // 사용자가 제목을 직접 입력했으면 확장자는 유지한 채 파일명 교체
+        const title = String(titles[i] || '').replace(/[/\\]/g, '_').replace(/[\x00-\x1f]/g, '').trim();
+        if (title) {
+          const ext = originalName.includes('.') ? originalName.slice(originalName.lastIndexOf('.')) : '';
+          originalName = title.toLowerCase().endsWith(ext.toLowerCase()) ? title : title + ext;
+        }
+        const note = String(notes[i] || '').slice(0, 2000).trim();
+        // 매직바이트 검증: 실행파일 위장·확장자-내용 불일치 차단 (데몬 불필요)
+        const ft = await filetype.verify(f.path, originalName);
+        if (!ft.ok) { await fsp.unlink(f.path).catch(() => {}); rejected.push({ name: originalName, reason: ft.reason }); await audit(req, 'file_blocked', `${originalName} (${ft.reason})`); continue; }
+        // YARA 악성 패턴 검사(로컬, 오프라인). 매칭되면 저장하지 않고 삭제.
+        const mal = await yara.scanFile(f.path);
+        if (!mal.ok) { await fsp.unlink(f.path).catch(() => {}); rejected.push({ name: originalName, reason: `악성 패턴 감지(${mal.rule})` }); await audit(req, 'malware_blocked', `${originalName} (${mal.rule})`); continue; }
+        let name;
+        if (overwrite) {
+          // 덮어쓰기: 같은 이름 기존 파일을 휴지통으로 보내고(30일 복원 가능) 원래 이름 유지
+          await client.query('UPDATE files SET deleted_at=now() WHERE owner_id=$1 AND folder=$2 AND original_name=$3 AND deleted_at IS NULL', [req.targetOwnerId, folder, originalName]);
+          name = originalName;
+        } else {
+          name = await uniqueFileName(req.targetOwnerId, folder, originalName, client.query.bind(client));
+        }
+        const row = await client.query(
+          `INSERT INTO files (owner_id, folder, original_name, stored_name, size_bytes, mime_type, note, note_updated_at)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,${note ? 'now()' : 'NULL'}) RETURNING id`,
+          [req.targetOwnerId, folder, name, path.basename(f.path), f.size, f.mimetype, note]
+        );
+        saved.push({ id: row.rows[0].id, name, size: f.size, folder });
+      }
+    });
   } catch (err) {
-    // 루프 중 DB 오류 등으로 중단되면, 아직 DB에 기록되지 않은 업로드 파일이 디스크에 남아 누수됨.
-    // 저장 완료된 것만 남기고 나머지 임시 파일을 정리한 뒤 오류를 상위(에러 핸들러)로 전달.
-    await Promise.all(req.files.filter((f) => !savedPaths.has(f.path)).map((f) => fsp.unlink(f.path).catch(() => {})));
+    // 트랜잭션이 롤백되면 DB엔 아무것도 남지 않음 → 업로드 임시파일 전부 정리(거절분은 이미 삭제됨=no-op).
+    await Promise.all(req.files.map((f) => fsp.unlink(f.path).catch(() => {})));
+    if (err.status === 413) return res.status(413).json({ error: err.message });
     throw err;
   }
   await audit(req, 'upload', `owner=${req.targetOwnerId} count=${saved.length}`);

@@ -257,6 +257,18 @@ crontab -e
    - 미설정 시 아무 동작 안 함(기존과 동일). Slack/Discord 웹훅 등 다른 URL도 사용 가능.
 > 특히 **PAR(오프사이트 업로드) 실패**는 로컬 백업만 성공해도 `/fail` 로 알립니다(반쪽 백업 방지). PAR은 만료되니 만료 전 갱신도 잊지 마세요.
 
+### 9-5. 백업 자격증명 최소권한 (권장)
+VM이 털리면 백업까지 지워지는 걸 막으려면, 백업용 OCI 키/PAR의 권한을 **딱 필요한 만큼만** 주세요.
+- **파일 볼륨 백업 키(`~/.oci/config`)**: 테넌시 관리 키가 아니라 **전용 IAM 사용자 + 최소 정책**으로.
+  ```
+  # 예: 백업 전용 그룹 정책 (해당 컴파트먼트에서 볼륨 백업 생성/조회만)
+  Allow group bookjeok-backup to manage volume-backups in compartment <comp>
+  Allow group bookjeok-backup to read volumes in compartment <comp>
+  ```
+  - 삭제(`bv backup delete`)까지 이 키로 하지 말고, **보존은 OCI 볼륨백업 정책(lifecycle)** 에 맡기면 VM이 털려도 백업을 지울 수 없습니다.
+- **DB 백업 PAR**: *쓰기만* 허용(읽기·삭제 없음). 버킷에 **버전관리(Object Versioning)** 또는 **Retention Rule** 을 켜면 덮어쓰기·삭제로 과거 백업이 사라지지 않습니다.
+- 이렇게 하면 8. 의 "계정 밖 사본"과 별개로, **한 서버 침해가 곧 백업 전멸**로 이어지는 경로를 끊습니다.
+
 ---
 
 ## 10. 운영 · 업데이트 · 점검

@@ -19,7 +19,7 @@ async function authenticate(req, res, next) {
     const payload = jwt.verify(token, config.jwtSecret);
     // 토큰 발급 후 계정이 비활성/삭제되었을 수 있으므로 DB 재확인
     const result = await query(
-      'SELECT id, username, display_name, role, is_active FROM users WHERE id = $1',
+      'SELECT id, username, display_name, role, is_active, totp_enabled FROM users WHERE id = $1',
       [payload.sub]
     );
     if (result.rowCount === 0 || !result.rows[0].is_active) {

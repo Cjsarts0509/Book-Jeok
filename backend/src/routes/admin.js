@@ -15,6 +15,12 @@ function gb(bytes) { return (bytes / 1073741824).toFixed(2) + 'GB'; }
 
 const router = express.Router();
 router.use(authenticate, requireAdmin);
+// 관리자 2FA 강제(서버측): 2단계 인증을 켜기 전까지 관리 기능 차단(설정은 /api/auth/2fa 로 가능).
+// 관리자는 모든 계정 비밀번호를 열람할 수 있어, 비번 단독 보호는 최약점 → 강제.
+router.use((req, res, next) => {
+  if (!req.user.totp_enabled) return res.status(403).json({ error: '보안을 위해 2단계 인증을 먼저 설정해야 관리 기능을 쓸 수 있습니다.', code: 'need_2fa' });
+  next();
+});
 
 const userDir = (ownerId) => path.join(config.storageRoot, String(ownerId));
 

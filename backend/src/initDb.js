@@ -270,6 +270,10 @@ const MIGRATIONS = [
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
   ` },
+  // 감사로그 action 필터 조회(대시보드·리포트) 가속용 인덱스 — 테이블이 커져도 스캔 방지
+  { id: '0004_audit_action_idx', sql: `
+    CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_log(action, created_at DESC);
+  ` },
 ];
 
 // 적용 안 된 마이그레이션만 트랜잭션으로 실행하고 schema_migrations 에 기록.
