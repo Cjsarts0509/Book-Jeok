@@ -217,10 +217,13 @@ router.get('/db-status', wrap(async (req, res) => {
 router.get('/backup-status', wrap(async (req, res) => {
   const dir = path.join(config.storageRoot, '_backup-status');
   const readJson = async (name) => { try { return JSON.parse(await fsp.readFile(path.join(dir, name), 'utf8')); } catch { return null; } };
+  // dayMap: {YYYY-MM-DD: true/false} — 일자별 DB(일간=구글) 백업 성공 여부(프런트 주차 그리드용)
+  const dayMap = {};
+  for (const [k, v] of require('../report').backupDayMap()) dayMap[k] = v;
   res.json({
     db: await readJson('db.json'), files: await readJson('files.json'), offsite: await readJson('offsite.json'),
     dbList: (await readJson('db-list.json')) || [], filesList: (await readJson('files-list.json')) || [],
-    days: require('../report').backupDays(7),   // 최근 7일 일자별 성공 여부
+    dayMap,
   });
 }));
 
