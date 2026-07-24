@@ -2,8 +2,19 @@
 
 // 주간 시스템 상태 리포트 생성 — 계정별 디스크, 최근 7일 활동/실패, 특이사항.
 // 이메일용 HTML(인라인 스타일)과 텍스트를 함께 생성한다.
+const fs = require('fs');
+const path = require('path');
+const config = require('./config');
 const { query } = require('./db');
 const { diskTotalBytes, allocatedBytes } = require('./disk');
+
+// 백업 상태 파일(_backup-status/*.json) 읽기 — 스크립트가 실행 결과를 여기에 기록한다.
+function readBackupStatus() {
+  const dir = path.join(config.storageRoot, '_backup-status');
+  const read = (name) => { try { return JSON.parse(fs.readFileSync(path.join(dir, name), 'utf8')); } catch { return null; } };
+  return { db: read('db.json'), files: read('files.json'), offsite: read('offsite.json') };
+}
+const ageHours = (iso) => { const t = iso ? new Date(iso).getTime() : 0; return t ? (Date.now() - t) / 3600000 : Infinity; };
 
 function fmtBytes(n) {
   n = Number(n) || 0;
@@ -58,7 +69,24 @@ async function collect() {
   if (blocked > 0) anomalies.push(`업로드 차단 ${blocked}건 (형식위장/악성패턴) — 아래 계정별 실패 이력 참고`);
   if ((acts.login_failed || 0) >= 10) anomalies.push(`로그인 실패 ${acts.login_failed}건 — 비정상 접근 가능성 점검`);
 
+  // 백업 상태 → 실패/오래됨이면 특이사항에 올린다
+  const backup = readBackupStatus();
+  if (!backup.db) anomalies.push('DB 백업 기록이 없습니다 — 백업 스케줄 확인 필요');
+  else {
+    if (ageHours(backup.db.at) > 48) anomalies.push(`DB 백업이 ${Math.floor(ageHours(backup.db.at) / 24)}일째 갱신 안 됨 — 확인 필요`);
+    if (backup.db.remote === false) anomalies.push('DB 오프사이트(오브젝트스토리지) 업로드 실패 — 로컬 백업만 존재');
+  }
+  if (!backup.files) anomalies.push('파일 볼륨 백업 기록이 없습니다 — 스케줄 확인 필요');
+  else if (backup.files.ok === false) anomalies.push('파일 볼륨 백업 실패 — 확인 필요');
+  else if (ageHours(backup.files.at) > 9 * 24) anomalies.push(`파일 볼륨 백업이 ${Math.floor(ageHours(backup.files.at) / 24)}일째 갱신 안 됨`);
+  // 계정 밖(오프사이트)은 설정된 경우(기록 존재)에만 검사
+  if (backup.offsite) {
+    if (backup.offsite.ok === false) anomalies.push('계정 밖(오프사이트) 백업 실패 — 확인 필요');
+    else if (ageHours(backup.offsite.at) > 35 * 24) anomalies.push(`계정 밖 백업이 ${Math.floor(ageHours(backup.offsite.at) / 24)}일째 갱신 안 됨`);
+  }
+
   return {
+    backup,
     range: '최근 7일',
     storage: { total, used, alloc, available: Math.max(0, total - alloc), usedPct: diskPct, allocPct },
     activity: {
@@ -95,6 +123,22 @@ function render(d) {
     ? `<ul style="margin:6px 0 0;padding-left:18px">${d.anomalies.map((a) => `<li style="margin:3px 0">${esc(a)}</li>`).join('')}</ul>`
     : '<p style="color:#0a0;margin:6px 0 0">특이사항 없음 ✅</p>';
 
+  // 백업 상태 표
+  const bkRow = (label, st, freshH, extraBad) => {
+    if (!st) return `<tr><td style="padding:4px 8px">${label}</td><td style="padding:4px 8px;color:#EA4B54">기록 없음</td><td></td></tr>`;
+    const stale = ageHours(st.at) > freshH; const bad = st.ok === false || extraBad;
+    const when = st.at ? new Date(st.at).toLocaleString('ko-KR') : '?';
+    const status = bad ? '⚠️ 실패/부분' : stale ? '⚠️ 오래됨' : '✅ 정상';
+    const color = (bad || stale) ? '#EA4B54' : '#0a0';
+    return `<tr><td style="padding:4px 8px">${label}</td><td style="padding:4px 8px;color:${color}">${status}</td><td style="padding:4px 8px;text-align:right;color:#666;font-size:12px">${esc(when)}</td></tr>`;
+  };
+  const b = d.backup || {};
+  const backupTable = `<table style="width:100%;border-collapse:collapse;font-size:14px">
+    ${bkRow('DB (일간)', b.db, 48, b.db && b.db.remote === false)}
+    ${bkRow('파일 볼륨 (주간)', b.files, 9 * 24)}
+    ${b.offsite ? bkRow('계정 밖 (오프사이트)', b.offsite, 35 * 24) : '<tr><td style="padding:4px 8px;color:#888">계정 밖(오프사이트)</td><td style="padding:4px 8px;color:#888">미설정</td><td></td></tr>'}
+  </table>`;
+
   const html = `<div style="font-family:-apple-system,'Malgun Gothic',sans-serif;max-width:720px;margin:0 auto;color:#222">
     <div style="background:#FFD166;padding:18px 20px;border-radius:12px 12px 0 0">
       <div style="font-size:20px;font-weight:800">📮 북적북적 주간 리포트</div>
@@ -109,6 +153,7 @@ function render(d) {
         <tr><td style="padding:4px 8px">할당 합계</td><td style="padding:4px 8px;text-align:right">${fmtBytes(s.alloc)} (${s.allocPct}%)</td>
             <td style="padding:4px 8px">할당 가능</td><td style="padding:4px 8px;text-align:right">${fmtBytes(s.available)}</td></tr>
       </table>
+      <h3 style="margin:20px 0 8px">🛟 백업</h3>${backupTable}
       <h3 style="margin:20px 0 8px">📊 최근 7일 활동</h3>
       <table style="width:100%;border-collapse:collapse;font-size:14px;text-align:center">
         <tr style="color:#666;font-size:12px"><td>업로드</td><td>다운로드</td><td>차단(형식/악성)</td><td>로그인 실패</td></tr>
@@ -126,6 +171,10 @@ function render(d) {
     `북적북적 주간 리포트 (${d.range})`, '',
     '[특이사항]', ...(d.anomalies.length ? d.anomalies.map((a) => ' - ' + a) : [' - 없음']), '',
     `[디스크] 사용 ${fmtBytes(s.used)}/${fmtBytes(s.total)} (${s.usedPct}%), 할당 ${fmtBytes(s.alloc)} (${s.allocPct}%), 가능 ${fmtBytes(s.available)}`, '',
+    '[백업]',
+    ` - DB(일간): ${b.db ? (b.db.remote === false ? '⚠️ 오프사이트 업로드 실패' : (ageHours(b.db.at) > 48 ? '⚠️ 오래됨' : '정상')) + ' · ' + (b.db.at ? new Date(b.db.at).toLocaleString('ko-KR') : '?') : '기록 없음'}`,
+    ` - 파일볼륨(주간): ${b.files ? (b.files.ok === false ? '⚠️ 실패' : (ageHours(b.files.at) > 9 * 24 ? '⚠️ 오래됨' : '정상')) + ' · ' + (b.files.at ? new Date(b.files.at).toLocaleString('ko-KR') : '?') : '기록 없음'}`,
+    ` - 계정밖(오프사이트): ${b.offsite ? (b.offsite.ok === false ? '⚠️ 실패' : (ageHours(b.offsite.at) > 35 * 24 ? '⚠️ 오래됨' : '정상')) + ' · ' + (b.offsite.at ? new Date(b.offsite.at).toLocaleString('ko-KR') : '?') : '미설정'}`, '',
     `[7일 활동] 업로드 ${d.activity.uploads} · 다운로드 ${d.activity.downloads} · 차단 ${d.activity.blocked} · 로그인실패 ${d.activity.loginFailed}`, '',
     '[계정별 사용량]',
     ...d.accounts.map((a) => ` - ${a.displayName}(@${a.username}): ${fmtBytes(a.used)}${a.quota > 0 ? '/' + fmtBytes(a.quota) + ' (' + a.pct + '%)' : ''} · ${a.files}개`),

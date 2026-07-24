@@ -25,8 +25,15 @@ command -v rclone >/dev/null 2>&1 || { echo "[offsite] rclone 이 설치돼 있�
 
 # 모니터링(선택): 전용 URL 없으면 공용 BOOKJEOK_HC_URL 도 사용 안 함(오프사이트는 빈도가 달라 별도 권장)
 HC_URL="${BOOKJEOK_OFFSITE_HC_URL:-}"
+API_CONTAINER="${API_CONTAINER:-bookjeok-api}"
 hc() { [ -n "$HC_URL" ] && curl -fsS -m 15 --retry 2 "${HC_URL}${1:-}" >/dev/null 2>&1 || true; }
-trap 'hc /fail' ERR
+# 결과를 앱이 읽는 위치(_backup-status/offsite.json)에 기록 → 주간 리포트/관리자 탭에서 표시
+write_status() { # $1=ok(true/false)
+  local ts; ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  printf '{"at":"%s","ok":%s}' "$ts" "$1" \
+    | docker exec -i "$API_CONTAINER" sh -c 'mkdir -p /data/storage/_backup-status && cat > /data/storage/_backup-status/offsite.json' 2>/dev/null || true
+}
+trap 'write_status false; hc /fail' ERR
 hc /start
 
 DATA_ROOT="${DATA_ROOT:-/mnt/bookjeok-data}"
@@ -55,4 +62,5 @@ rclone sync "$STORAGE" "$REMOTE/storage" \
 find "$LOCAL_DB" -name 'bookjeok-db-offsite-*.sql.gz' -mtime +2 -delete
 
 echo "$(date '+%F %T') [offsite] 완료 → $REMOTE"
+write_status true
 hc            # 성공 핑
