@@ -585,6 +585,8 @@ const App = (() => {
   const prettyPath = (folder) => (!folder || folder === '/') ? '🏠 홈' : folder.split('/').filter(Boolean).join(' › ');
   // 목록용 짧은 날짜: 2026.07.09 → 26.07.09
   const sdate = (iso) => { const s = UI.date(iso); return s ? s.replace(/^20/, '') : s; };
+  // 목록 날짜셀: 날짜(년월일) 아래에 작게 시:분
+  const sdt = (iso) => { if (!iso) return '—'; const d = new Date(iso); const p = (x) => String(x).padStart(2, '0'); return `${sdate(iso)}<span class="cell-time">${p(d.getHours())}:${p(d.getMinutes())}</span>`; };
 
   // 파일명 기반 폴더 추천: 파일명 속 지점명(영업점) + 날짜(YYYYMMDD/YYYY-MM 등)와 매칭되는 폴더를 경로째 추천
   function recommendFolders(fileItems) {
@@ -694,8 +696,8 @@ const App = (() => {
         <td class="open-cell name-cell" data-open="${UI.escapeHtml(f.path)}" title="더블클릭하여 열기">${favBtn(true, f.path, f.fav)}<span class="ic${f.color ? ' tint' : ''}" style="${folderIcoStyle(f.color)}">${f.icon || '📁'}</span> ${UI.escapeHtml(f.name)}${updateBadge(f, true)}</td>
         <td class="path-cell" data-goto="${UI.escapeHtml(par)}" title="${UI.escapeHtml(par)}">${UI.escapeHtml(prettyPath(par))}</td>
         <td class="num muted" data-label="크기">${UI.bytes(f.size)}</td>
-        <td class="num muted" data-label="등록">${f.createdAt ? sdate(f.createdAt) : '—'}</td>
-        <td class="num muted" data-label="수정">${f.noteUpdatedAt ? sdate(f.noteUpdatedAt) : '—'}</td>
+        <td class="num muted" data-label="등록">${sdt(f.createdAt)}</td>
+        <td class="num muted" data-label="수정">${sdt(f.noteUpdatedAt)}</td>
         <td class="note-cell" data-fnote="${UI.escapeHtml(f.path)}" title="클릭하여 비고 편집">${f.note ? UI.escapeHtml(f.note) : '<span class="muted">+ 비고</span>'}</td>
         <td class="row-actions"><button class="icon-btn" data-fshare="${UI.escapeHtml(f.path)}" title="폴더 공유(읽기전용)">🔗</button><button class="icon-btn" data-freq="${UI.escapeHtml(f.path)}" title="업로드 요청 링크">📥</button><button class="icon-btn" data-fedit="${UI.escapeHtml(f.path)}" title="폴더 설정">⚙️</button></td>
       </tr>`;
@@ -707,8 +709,8 @@ const App = (() => {
         <td class="name-cell">${favBtn(false, f.id, f.fav)}<span class="ic">${UI.fileIcon(f.name)}</span> ${UI.escapeHtml(f.name)}${updateBadge(f, false)}${tagChips(f.tags)}</td>
         <td class="path-cell" data-goto="${UI.escapeHtml(f.folder || '/')}" title="${UI.escapeHtml(f.folder || '/')}">${UI.escapeHtml(prettyPath(f.folder))}</td>
         <td class="num muted" data-label="크기">${UI.bytes(f.size)}</td>
-        <td class="num muted" data-label="등록">${sdate(f.createdAt)}</td>
-        <td class="num muted" data-label="수정">${sdate(f.updatedAt || f.createdAt)}</td>
+        <td class="num muted" data-label="등록">${sdt(f.createdAt)}</td>
+        <td class="num muted" data-label="수정">${sdt(f.updatedAt || f.createdAt)}</td>
         <td class="note-cell" data-note="${f.id}" title="클릭하여 비고 편집">${f.note ? UI.escapeHtml(f.note) : '<span class="muted">+ 비고</span>'}</td>
         <td class="row-actions">${canPreview(f.name) ? `<button class="icon-btn" data-preview="${f.id}" title="미리보기">👁️</button>` : ''}<button class="icon-btn" data-share="${f.id}" title="공유">🔗</button><button class="icon-btn" data-tags="${f.id}" title="태그">🏷️</button><button class="icon-btn" data-dl="${f.id}" title="다운로드">⬇️</button></td>
       </tr>`;

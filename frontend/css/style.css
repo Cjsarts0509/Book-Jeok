@@ -563,6 +563,7 @@ th { background: var(--bg); font-weight: 700; color: var(--text-muted); font-siz
 .filetable tr.sel { background: #FFF3CF; }
 .filetable td { vertical-align: middle; }
 .filetable td.num { white-space: nowrap; }   /* 크기·날짜 줄바꿈 방지 → 행 높이 통일 */
+.filetable .cell-time { display: block; font-size: 11px; line-height: 1.2; color: var(--text-muted); opacity: .7; margin-top: 1px; }   /* 등록/수정일 아래 시:분 */
 .filetable .ic { margin-right: 4px; }
 /* 정렬 가능한 헤더 */
 .filetable th.sortable { cursor: pointer; user-select: none; white-space: nowrap; transition: background .12s, color .12s; }
