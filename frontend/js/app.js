@@ -585,8 +585,8 @@ const App = (() => {
   const prettyPath = (folder) => (!folder || folder === '/') ? '🏠 홈' : folder.split('/').filter(Boolean).join(' › ');
   // 목록용 짧은 날짜: 2026.07.09 → 26.07.09
   const sdate = (iso) => { const s = UI.date(iso); return s ? s.replace(/^20/, '') : s; };
-  // 목록 날짜셀: 날짜(년월일) 아래에 작게 시:분
-  const sdt = (iso) => { if (!iso) return '—'; const d = new Date(iso); const p = (x) => String(x).padStart(2, '0'); return `${sdate(iso)}<span class="cell-time">${p(d.getHours())}:${p(d.getMinutes())}</span>`; };
+  // 목록 날짜셀: 날짜(년월일) 아래에 작게 오전/오후 시:분
+  const sdt = (iso) => { if (!iso) return '—'; const d = new Date(iso); const p = (x) => String(x).padStart(2, '0'); const h = d.getHours(); const ap = h < 12 ? '오전' : '오후'; const h12 = h % 12 || 12; return `${sdate(iso)}<span class="cell-time">${ap} ${p(h12)}:${p(d.getMinutes())}</span>`; };
 
   // 파일명 기반 폴더 추천: 파일명 속 지점명(영업점) + 날짜(YYYYMMDD/YYYY-MM 등)와 매칭되는 폴더를 경로째 추천
   function recommendFolders(fileItems) {
