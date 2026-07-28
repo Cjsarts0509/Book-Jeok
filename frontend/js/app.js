@@ -218,19 +218,50 @@ const App = (() => {
   function closeNavMenu() { document.getElementById('appbar-nav')?.classList.remove('open'); }
   const isMobile = () => window.matchMedia('(max-width: 640px)').matches;
   function resetToOwn() { state.ownerId = null; state.ownerName = null; state.folder = '/'; state.selected.clear(); resetNav(); const sw = document.getElementById('account-switcher'); if (sw) sw.value = ''; thumbClear(); loadAll(); }
+  // 다른 계정(외부업체·영업점) 공간으로 진입 — 계정전환 드롭다운/폴더카드 공용.
+  function enterAccount(a) {
+    if (!a) return;
+    state.ownerId = a.id; state.ownerName = a.displayName; state.folder = '/'; state.selected.clear(); resetNav(); thumbClear();
+    const sw = document.getElementById('account-switcher'); if (sw) sw.value = String(a.id);
+    loadAll();
+  }
 
   async function setupAccountSwitcher() {
     try {
       const { accounts } = await API.accounts();
       state.accounts = accounts.filter((a) => a.id !== state.user.id);
-      const sw = document.getElementById('account-switcher'); if (!sw) return;
-      for (const a of state.accounts) { const o = document.createElement('option'); o.value = a.id; o.textContent = `${a.displayName} (@${a.username}·${roleLabel(a.role)})`; sw.appendChild(o); }
-      sw.addEventListener('change', () => {
-        if (!sw.value) return resetToOwn();
-        const a = state.accounts.find((x) => String(x.id) === sw.value);
-        state.ownerId = a.id; state.ownerName = a.displayName; state.folder = '/'; state.selected.clear(); resetNav(); thumbClear(); loadAll();
-      });
+      const sw = document.getElementById('account-switcher');
+      if (sw) {
+        for (const a of state.accounts) { const o = document.createElement('option'); o.value = a.id; o.textContent = `${a.displayName} (@${a.username}·${roleLabel(a.role)})`; sw.appendChild(o); }
+        sw.addEventListener('change', () => { if (!sw.value) return resetToOwn(); enterAccount(state.accounts.find((x) => String(x.id) === sw.value)); });
+      }
+      renderAccountShortcuts();   // 계정 목록이 늦게 도착해도 홈 화면의 폴더카드에 반영
     } catch {}
+  }
+
+  // ── 계정 폴더 바로가기(관리자·담당자) ──
+  // 담당자/관리자의 '내 공간 홈' 최상위에, 다룰 수 있는 계정을 폴더처럼 보여준다.
+  //  · 외부업체(user): 담당자·관리자 모두  · 영업점(branch): 관리자만 (API.accounts 가 역할별로 이미 필터)
+  //  클릭 시 그 계정 공간으로 들어가 파일을 보고 올릴 수 있고, 용량은 그 계정에 반영된다.
+  function showAccountShortcuts() { return isPriv() && !state.ownerId && state.folder === '/' && !state.search.on; }
+  function accountShortcutsHTML() {
+    const esc = UI.escapeHtml;
+    const vendors = state.accounts.filter((a) => a.role === 'user');
+    const branches = state.accounts.filter((a) => a.role === 'branch');
+    if (!vendors.length && !branches.length) return '';
+    const card = (a) => `<button class="acct-card" data-acct="${a.id}" title="${esc(a.displayName)} (@${esc(a.username)}) 공간 열기">
+        <span class="acct-ico">${a.role === 'branch' ? '🏬' : '🏢'}</span>
+        <span class="acct-meta"><span class="acct-name">${esc(a.displayName)}</span><span class="acct-sub">@${esc(a.username)}</span></span></button>`;
+    const group = (title, arr) => arr.length ? `<div class="acct-group"><div class="acct-group-title">${title} <span class="muted">${arr.length}</span></div><div class="acct-cards">${arr.map(card).join('')}</div></div>` : '';
+    return `<div class="acct-shortcuts">
+        <div class="acct-shortcuts-hint">🗂️ 계정 폴더를 열면 그 계정 공간에서 파일을 보고 올릴 수 있어요 (용량은 그 계정에 반영).</div>
+        ${group('🏢 외부업체', vendors)}${group('🏬 영업점', branches)}
+      </div>`;
+  }
+  function renderAccountShortcuts() {
+    const box = document.getElementById('acct-shortcuts'); if (!box) return;
+    box.innerHTML = showAccountShortcuts() ? accountShortcutsHTML() : '';
+    box.querySelectorAll('[data-acct]').forEach((b) => b.addEventListener('click', () => enterAccount(state.accounts.find((x) => String(x.id) === b.dataset.acct))));
   }
 
   async function doLogout() { try { await API.logout(); } catch {} thumbClear(); API.setToken(null); state.user = null; renderLogin(); }
@@ -362,9 +393,10 @@ const App = (() => {
         </div>
       </div>
       ${state.search.on ? `<div class="search-banner">🔎 <b>${UI.escapeHtml(state.search.q)}</b> 검색 결과 · ${state.folders.length + state.files.length}건<div style="flex:1"></div><button class="btn btn-sm btn-ghost" id="search-exit">✕ 검색 나가기</button></div>` : ''}
+      <div id="acct-shortcuts"></div>
       <div id="selbar" class="selbar empty"></div>
       <div id="listing"></div>`;
-    renderCrumbs(); renderListing(); wireContent();
+    renderCrumbs(); renderAccountShortcuts(); renderListing(); wireContent();
   }
 
   function renderCrumbs() {
