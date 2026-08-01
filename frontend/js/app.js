@@ -2980,15 +2980,25 @@ const App = (() => {
       });
     }
 
-    // 오차 목록 → 워크북(aoa) 빌드 — 다운로드/전달 공용
+    // 서가번호(11자리) → [대분류(3·수불처), 중분류(6), 소분류(2)]. 형식이 다르면 통째로 대분류에.
+    function splitShelf(num) {
+      const s = String(num == null ? '' : num).trim();
+      if (s.length >= 11) return [s.slice(0, 3), s.slice(3, 9), s.slice(9)];
+      return [s, '', ''];
+    }
+    // 오차 목록 → 워크북(aoa) 빌드. 서가는 대분류/중분류/소분류/스캔수량 칼럼 + 서가번호별 '행 분리', 중분류 정렬.
     function buildDiscWorkbook(XLSX) {
-      const aoa = [[...base, ...shelfHead]];
+      const headers = ['분야', 'ISBN', '도서명', '출판사', '전산재고', '실재고', '누락재고', '예외여부', '스캔재고', '차이', '대분류', '중분류', '소분류', '스캔수량'];
+      const rows = [];
       for (const d of disc) {
-        const row = [d.field, d.isbn, d.name, d.pub, d.sys, d.real, d.miss, d.exc, d.scan, d.diff];
-        for (let i = 0; i < SA_MAX_SHELF; i++) { const s = d.shelves[i]; row.push(s ? `${s[0]} (${s[1]})` : ''); }
-        aoa.push(row);
+        const shelves = (d.shelves && d.shelves.length) ? d.shelves : [null];
+        for (const s of shelves) {
+          const [maj, mid, min] = s ? splitShelf(s[0]) : ['', '', ''];
+          rows.push([d.field, d.isbn, d.name, d.pub, d.sys, d.real, d.miss, d.exc, d.scan, d.diff, maj, mid, min, s ? s[1] : '']);
+        }
       }
-      const ws = XLSX.utils.aoa_to_sheet(aoa);
+      rows.sort((a, b) => String(a[11]).localeCompare(String(b[11]), 'ko', { numeric: true }));  // 중분류 기준 정렬
+      const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
       const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, '재고오차');
       return wb;
     }
