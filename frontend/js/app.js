@@ -2629,13 +2629,16 @@ const App = (() => {
     // 담당자·관리자면 전달 대상 영업점 목록을 불러온다(영업점 계정 자체는 이 목록 안 씀).
     if (isPriv()) API.stockAuditBranches().then((r) => { saBranches = r.branches || []; const sel = m.q('#sa-branch'); if (sel) fillBranchSelect(sel); }).catch(() => {});
     let saPhotoStems = new Set();   // 현재 폴더에 이미 사진이 있는 ISBN
-    let saSort = { col: null, dir: 1 };  // 정렬 열(0~9) · 방향(1 오름/-1 내림)
+    const SA_MID_COL = 11;                // 중분류 열 인덱스(기본 정렬 기준)
+    let saSort = { col: SA_MID_COL, dir: 1 };  // 정렬 열 · 방향(1 오름/-1 내림) · 기본=중분류
     let saFilterFields = new Set();  // 분야 필터(비어있으면 전체, 아니면 선택된 분야만)
     let saFilterPhoto = '';         // 사진 필터('' 전체 · 'has' 있음 · 'no' 없음)
-    // 정렬용 열 정의(기본 10열) — key는 disc 필드, num이면 숫자 정렬
+    // 정렬용 열 정의(14열). shelf=true 는 서가 분해값(대/중/소분류·스캔수량)으로 disc 항목이 아닌 '행'에서 취함.
+    const SA_HEADERS = ['분야', 'ISBN', '도서명', '출판사', '전산재고', '실재고', '누락재고', '예외여부', '스캔재고', '차이', '대분류', '중분류', '소분류', '스캔수량'];
     const SA_COLS = [
       { k: 'field', num: false }, { k: 'isbn', num: false }, { k: 'name', num: false }, { k: 'pub', num: false },
       { k: 'sys', num: true }, { k: 'real', num: true }, { k: 'miss', num: true }, { k: 'exc', num: false }, { k: 'scan', num: true }, { k: 'diff', num: true },
+      { k: 'maj', num: false, shelf: true }, { k: 'mid', num: false, shelf: true }, { k: 'min', num: false, shelf: true }, { k: 'qty', num: true, shelf: true },
     ];
 
     // ── 목록 저장/불러오기(서버 보관 · 계정별) — 같은 계정이면 어느 기기서든 이어서 작업 ──
@@ -2671,45 +2674,45 @@ const App = (() => {
       });
       const c = m.q('#sa-photocount'); if (c) c.textContent = n ? ` · 📷 사진있음 ${n.toLocaleString()}건` : '';
     }
-    // 필터+정렬을 적용한 표시 순서(disc 인덱스 배열)
-    function sortedIndices() {
-      let idx = disc.map((_, i) => i).filter((i) => {
-        const d = disc[i];
-        if (saFilterFields.size && !saFilterFields.has(String(d.field == null ? '' : d.field))) return false;
-        if (saFilterPhoto === 'has' && !saPhotoStems.has(d.isbn)) return false;
-        if (saFilterPhoto === 'no' && saPhotoStems.has(d.isbn)) return false;
-        return true;
+    // 표에 그릴 '행' 목록: 항목×서가번호별로 펼치고 필터 적용 후 정렬(기본=중분류). 각 행은 disc 인덱스(ri)+서가 분해값.
+    function buildRows() {
+      const rows = [];
+      disc.forEach((d, ri) => {
+        if (saFilterFields.size && !saFilterFields.has(String(d.field == null ? '' : d.field))) return;
+        if (saFilterPhoto === 'has' && !saPhotoStems.has(d.isbn)) return;
+        if (saFilterPhoto === 'no' && saPhotoStems.has(d.isbn)) return;
+        const shelves = (d.shelves && d.shelves.length) ? d.shelves : [null];
+        for (const s of shelves) {
+          const [maj, mid, min] = s ? splitShelf(s[0]) : ['', '', ''];
+          rows.push({ ri, maj, mid, min, qty: s ? s[1] : '' });
+        }
       });
-      if (saSort.col != null) {
-        const c = SA_COLS[saSort.col];
-        idx.sort((a, b) => {
-          const va = disc[a][c.k], vb = disc[b][c.k];
-          const r = c.num ? (num(va) - num(vb)) : String(va == null ? '' : va).localeCompare(String(vb == null ? '' : vb), 'ko');
-          return r * saSort.dir;
-        });
-      }
-      return idx;
+      const c = SA_COLS[saSort.col] || SA_COLS[SA_MID_COL];
+      const val = (row) => (c.shelf ? row[c.k] : disc[row.ri][c.k]);
+      rows.sort((a, b) => {
+        const va = val(a), vb = val(b);
+        const r = c.num ? (num(va) - num(vb)) : String(va == null ? '' : va).localeCompare(String(vb == null ? '' : vb), 'ko', { numeric: true });
+        return r * saSort.dir;
+      });
+      return rows;
     }
-    // 표(thead+tbody)를 필터·정렬 반영해 다시 그림
+    // 표(thead+tbody)를 필터·정렬 반영해 다시 그림. 서가번호별로 행이 나뉘며 대/중/소분류·스캔수량 칼럼으로 표기.
     function renderTable() {
       const wrap = m.q('#sa-tablewrap'); if (!wrap) return;
-      const order = sortedIndices();
+      const rows = buildRows();
       const arrow = (i) => (saSort.col === i ? (saSort.dir > 0 ? ' ▲' : ' ▼') : '');
-      const thBase = base.map((h, i) => `<th class="sa-sortable" data-col="${i}">${esc(h)}${arrow(i)}</th>`).join('');
-      const thShelf = shelfHead.map((h) => `<th>${esc(h)}</th>`).join('');
-      const thead = `<thead><tr>${thBase}${thShelf}</tr></thead>`;
-      const tbody = order.map((ri) => {
-        const d = disc[ri];
-        const cells = [d.field, d.isbn, d.name, d.pub, d.sys, d.real, d.miss, d.exc, d.scan, d.diff];
-        for (let i = 0; i < SA_MAX_SHELF; i++) { const s = d.shelves[i]; cells.push(s ? `${s[0]} (${s[1]})` : ''); }
-        return `<tr data-ri="${ri}">${cells.map((c, idx) => `<td class="${idx >= base.length ? 'sa-shelf' : (idx === 1 ? 'sa-isbn' : '')}">${esc(String(c == null ? '' : c))}</td>`).join('')}</tr>`;
+      const thead = `<thead><tr>${SA_HEADERS.map((h, i) => `<th class="sa-sortable" data-col="${i}">${esc(h)}${arrow(i)}</th>`).join('')}</tr></thead>`;
+      const tbody = rows.map((row) => {
+        const d = disc[row.ri];
+        const cells = [d.field, d.isbn, d.name, d.pub, d.sys, d.real, d.miss, d.exc, d.scan, d.diff, row.maj, row.mid, row.min, row.qty];
+        return `<tr data-ri="${row.ri}">${cells.map((c, idx) => `<td class="${idx >= 10 ? 'sa-shelf' : (idx === 1 ? 'sa-isbn' : '')}">${esc(String(c == null ? '' : c))}</td>`).join('')}</tr>`;
       }).join('');
-      wrap.innerHTML = order.length
+      wrap.innerHTML = rows.length
         ? `<table class="sa-table">${thead}<tbody>${tbody}</tbody></table>`
         : '<p class="muted" style="padding:14px">조건에 맞는 항목이 없습니다.</p>';
-      // 정렬/행 클릭은 renderResult 에서 wrap 에 위임 1회 등록(여기서 1000+ 개별 바인딩하지 않음)
+      // 정렬/행 클릭은 renderResult 에서 wrap 에 위임 1회 등록(여기서 개별 바인딩하지 않음)
       applyShade();
-      const sh = m.q('#sa-shown'); if (sh) sh.textContent = order.length !== disc.length ? ` · 표시 ${order.length.toLocaleString()}건` : '';
+      const sh = m.q('#sa-shown'); if (sh) sh.textContent = ` · 표 ${rows.length.toLocaleString()}행`;
     }
     async function setFolder(f) {
       saCurrentFolder = f || '/';
@@ -2916,7 +2919,7 @@ const App = (() => {
     function renderResult() {
       if (!disc.length) { m.q('#sa-result').innerHTML = '<p class="muted" style="padding:14px">오차 항목이 없습니다.</p>'; return; }
       // 필터 상태 초기화(새 목록/이어서 보기 시)
-      saSort = { col: null, dir: 1 }; saFilterFields = new Set(); saFilterPhoto = '';
+      saSort = { col: SA_MID_COL, dir: 1 }; saFilterFields = new Set(); saFilterPhoto = '';
       const matched = disc.filter((d) => d.shelves && d.shelves.length).length;
       const fields = [...new Set(disc.map((d) => String(d.field == null ? '' : d.field)).filter((x) => x !== ''))].sort((a, b) => a.localeCompare(b, 'ko'));
       m.q('#sa-result').innerHTML = `
