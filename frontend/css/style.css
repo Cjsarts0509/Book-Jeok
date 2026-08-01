@@ -890,7 +890,8 @@ th { background: var(--bg); font-weight: 700; color: var(--text-muted); font-siz
 .sa-summary { flex: 1; min-width: 200px; font-size: 14px; padding: 10px 14px; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-sm); }
 .sa-tablewrap { flex: 1; min-height: 0; overflow: auto; border: 1px solid var(--border); border-radius: var(--radius-sm); }
 .sa-table { border-collapse: collapse; font-size: 12.5px; white-space: nowrap; }
-.sa-table th, .sa-table td { border: 1px solid var(--border); padding: 6px 9px; text-align: left; }
+.sa-table th, .sa-table td { border: 1px solid var(--border); padding: 6px 9px; text-align: left; vertical-align: top; }
+.sa-table td.sa-shelf { line-height: 1.7; }   /* 서가 여러 줄(중분류 순)일 때 줄 간격 */
 .sa-table thead th { position: sticky; top: 0; background: var(--bg); z-index: 1; font-weight: 700; }
 .sa-table th.sa-sortable { cursor: pointer; user-select: none; }
 .sa-table th.sa-sortable:hover { background: var(--hover); }
