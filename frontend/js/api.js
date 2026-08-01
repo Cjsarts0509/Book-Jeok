@@ -120,6 +120,8 @@ const API = (() => {
     dashboard: () => req('GET', '/admin/dashboard'),
     adminShares: () => req('GET', '/admin/shares'),
     deleteAdminShare: (kind, id) => req('DELETE', `/admin/shares/${kind}/${id}`),
+    branchAccountsPreview: () => req('GET', '/admin/branch-accounts/preview'),
+    branchAccountsCreate: (data) => req('POST', '/admin/branch-accounts/create', data),
     usageTree: () => req('GET', '/admin/usage/tree'),
     reportPreview: () => req('GET', '/admin/report/preview'),
     reportSend: () => req('POST', '/admin/report/send'),

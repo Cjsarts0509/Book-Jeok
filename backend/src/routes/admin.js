@@ -440,6 +440,67 @@ router.delete('/branches/:id', wrap(async (req, res) => {
   res.json({ ok: true });
 }));
 
+// ══════════ 영업점 계정 일괄 생성(공유 풀) ══════════
+// 현재 등록된 영업점(branches)을 코드표(branchCodes)와 대조해 kyobo_<코드> 계정을 만든다.
+//  · role=branch, manager_id=선택한 담당자, quota_bytes=0(용량은 담당자 풀 공유), 초기 비번=아이디.
+const { codeForName } = require('../branchCodes');
+const GB10 = 10 * 1024 * 1024 * 1024;
+
+// 미리보기: 무엇이 생성될지(코드 매칭·기존여부) + 담당자 목록을 돌려준다(실제 생성 없음).
+router.get('/branch-accounts/preview', wrap(async (req, res) => {
+  const branches = (await query('SELECT name FROM branches ORDER BY sort_order, name')).rows;
+  const managers = (await query("SELECT id, username, display_name, quota_bytes FROM users WHERE role='manager' ORDER BY username")).rows
+    .map((u) => ({ id: u.id, username: u.username, displayName: u.display_name, quotaBytes: Number(u.quota_bytes) }));
+  const items = [];
+  for (const b of branches) {
+    const code = codeForName(b.name);
+    const username = code ? `kyobo_${code}` : null;
+    let exists = null;
+    if (username) {
+      const e = await query('SELECT id, role, manager_id FROM users WHERE username=$1', [username]);
+      if (e.rowCount) exists = { id: e.rows[0].id, role: e.rows[0].role, managerId: e.rows[0].manager_id };
+    }
+    items.push({ branchName: b.name, code, username, matched: !!code, exists });
+  }
+  res.json({ items, managers, suggestedPoolQuota: GB10 });
+}));
+
+// 생성: 선택된 코드들(codes, 없으면 매칭 전체)에 대해 없는 계정만 생성. 담당자 풀 용량도 설정 가능.
+router.post('/branch-accounts/create', wrap(async (req, res) => {
+  const managerId = parseInt(req.body.managerId, 10);
+  const codes = Array.isArray(req.body.codes) ? req.body.codes.map(String) : null;
+  const poolQuotaBytes = Math.max(0, parseInt(req.body.poolQuotaBytes || '0', 10) || 0);
+  const mgr = await query('SELECT id, role, quota_bytes FROM users WHERE id=$1', [managerId]);
+  if (!mgr.rowCount || mgr.rows[0].role !== 'manager') return res.status(400).json({ error: '담당자(manager) 계정을 선택하세요.' });
+  // 담당자 풀 용량 설정(요청 시) — validateAllocation(자기 제외)
+  if (poolQuotaBytes > 0 && poolQuotaBytes !== Number(mgr.rows[0].quota_bytes)) {
+    const alloc = await validateAllocation(poolQuotaBytes, managerId);
+    if (!alloc.ok) return res.status(400).json({ error: `풀 용량이 할당 가능 범위를 초과했습니다. (남은: ${gb(alloc.available)})` });
+    await query('UPDATE users SET quota_bytes=$1, updated_at=now() WHERE id=$2', [poolQuotaBytes, managerId]);
+    await audit(req, 'update_user', `manager=${managerId} pool_quota=${gb(poolQuotaBytes)}`);
+  }
+  const branches = (await query('SELECT name FROM branches ORDER BY sort_order, name')).rows;
+  const created = [], skipped = [];
+  for (const b of branches) {
+    const code = codeForName(b.name);
+    if (!code) { skipped.push({ branchName: b.name, reason: '코드 없음' }); continue; }
+    if (codes && !codes.includes(code)) continue;
+    const username = `kyobo_${code}`;
+    const dup = await query('SELECT id FROM users WHERE username=$1', [username]);
+    if (dup.rowCount) { skipped.push({ branchName: b.name, username, reason: '이미 존재' }); continue; }
+    const password = username;                       // 초기 비번 = 아이디
+    const hash = await hashPassword(password), enc = encryptSecret(password);
+    const ins = await query(
+      `INSERT INTO users (username, display_name, role, password_hash, password_enc, quota_bytes, manager_id)
+       VALUES ($1,$2,'branch',$3,$4,0,$5) RETURNING id`,
+      [username, b.name, hash, enc, managerId]
+    );
+    created.push({ id: ins.rows[0].id, username, branchName: b.name, password });
+    await audit(req, 'create_user', `username=${username} role=branch pool=${managerId}`);
+  }
+  res.json({ created, skipped });
+}));
+
 // ══════════ 공지사항 관리 ══════════
 const ALL_ROLES = ['admin', 'manager', 'user', 'branch'];
 function sanitizeRoles(input) {
