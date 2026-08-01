@@ -430,31 +430,23 @@ const Admin = (() => {
     } catch (err) { view.innerHTML = `<div class="empty">⚠️ ${UI.escapeHtml(err.message)}</div>`; }
   }
 
-  // 영업점 계정 일괄생성 — 미리보기(무엇이 생성될지) → 확인 후 생성. 초기 비번=아이디, 담당자 풀에 소속.
+  // 영업점 계정 일괄생성 — 미리보기(무엇이 생성될지) → 확인 후 생성. 초기 비번=아이디, 용량은 관리자 풀(무제한).
   async function branchAccountsModal() {
     let data;
     try { data = await API.branchAccountsPreview(); } catch (err) { return UI.toast(err.message, 'error'); }
-    const { items, managers, suggestedPoolQuota } = data;
-    if (!managers.length) return UI.toast('담당자(manager) 계정이 먼저 필요합니다. 계정 관리에서 담당자를 만들어 주세요.', 'error');
+    const { items } = data;
     const willCreate = items.filter((x) => x.matched && !x.exists);
     const existing = items.filter((x) => x.exists);
     const unmatched = items.filter((x) => !x.matched);
-    const gb10 = Math.round((suggestedPoolQuota / 1073741824) * 10) / 10;
     const row = (x) => {
       const st = x.exists ? `<span class="muted">이미 있음</span>` : (x.matched ? '<span style="color:var(--accent,#06D6A0)">생성 예정</span>' : '<span style="color:var(--danger)">코드 없음</span>');
       const cb = (x.matched && !x.exists) ? `<input type="checkbox" class="ba-cb" value="${x.code}" checked>` : '';
       return `<tr><td style="text-align:center">${cb}</td><td>${UI.escapeHtml(x.branchName)}</td><td class="num">${x.code || '—'}</td><td><span style="font-family:monospace">${x.username ? UI.escapeHtml(x.username) : '—'}</span></td><td>${st}</td></tr>`;
     };
     const m = UI.modal(`<h3>🔑 영업점 계정 일괄생성</h3>
-      <p style="font-size:13px;color:var(--text-muted);margin:0 0 10px">현재 등록된 영업점 ${items.length}개 중 <b>생성 예정 ${willCreate.length}개</b> · 이미 있음 ${existing.length} · 코드없음 ${unmatched.length}. 아이디=<b>kyobo_코드</b>, 초기 비밀번호=아이디와 동일, 담당자 풀에 소속됩니다.</p>
-      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:end;margin-bottom:10px">
-        <div class="field" style="margin:0"><label>소속 담당자(풀)</label>
-          <select class="input" id="ba-mgr" style="min-width:220px">${managers.map((mg) => `<option value="${mg.id}">${UI.escapeHtml(mg.displayName)} (@${UI.escapeHtml(mg.username)})</option>`).join('')}</select></div>
-        <div class="field" style="margin:0"><label>담당자 풀 용량(GB)</label>
-          <input class="input" id="ba-quota" type="number" min="0" step="0.5" value="${gb10}" style="width:120px"></div>
-        <label style="font-size:13px;display:flex;align-items:center;gap:6px"><input type="checkbox" id="ba-all" checked> 전체 선택</label>
-      </div>
-      <div class="table-wrap" style="max-height:44vh;overflow:auto"><table class="filetable"><thead><tr><th style="width:36px"></th><th>영업점</th><th>코드</th><th>아이디</th><th>상태</th></tr></thead><tbody>${items.map(row).join('')}</tbody></table></div>
+      <p style="font-size:13px;color:var(--text-muted);margin:0 0 10px">현재 등록된 영업점 ${items.length}개 중 <b>생성 예정 ${willCreate.length}개</b> · 이미 있음 ${existing.length} · 코드없음 ${unmatched.length}. 아이디=<b>kyobo_코드</b>, 초기 비밀번호=아이디와 동일. 용량은 <b>관리자 풀(무제한)</b>에 귀속됩니다.</p>
+      <div style="margin-bottom:10px"><label style="font-size:13px;display:inline-flex;align-items:center;gap:6px"><input type="checkbox" id="ba-all" checked> 전체 선택</label></div>
+      <div class="table-wrap" style="max-height:46vh;overflow:auto"><table class="filetable"><thead><tr><th style="width:36px"></th><th>영업점</th><th>코드</th><th>아이디</th><th>상태</th></tr></thead><tbody>${items.map(row).join('')}</tbody></table></div>
       <div id="ba-result" style="margin-top:10px"></div>
       <div class="modal-actions"><button class="btn btn-ghost" id="ba-cancel">닫기</button><button class="btn btn-primary" id="ba-create" ${willCreate.length ? '' : 'disabled'}>선택 계정 생성</button></div>`);
     m.el.querySelector('.modal').classList.add('modal-wide');
@@ -464,13 +456,11 @@ const Admin = (() => {
     m.q('#ba-create').addEventListener('click', async () => {
       const codes = cbs().filter((c) => c.checked).map((c) => c.value);
       if (!codes.length) return UI.toast('생성할 계정을 선택하세요.', 'error');
-      const managerId = Number(m.q('#ba-mgr').value);
-      const poolQuotaBytes = Math.round(parseFloat(m.q('#ba-quota').value || '0') * 1073741824);
-      const ok = await UI.confirm({ title: '영업점 계정 생성', confirmText: '생성', message: `${codes.length}개 계정을 생성합니다.\n담당자 풀 용량을 ${(poolQuotaBytes / 1073741824).toFixed(1)}GB로 설정합니다.\n초기 비밀번호는 아이디와 동일합니다.` });
+      const ok = await UI.confirm({ title: '영업점 계정 생성', confirmText: '생성', message: `${codes.length}개 계정을 생성합니다.\n초기 비밀번호는 아이디와 동일하며, 용량은 관리자 풀(무제한)에 귀속됩니다.` });
       if (!ok) return;
       const btn = m.q('#ba-create'); btn.disabled = true; btn.textContent = '생성 중…';
       try {
-        const res = await API.branchAccountsCreate({ managerId, codes, poolQuotaBytes });
+        const res = await API.branchAccountsCreate({ codes });
         const lines = res.created.map((c) => `${c.username},${c.password},${c.branchName}`).join('\n');
         m.q('#ba-result').innerHTML = `<div class="card" style="padding:12px"><b>✅ ${res.created.length}개 생성 완료</b>${res.skipped.length ? ` · 건너뜀 ${res.skipped.length}` : ''}
           ${res.created.length ? `<p class="muted" style="font-size:12px;margin:6px 0 4px">아이디,비밀번호,영업점 (아래를 복사해 보관하세요)</p><pre class="pp-text" style="user-select:all;white-space:pre-wrap;max-height:160px;overflow:auto;font-family:monospace;font-size:12px">${UI.escapeHtml(lines)}</pre><button class="btn btn-ghost btn-sm" id="ba-copy">📋 계정 목록 복사</button>` : ''}</div>`;

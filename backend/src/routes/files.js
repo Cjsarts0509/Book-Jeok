@@ -160,8 +160,8 @@ router.get('/accounts', authenticate, wrap(async (req, res) => {
     return res.json({ accounts: r.rows.map((u) => ({ id: u.id, username: u.username, displayName: u.display_name, role: u.role })) });
   }
   if (req.user.role === 'manager') {
-    // 외부업체 전부 + 내 소속 영업점(공유 풀)
-    const r = await query("SELECT id, username, display_name, role FROM users WHERE role='user' OR (role='branch' AND manager_id=$1) ORDER BY role, username", [req.user.id]);
+    // 담당자는 외부업체만 열람 가능(영업점 웹하드는 안 보임)
+    const r = await query("SELECT id, username, display_name, role FROM users WHERE role='user' ORDER BY username");
     return res.json({ accounts: r.rows.map((u) => ({ id: u.id, username: u.username, displayName: u.display_name, role: u.role })) });
   }
   res.json({ accounts: [] });
@@ -191,6 +191,46 @@ router.put('/stock-audit', authenticate, wrap(resolveOwner), wrap(async (req, re
 router.delete('/stock-audit', authenticate, wrap(resolveOwner), wrap(async (req, res) => {
   await query('DELETE FROM stock_audits WHERE owner_id=$1', [req.targetOwnerId]);
   res.json({ ok: true });
+}));
+
+// ── 재고조사 '전달'(담당자·관리자 → 영업점) ──────────
+// 담당자는 영업점 웹하드를 열람할 순 없지만, 결과 오차목록을 특정 영업점 공간의
+// 재고조사오차_<년도> 폴더에 '가상 파일(.bjsa)'로 넣어줄 수 있다(browse 아님, 전용 쓰기 경로).
+// 영업점이 이 파일을 더블클릭하면 재고조사 화면(사진 촬영·체크)이 그 목록으로 열린다.
+router.get('/stock-audit/branches', authenticate, wrap(async (req, res) => {
+  if (!['manager', 'admin'].includes(req.user.role)) return res.status(403).json({ error: '권한이 없습니다.' });
+  const r = await query("SELECT id, username, display_name FROM users WHERE role='branch' AND is_active ORDER BY username");
+  res.json({ branches: r.rows.map((u) => ({ id: u.id, username: u.username, displayName: u.display_name })) });
+}));
+router.post('/stock-audit/deliver', authenticate, wrap(async (req, res) => {
+  if (!['manager', 'admin'].includes(req.user.role)) return res.status(403).json({ error: '권한이 없습니다.' });
+  const branchId = Number(req.body.branchId);
+  const data = req.body.data;
+  const year = String(req.body.year || new Date().getFullYear()).replace(/[^0-9]/g, '').slice(0, 4) || String(new Date().getFullYear());
+  if (!Array.isArray(data) || !data.length) return res.status(400).json({ error: '전달할 오차 목록이 없습니다.' });
+  if (data.length > 50000) return res.status(413).json({ error: '항목이 너무 많습니다(최대 5만).' });
+  const b = await query("SELECT display_name FROM users WHERE id=$1 AND role='branch'", [branchId]);
+  if (!b.rowCount) return res.status(400).json({ error: '영업점 계정을 찾을 수 없습니다.' });
+  const branchName = b.rows[0].display_name;
+  const folder = `/재고조사오차_${year}`;
+  await ensureFolder(branchId, folder);
+  const now = new Date();
+  const p2 = (n) => String(n).padStart(2, '0');
+  const stamp = `${now.getFullYear()}${p2(now.getMonth() + 1)}${p2(now.getDate())}`;
+  const name = await uniqueFileName(branchId, folder, `재고조사오차_${branchName}_${stamp}.bjsa`);
+  const payload = JSON.stringify({ v: 1, kind: 'stockaudit', branchName, deliveredBy: req.user.username, deliveredAt: now.toISOString(), disc: data });
+  const dir = userDir(branchId);
+  await fsp.mkdir(dir, { recursive: true });
+  const storedName = crypto.randomUUID();
+  await fsp.writeFile(path.join(dir, storedName), payload, 'utf8');
+  const row = await query(
+    `INSERT INTO files (owner_id, folder, original_name, stored_name, size_bytes, mime_type)
+     VALUES ($1,$2,$3,$4,$5,'application/x-bookjeok-stockaudit') RETURNING id`,
+    [branchId, folder, name, storedName, Buffer.byteLength(payload)]
+  );
+  await audit(req, 'stock_audit_deliver', `branch=${branchId} items=${data.length} file=${name}`);
+  notify.push({ userId: branchId, type: 'stockaudit', title: '재고조사 오차 파일이 도착했습니다', body: `${folder} 폴더의 '${name}'를 열어 사진·체크를 진행하세요.` }).catch(() => {});
+  res.status(201).json({ ok: true, fileId: row.rows[0].id, folder, name });
 }));
 
 // ── 폴더 트리 ──────────

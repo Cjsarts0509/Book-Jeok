@@ -50,6 +50,8 @@ const API = (() => {
     stockAuditGet: (ownerId) => req('GET', `/files/stock-audit${ownerId ? '?ownerId=' + ownerId : ''}`),
     stockAuditSave: (data, ownerId) => req('PUT', '/files/stock-audit', { data, ownerId }),
     stockAuditDelete: (ownerId) => req('DELETE', `/files/stock-audit${ownerId ? '?ownerId=' + ownerId : ''}`),
+    stockAuditBranches: () => req('GET', '/files/stock-audit/branches'),
+    stockAuditDeliver: (payload) => req('POST', '/files/stock-audit/deliver', payload),
     tree: (ownerId) => req('GET', `/files/tree${ownerId ? '?ownerId=' + ownerId : ''}`),
     accounts: () => req('GET', '/files/accounts'),
     branches: () => req('GET', '/meta/branches'),

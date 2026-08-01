@@ -389,7 +389,7 @@ const App = (() => {
         </div>
         <div class="head-right">
           <div class="breadcrumb" id="crumbs"></div>
-          <div class="usage-line"><span class="num">${UI.bytes(u.usedBytes)}</span><span class="muted">${u.unlimited ? '· 무제한' : (u.quotaBytes > 0 ? '/ ' + UI.bytes(u.quotaBytes) : '· 미할당')}${u.pooled ? ' · <span title="담당자 계정과 소속 영업점이 함께 쓰는 공유 용량입니다">담당자 풀 공유</span>' : ''} · ${u.fileCount}개 파일</span>${!u.unlimited && u.quotaBytes > 0 ? `<span class="usage-bar"><span style="width:${pct}%"></span></span>` : ''}<button class="btn btn-ghost btn-sm" id="usage-report" title="용량 리포트">📊</button></div>
+          <div class="usage-line"><span class="num">${UI.bytes(u.usedBytes)}</span><span class="muted">${u.unlimited ? '· 무제한' : (u.quotaBytes > 0 ? '/ ' + UI.bytes(u.quotaBytes) : '· 미할당')}${u.pooled && !u.unlimited ? ' · <span title="여러 계정이 함께 쓰는 공유 용량입니다">공유 용량</span>' : ''} · ${u.fileCount}개 파일</span>${!u.unlimited && u.quotaBytes > 0 ? `<span class="usage-bar"><span style="width:${pct}%"></span></span>` : ''}<button class="btn btn-ghost btn-sm" id="usage-report" title="용량 리포트">📊</button></div>
         </div>
       </div>
       ${state.search.on ? `<div class="search-banner">🔎 <b>${UI.escapeHtml(state.search.q)}</b> 검색 결과 · ${state.folders.length + state.files.length}건<div style="flex:1"></div><button class="btn btn-sm btn-ghost" id="search-exit">✕ 검색 나가기</button></div>` : ''}
@@ -528,7 +528,8 @@ const App = (() => {
           <div class="mcard-info"><span class="k">수정</span> ${UI.date(f.updatedAt || f.createdAt)}</div>
           ${f.note ? `<div class="mcard-info"><span class="k">비고</span> ${esc(f.note)}</div>` : ''}
           <div class="mcard-acts">
-            <button class="mbtn mbtn-primary" data-dl="${f.id}">⬇️ 다운로드</button>
+            ${isStockAuditFile(f.name) ? `<button class="mbtn mbtn-primary" data-saopen="${f.id}" data-name="${esc(f.name)}">📊 재고조사 열기</button>` : ''}
+            <button class="mbtn ${isStockAuditFile(f.name) ? '' : 'mbtn-primary'}" data-dl="${f.id}">⬇️ 다운로드</button>
             ${canPreview(f.name) ? `<button class="mbtn" data-preview="${f.id}">👁️ 미리보기</button>` : ''}
             <button class="mbtn" data-share="${f.id}">🔗 공유</button>
             <button class="mbtn" data-tags="${f.id}">🏷️ 태그</button>
@@ -965,7 +966,7 @@ const App = (() => {
       const found = isFolder ? state.folders.find((f) => `folder:${f.path}` === key) : state.files.find((f) => `file:${f.id}` === key);
       const item = isFolder ? { type: 'folder', path: key.slice(7), name: found ? found.name : '' } : { type: 'file', id: key.slice(5), name: found ? found.name : '' };
       el.addEventListener('click', (e) => { if (e.target.closest(actionSel)) return; selectClick(e, key, item); });
-      el.addEventListener('dblclick', (e) => { if (e.target.closest(actionSel)) return; if (isFolder) openFolder(item.path); else downloadFile(item.id); });
+      el.addEventListener('dblclick', (e) => { if (e.target.closest(actionSel)) return; if (isFolder) openFolder(item.path); else if (isStockAuditFile(item.name)) openStockAuditFile(item); else downloadFile(item.id); });
       el.addEventListener('contextmenu', (e) => { if (e.target.closest('input, a')) return; e.preventDefault(); openContextFor(e, isFolder, item); });
       el.addEventListener('dragstart', (e) => {
         if (!state.selected.has(key)) { state.selected.clear(); state.selected.set(key, item); state.anchor = key; applySelectionClasses(); }
@@ -983,6 +984,7 @@ const App = (() => {
     box.querySelectorAll('.path-cell[data-goto], .mcard-path[data-goto]').forEach((el) => el.addEventListener('click', (e) => { e.stopPropagation(); goTo(el.dataset.goto); }));
     box.querySelectorAll('[data-preview]').forEach((el) => el.addEventListener('click', (e) => { e.stopPropagation(); openPreview(el.dataset.preview); }));
     box.querySelectorAll('[data-dl]').forEach((el) => el.addEventListener('click', (e) => { e.stopPropagation(); downloadFile(el.dataset.dl); }));
+    box.querySelectorAll('[data-saopen]').forEach((el) => el.addEventListener('click', (e) => { e.stopPropagation(); openStockAuditFile({ id: el.dataset.saopen, name: el.dataset.name }); }));
     box.querySelectorAll('[data-del]').forEach((el) => el.addEventListener('click', (e) => { e.stopPropagation(); deleteFile(el.dataset.del); }));
     box.querySelectorAll('[data-share]').forEach((el) => el.addEventListener('click', (e) => { e.stopPropagation(); shareModal(el.dataset.share); }));
     box.querySelectorAll('[data-note]').forEach((el) => el.addEventListener('click', (e) => { e.stopPropagation(); noteModal(el.dataset.note); }));
@@ -1965,6 +1967,18 @@ const App = (() => {
       </div>`).join('') + '</div>';
   }
 
+  // 재고조사 '가상 파일'(.bjsa): 더블클릭하면 다운로드 대신 재고조사 화면(사진·체크)을 그 목록으로 연다.
+  const isStockAuditFile = (name) => /\.bjsa$/i.test(String(name || ''));
+  async function openStockAuditFile(item) {
+    try {
+      const res = await fetch(API.downloadUrl(item.id), { headers: { Authorization: 'Bearer ' + API.getToken() }, credentials: 'include' });
+      if (!res.ok) throw new Error('파일을 열 수 없습니다 (' + res.status + ')');
+      const j = await res.json();
+      const disc = Array.isArray(j) ? j : (j.disc || j.data || []);
+      if (!Array.isArray(disc) || !disc.length) return UI.toast('열 수 있는 재고조사 목록이 없습니다.', 'error');
+      stockAuditModal(false, { disc, folder: state.folder || '/' });   // 파일이 있는 현재 폴더 = 사진 저장 폴더
+    } catch (e) { UI.toast(e.message || '열기 실패', 'error'); }
+  }
   async function downloadFile(id) {
     // 이미 목록에 아는 파일명이 있으면 그것을 기본값으로 (헤더를 못 읽어도 이름 보존)
     const known = state.files.find((x) => String(x.id) === String(id));
@@ -2580,7 +2594,7 @@ const App = (() => {
     return (s && !s.closed && Array.isArray(s.disc) && s.disc.length &&
       Date.now() - (s.at || 0) < 6 * 60 * 60 * 1000 && (s.ownerId || null) === (state.ownerId || null)) ? s : null;
   }
-  function stockAuditModal(auto) {
+  function stockAuditModal(auto, preload) {
     const m = UI.modal(`<h3>📊 재고조사 오차체크</h3>
       <p class="muted" style="font-size:12px;margin:-6px 0 12px">두 엑셀을 올리면 오차 항목(예외 제외·차이≠0)을 뽑아 서가별 실사수량과 함께 표로 보여줍니다.</p>
       <div id="sa-resume"></div>
@@ -2610,7 +2624,10 @@ const App = (() => {
     const shelfHead = Array.from({ length: SA_MAX_SHELF }, (_, i) => `서가${i + 1}`);
     let disc = [];                 // 오차 항목(상세·바코드검색·다운로드 공용)
     let isbnSet = new Set();        // 리스트에 있는 ISBN 집합(빠른 조회)
-    let saCurrentFolder = state.folder || '/';  // 사진 저장·확인 대상 폴더
+    let saCurrentFolder = (preload && preload.folder) || state.folder || '/';  // 사진 저장·확인 대상 폴더
+    let saBranches = [];   // 전달 가능한 영업점 목록(담당자·관리자만 로드됨)
+    // 담당자·관리자면 전달 대상 영업점 목록을 불러온다(영업점 계정 자체는 이 목록 안 씀).
+    if (isPriv()) API.stockAuditBranches().then((r) => { saBranches = r.branches || []; const sel = m.q('#sa-branch'); if (sel) fillBranchSelect(sel); }).catch(() => {});
     let saPhotoStems = new Set();   // 현재 폴더에 이미 사진이 있는 ISBN
     let saSort = { col: null, dir: 1 };  // 정렬 열(0~9) · 방향(1 오름/-1 내림)
     let saFilterFields = new Set();  // 분야 필터(비어있으면 전체, 아니면 선택된 분야만)
@@ -2911,7 +2928,7 @@ const App = (() => {
           ${window.ISBN ? '<button class="btn btn-secondary btn-sm" id="sa-scan">📷 바코드로 찾기</button>' : ''}
           <button class="btn btn-secondary btn-sm" id="sa-save">💾 저장</button>
           <button class="btn btn-primary btn-sm" id="sa-dl">⬇ 엑셀 다운로드</button>
-          ${saBranchAccts().length ? `<span class="sa-deliver-wrap"><label class="sa-foldersel">🏬 <select id="sa-branch"><option value="">영업점 선택…</option>${saBranchAccts().map((a) => `<option value="${a.id}">${esc(a.displayName)}</option>`).join('')}</select></label><button class="btn btn-accent btn-sm" id="sa-deliver" title="선택한 영업점의 재고조사오차_&lt;년도&gt; 폴더에 결과 파일을 저장(전달)">📤 영업점에 전달</button></span>` : ''}
+          ${isPriv() ? `<span class="sa-deliver-wrap"><label class="sa-foldersel">🏬 <select id="sa-branch"><option value="">영업점 선택…</option>${saBranches.map((a) => `<option value="${a.id}">${esc(a.displayName)}</option>`).join('')}</select></label><button class="btn btn-accent btn-sm" id="sa-deliver" title="선택한 영업점의 재고조사오차_&lt;년도&gt; 폴더에 재고조사 파일을 전달(영업점이 열어 사진·체크)">📤 영업점에 전달</button></span>` : ''}
         </div>
         <div class="table-wrap sa-tablewrap" id="sa-tablewrap"></div>`;
       m.q('#sa-dl')?.addEventListener('click', downloadXlsx);
@@ -2983,35 +3000,40 @@ const App = (() => {
         XLSX.writeFile(wb, `재고오차_${dt.getFullYear()}${p2(dt.getMonth() + 1)}${p2(dt.getDate())}_${p2(dt.getHours())}${p2(dt.getMinutes())}.xlsx`);
       } catch (e) { UI.toast(e.message || '다운로드 실패', 'error'); }
     }
-    // 접근 가능한 영업점 계정 목록(담당자=소속 영업점, 관리자=전체) — 계정전환에서 로드된 state.accounts 사용
-    function saBranchAccts() { return (state.accounts || []).filter((a) => a.role === 'branch'); }
-    // 결과 파일을 '선택한 영업점' 계정의 재고조사오차_<생성년도> 폴더에 저장(전달). 용량은 그 영업점(담당자 풀)에 반영.
+    // 영업점 선택 드롭다운 채우기(목록이 늦게 도착해도 반영)
+    function fillBranchSelect(sel) {
+      const cur = sel.value;
+      sel.innerHTML = '<option value="">영업점 선택…</option>' + saBranches.map((a) => `<option value="${a.id}">${esc(a.displayName)}</option>`).join('');
+      if (cur) sel.value = cur;
+    }
+    // 결과 오차목록을 '선택한 영업점' 계정의 재고조사오차_<생성년도> 폴더에 '가상 파일(.bjsa)'로 전달.
+    // 영업점이 그 파일을 더블클릭하면 재고조사 화면(사진·체크)이 이 목록으로 열린다. 용량은 관리자 풀(무제한).
     async function deliverToBranch() {
       if (!disc.length) return UI.toast('먼저 분석을 실행하세요.', 'error');
       const sel = m.q('#sa-branch'); const bid = sel && sel.value;
       if (!bid) return UI.toast('전달할 영업점을 선택하세요.', 'error');
-      const acct = saBranchAccts().find((a) => String(a.id) === String(bid));
+      const acct = saBranches.find((a) => String(a.id) === String(bid));
       const branchName = acct ? acct.displayName : '영업점';
-      const dt = new Date(); const p2 = (x) => String(x).padStart(2, '0'); const year = dt.getFullYear();
-      const folder = `/재고조사오차_${year}`;
-      const fname = `재고조사오차_${branchName}_${year}${p2(dt.getMonth() + 1)}${p2(dt.getDate())}.xlsx`;
-      const ok = await UI.confirm({ title: '영업점에 전달', confirmText: '전달', message: `'${branchName}' 계정의 ${folder} 폴더에\n${fname}\n파일을 저장합니다.` });
+      const year = new Date().getFullYear();
+      const ok = await UI.confirm({ title: '영업점에 전달', confirmText: '전달', message: `'${branchName}' 계정의 재고조사오차_${year} 폴더에\n재고조사 파일을 전달합니다 (오차 ${disc.length.toLocaleString()}건).\n영업점이 이 파일을 열어 사진 촬영·체크를 진행합니다.` });
       if (!ok) return;
       const btn = m.q('#sa-deliver'); if (btn) { btn.disabled = true; btn.textContent = '전달 중…'; }
       try {
-        const XLSX = await ensureXLSX();
-        const out = XLSX.write(buildDiscWorkbook(XLSX), { type: 'array', bookType: 'xlsx' });
-        const fd = new FormData();
-        fd.append('folder', folder);
-        fd.append('file', new File([out], fname, { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
-        await API.upload(fd, bid);
-        UI.toast(`'${branchName}' ${folder} 에 전달했습니다 (${disc.length.toLocaleString()}건)`, 'success');
+        const res = await API.stockAuditDeliver({ branchId: Number(bid), branchName, year, data: disc });
+        UI.toast(`'${branchName}'에 전달 완료 — ${res.folder}/${res.name}`, 'success');
       } catch (e) { UI.toast(e.message || '전달 실패', 'error'); }
       finally { if (btn) { btn.disabled = false; btn.textContent = '📤 영업점에 전달'; } }
     }
 
-    // 재로딩으로 모달이 닫혔던 경우(auto): 진행 중이던 로컬 세션을 재업로드 없이 즉시 복원
+    // 전달받은 재고조사 파일(.bjsa)로 열린 경우: 그 오차 목록을 바로 표시(영업점이 사진·체크)
     (function initResume() {
+      if (preload && Array.isArray(preload.disc)) {
+        disc = preload.disc.map((d) => ({ ...d, shelves: d.shelves || [] }));
+        isbnSet = new Set(disc.map((d) => d.isbn));
+        status(''); renderResult();
+        UI.toast(`전달받은 재고조사 오차 ${disc.length.toLocaleString()}건을 열었습니다 — 사진 촬영·체크를 진행하세요`, 'info');
+        return;
+      }
       if (auto) {
         const s = saSessionActive();
         if (s) {
