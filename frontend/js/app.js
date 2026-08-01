@@ -2911,9 +2911,11 @@ const App = (() => {
           ${window.ISBN ? '<button class="btn btn-secondary btn-sm" id="sa-scan">📷 바코드로 찾기</button>' : ''}
           <button class="btn btn-secondary btn-sm" id="sa-save">💾 저장</button>
           <button class="btn btn-primary btn-sm" id="sa-dl">⬇ 엑셀 다운로드</button>
+          ${saBranchAccts().length ? `<span class="sa-deliver-wrap"><label class="sa-foldersel">🏬 <select id="sa-branch"><option value="">영업점 선택…</option>${saBranchAccts().map((a) => `<option value="${a.id}">${esc(a.displayName)}</option>`).join('')}</select></label><button class="btn btn-accent btn-sm" id="sa-deliver" title="선택한 영업점의 재고조사오차_&lt;년도&gt; 폴더에 결과 파일을 저장(전달)">📤 영업점에 전달</button></span>` : ''}
         </div>
         <div class="table-wrap sa-tablewrap" id="sa-tablewrap"></div>`;
       m.q('#sa-dl')?.addEventListener('click', downloadXlsx);
+      m.q('#sa-deliver')?.addEventListener('click', deliverToBranch);
       m.q('#sa-scan')?.addEventListener('click', scanFind);
       m.q('#sa-save')?.addEventListener('click', persist);
       m.q('#sa-folder')?.addEventListener('change', (e) => setFolder(e.target.value));
@@ -2961,20 +2963,51 @@ const App = (() => {
       });
     }
 
+    // 오차 목록 → 워크북(aoa) 빌드 — 다운로드/전달 공용
+    function buildDiscWorkbook(XLSX) {
+      const aoa = [[...base, ...shelfHead]];
+      for (const d of disc) {
+        const row = [d.field, d.isbn, d.name, d.pub, d.sys, d.real, d.miss, d.exc, d.scan, d.diff];
+        for (let i = 0; i < SA_MAX_SHELF; i++) { const s = d.shelves[i]; row.push(s ? `${s[0]} (${s[1]})` : ''); }
+        aoa.push(row);
+      }
+      const ws = XLSX.utils.aoa_to_sheet(aoa);
+      const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, '재고오차');
+      return wb;
+    }
     async function downloadXlsx() {
       try {
         const XLSX = await ensureXLSX();
-        const aoa = [[...base, ...shelfHead]];
-        for (const d of disc) {
-          const row = [d.field, d.isbn, d.name, d.pub, d.sys, d.real, d.miss, d.exc, d.scan, d.diff];
-          for (let i = 0; i < SA_MAX_SHELF; i++) { const s = d.shelves[i]; row.push(s ? `${s[0]} (${s[1]})` : ''); }
-          aoa.push(row);
-        }
-        const ws = XLSX.utils.aoa_to_sheet(aoa);
-        const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, '재고오차');
+        const wb = buildDiscWorkbook(XLSX);
         const dt = new Date(); const p2 = (x) => String(x).padStart(2, '0');
         XLSX.writeFile(wb, `재고오차_${dt.getFullYear()}${p2(dt.getMonth() + 1)}${p2(dt.getDate())}_${p2(dt.getHours())}${p2(dt.getMinutes())}.xlsx`);
       } catch (e) { UI.toast(e.message || '다운로드 실패', 'error'); }
+    }
+    // 접근 가능한 영업점 계정 목록(담당자=소속 영업점, 관리자=전체) — 계정전환에서 로드된 state.accounts 사용
+    function saBranchAccts() { return (state.accounts || []).filter((a) => a.role === 'branch'); }
+    // 결과 파일을 '선택한 영업점' 계정의 재고조사오차_<생성년도> 폴더에 저장(전달). 용량은 그 영업점(담당자 풀)에 반영.
+    async function deliverToBranch() {
+      if (!disc.length) return UI.toast('먼저 분석을 실행하세요.', 'error');
+      const sel = m.q('#sa-branch'); const bid = sel && sel.value;
+      if (!bid) return UI.toast('전달할 영업점을 선택하세요.', 'error');
+      const acct = saBranchAccts().find((a) => String(a.id) === String(bid));
+      const branchName = acct ? acct.displayName : '영업점';
+      const dt = new Date(); const p2 = (x) => String(x).padStart(2, '0'); const year = dt.getFullYear();
+      const folder = `/재고조사오차_${year}`;
+      const fname = `재고조사오차_${branchName}_${year}${p2(dt.getMonth() + 1)}${p2(dt.getDate())}.xlsx`;
+      const ok = await UI.confirm({ title: '영업점에 전달', confirmText: '전달', message: `'${branchName}' 계정의 ${folder} 폴더에\n${fname}\n파일을 저장합니다.` });
+      if (!ok) return;
+      const btn = m.q('#sa-deliver'); if (btn) { btn.disabled = true; btn.textContent = '전달 중…'; }
+      try {
+        const XLSX = await ensureXLSX();
+        const out = XLSX.write(buildDiscWorkbook(XLSX), { type: 'array', bookType: 'xlsx' });
+        const fd = new FormData();
+        fd.append('folder', folder);
+        fd.append('file', new File([out], fname, { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
+        await API.upload(fd, bid);
+        UI.toast(`'${branchName}' ${folder} 에 전달했습니다 (${disc.length.toLocaleString()}건)`, 'success');
+      } catch (e) { UI.toast(e.message || '전달 실패', 'error'); }
+      finally { if (btn) { btn.disabled = false; btn.textContent = '📤 영업점에 전달'; } }
     }
 
     // 재로딩으로 모달이 닫혔던 경우(auto): 진행 중이던 로컬 세션을 재업로드 없이 즉시 복원
