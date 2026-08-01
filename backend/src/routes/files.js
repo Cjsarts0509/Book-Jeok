@@ -15,6 +15,7 @@ const filetype = require('../filetype');
 const yara = require('../yara');
 const officePdf = require('../officePdf');
 const { diskUsage } = require('../disk');
+const { poolRootId, poolUsage } = require('../pool');
 const notify = require('../notify');
 const { isAllowed, allowedLabel, getAllowedExtensions, trashRetentionDays, shareQrEnabled } = require('../settings');
 const QRCode = require('qrcode');
@@ -159,7 +160,8 @@ router.get('/accounts', authenticate, wrap(async (req, res) => {
     return res.json({ accounts: r.rows.map((u) => ({ id: u.id, username: u.username, displayName: u.display_name, role: u.role })) });
   }
   if (req.user.role === 'manager') {
-    const r = await query("SELECT id, username, display_name, role FROM users WHERE role='user' ORDER BY username");
+    // 외부업체 전부 + 내 소속 영업점(공유 풀)
+    const r = await query("SELECT id, username, display_name, role FROM users WHERE role='user' OR (role='branch' AND manager_id=$1) ORDER BY role, username", [req.user.id]);
     return res.json({ accounts: r.rows.map((u) => ({ id: u.id, username: u.username, displayName: u.display_name, role: u.role })) });
   }
   res.json({ accounts: [] });
@@ -355,10 +357,9 @@ router.get('/', authenticate, wrap(resolveOwner), wrap(async (req, res) => {
 router.post('/upload', authenticate, wrap(resolveOwner), wrap(diskGate), upload.array('file', 30), wrap(async (req, res) => {
   const folder = normalizeFolder(req.body.folder);
   if (!req.files || req.files.length === 0) return res.status(400).json({ error: '업로드할 파일이 없습니다.' });
-  const owner = await query('SELECT quota_bytes, role, upload_conflict FROM users WHERE id=$1', [req.targetOwnerId]);
+  const owner = await query('SELECT role, upload_conflict FROM users WHERE id=$1', [req.targetOwnerId]);
   const isAdmin = owner.rows[0].role === 'admin';
   const overwrite = owner.rows[0].upload_conflict === 'overwrite'; // 동일 이름: 덮어쓰기(이전 파일은 휴지통) vs 번호 붙이기
-  const quota = Number(owner.rows[0].quota_bytes);
   await ensureFolder(req.targetOwnerId, folder);
   // 업로드 시 파일별 제목/비고(선택) — 카메라 업로드 등에서 index로 정렬해 전달
   const titles = req.body.titles !== undefined ? [].concat(req.body.titles) : [];
@@ -367,13 +368,16 @@ router.post('/upload', authenticate, wrap(resolveOwner), wrap(diskGate), upload.
   try {
     // 동시 업로드 쿼터 경합(TOCTOU) 방지: 소유자별 어드바이저리 락 + 쿼터 재확인 + 저장을 한 트랜잭션에서
     await withTransaction(async (client) => {
-      await client.query('SELECT pg_advisory_xact_lock($1)', [req.targetOwnerId]);
-      // 관리자는 무제한, 그 외는 할당량 적용(0=미할당이므로 업로드 불가)
+      // 공유 풀(담당자↔영업점) 기준으로 락·검사: 락은 풀 루트에 걸어 형제 영업점 동시업로드도 직렬화
+      const qc = client.query.bind(client);
+      const rootId = await poolRootId(req.targetOwnerId, qc);
+      await client.query('SELECT pg_advisory_xact_lock($1)', [rootId]);
+      // 관리자는 무제한, 그 외는 풀 할당량 적용(0=미할당이므로 업로드 불가)
       if (!isAdmin) {
-        const used = await client.query('SELECT COALESCE(SUM(size_bytes),0) AS s FROM files WHERE owner_id=$1 AND deleted_at IS NULL', [req.targetOwnerId]);
+        const pool = await poolUsage(rootId, qc, true);
         const incoming = req.files.reduce((s, f) => s + f.size, 0);
-        if (Number(used.rows[0].s) + incoming > quota) {
-          const e = new Error(quota === 0 ? '디스크가 할당되지 않은 계정입니다. 관리자에게 문의하세요.' : '저장 용량 할당량을 초과했습니다.');
+        if (!pool.unlimited && pool.used + incoming > pool.quota) {
+          const e = new Error(pool.quota === 0 ? '디스크가 할당되지 않은 계정입니다. 관리자에게 문의하세요.' : '저장 용량 할당량을 초과했습니다.');
           e.status = 413; throw e;
         }
       }
@@ -434,12 +438,11 @@ router.post('/upload/init', authenticate, wrap(resolveOwner), wrap(async (req, r
   if (!isAllowed(extOf(filename))) return res.status(415).json({ error: `허용되지 않는 파일 형식입니다. 가능: ${allowedLabel()}` });
   if (size > CHUNK_ASSEMBLE_MAX) return res.status(413).json({ error: `허용 최대 크기(${Math.round(CHUNK_ASSEMBLE_MAX / 1048576)}MB)를 초과했습니다.` });
   const owner = req.targetOwnerId;
-  const ownerRow = await query('SELECT quota_bytes, role FROM users WHERE id=$1', [owner]);
+  const ownerRow = await query('SELECT role FROM users WHERE id=$1', [owner]);
   if (ownerRow.rows[0].role !== 'admin') {
-    const quota = Number(ownerRow.rows[0].quota_bytes);
-    const used = await query('SELECT COALESCE(SUM(size_bytes),0) AS s FROM files WHERE owner_id=$1 AND deleted_at IS NULL', [owner]);
-    if (size > 0 && Number(used.rows[0].s) + size > quota) {
-      return res.status(413).json({ error: quota === 0 ? '디스크가 할당되지 않은 계정입니다. 관리자에게 문의하세요.' : '저장 용량 할당량을 초과했습니다.' });
+    const pool = await poolUsage(owner);
+    if (!pool.unlimited && size > 0 && pool.used + size > pool.quota) {
+      return res.status(413).json({ error: pool.quota === 0 ? '디스크가 할당되지 않은 계정입니다. 관리자에게 문의하세요.' : '저장 용량 할당량을 초과했습니다.' });
     }
   }
   res.json({ uploadId: crypto.randomUUID() });
@@ -505,14 +508,13 @@ router.post('/upload/complete', authenticate, wrap(resolveOwner), wrap(diskGate)
   // 크기 상한·할당량
   const size = (await fsp.stat(finalPath)).size;
   if (size > CHUNK_ASSEMBLE_MAX) { await fsp.unlink(finalPath).catch(() => {}); return res.status(413).json({ error: `허용 최대 크기(${Math.round(CHUNK_ASSEMBLE_MAX / 1048576)}MB)를 초과했습니다.` }); }
-  const ownerRow = await query('SELECT quota_bytes, role, upload_conflict FROM users WHERE id=$1', [owner]);
+  const ownerRow = await query('SELECT role, upload_conflict FROM users WHERE id=$1', [owner]);
   const overwrite = ownerRow.rows[0].upload_conflict === 'overwrite';
   if (ownerRow.rows[0].role !== 'admin') {
-    const quota = Number(ownerRow.rows[0].quota_bytes);
-    const used = await query('SELECT COALESCE(SUM(size_bytes),0) AS s FROM files WHERE owner_id=$1 AND deleted_at IS NULL', [owner]);
-    if (Number(used.rows[0].s) + size > quota) {
+    const pool = await poolUsage(owner);
+    if (!pool.unlimited && pool.used + size > pool.quota) {
       await fsp.unlink(finalPath).catch(() => {});
-      return res.status(413).json({ error: quota === 0 ? '디스크가 할당되지 않은 계정입니다. 관리자에게 문의하세요.' : '저장 용량 할당량을 초과했습니다.' });
+      return res.status(413).json({ error: pool.quota === 0 ? '디스크가 할당되지 않은 계정입니다. 관리자에게 문의하세요.' : '저장 용량 할당량을 초과했습니다.' });
     }
   }
   // 보안 검사(합친 파일 기준, 단일 업로드와 동일)
@@ -669,15 +671,21 @@ router.post('/bulk/copy', authenticate, wrap(async (req, res) => {
   const files = await loadAccessibleFiles(req.user, req.body.ids);
   if (files.length === 0) return res.status(400).json({ error: '복사할 항목이 없습니다.' });
   const owners = [...new Set(files.map((f) => f.owner_id))];
-  // 소유자별 용량(할당량) 검사 — 관리자는 무제한
+  // 공유 풀(담당자 공유) 기준 용량 검사 — 관리자는 무제한. 소유자별 유입량을 풀 루트로 합산해 검사.
+  const incomingByOwner = {};
+  for (const f of files) incomingByOwner[f.owner_id] = (incomingByOwner[f.owner_id] || 0) + Number(f.size_bytes);
+  const poolByRoot = {}; const incomingByRoot = {};
   for (const o of owners) {
-    const u = await query('SELECT quota_bytes, role FROM users WHERE id=$1', [o]);
+    const u = await query('SELECT role FROM users WHERE id=$1', [o]);
     if (!u.rows.length || u.rows[0].role === 'admin') continue;
-    const quota = Number(u.rows[0].quota_bytes);
-    const used = await query('SELECT COALESCE(SUM(size_bytes),0) AS s FROM files WHERE owner_id=$1 AND deleted_at IS NULL', [o]);
-    const incoming = files.filter((f) => f.owner_id === o).reduce((s, f) => s + Number(f.size_bytes), 0);
-    if (Number(used.rows[0].s) + incoming > quota) {
-      return res.status(413).json({ error: quota === 0 ? '디스크가 할당되지 않은 계정입니다. 관리자에게 문의하세요.' : '저장 용량 할당량을 초과했습니다.' });
+    const pool = await poolUsage(o);
+    poolByRoot[pool.rootId] = pool;
+    incomingByRoot[pool.rootId] = (incomingByRoot[pool.rootId] || 0) + incomingByOwner[o];
+  }
+  for (const rid of Object.keys(poolByRoot)) {
+    const pool = poolByRoot[rid];
+    if (!pool.unlimited && pool.used + incomingByRoot[rid] > pool.quota) {
+      return res.status(413).json({ error: pool.quota === 0 ? '디스크가 할당되지 않은 계정입니다. 관리자에게 문의하세요.' : '저장 용량 할당량을 초과했습니다.' });
     }
   }
   await Promise.all(owners.map((o) => ensureFolder(o, folder)));
@@ -1001,10 +1009,12 @@ router.post('/:id(\\d+)/share', authenticate, wrap(async (req, res) => {
 // ── 사용량 ──────────
 router.get('/usage/summary', authenticate, wrap(resolveOwner), wrap(async (req, res) => {
   const r = await query('SELECT COUNT(*)::int AS files, COALESCE(SUM(size_bytes),0) AS bytes FROM files WHERE owner_id=$1 AND deleted_at IS NULL', [req.targetOwnerId]);
-  const q = await query('SELECT quota_bytes, role FROM users WHERE id=$1', [req.targetOwnerId]);
+  // 공유 풀이면 사용량/할당량은 풀 전체 기준으로 보여준다(자기 파일 개수·용량은 별도로 함께 반환).
+  const pool = await poolUsage(req.targetOwnerId);
   res.json({
-    ownerId: req.targetOwnerId, fileCount: r.rows[0].files, usedBytes: Number(r.rows[0].bytes),
-    quotaBytes: Number(q.rows[0].quota_bytes), unlimited: q.rows[0].role === 'admin',
+    ownerId: req.targetOwnerId, fileCount: r.rows[0].files, usedBytes: pool.used,
+    quotaBytes: pool.quota, unlimited: pool.unlimited,
+    pooled: pool.memberCount > 1, ownUsedBytes: Number(r.rows[0].bytes),
   });
 }));
 

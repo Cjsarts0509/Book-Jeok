@@ -105,7 +105,7 @@ const App = (() => {
             <div class="nav-item" data-nav="trash"><span class="ico">🗑️</span><span class="t">휴지통</span></div>
             <div class="nav-item nav-bell" data-nav="notif"><span class="ico">🔔</span><span class="t">알림</span><span class="notif-badge hidden" id="notif-badge">0</span></div>
             ${admin ? '<a class="nav-item" href="admin.html"><span class="ico">🛡️</span><span class="t">관리자</span></a>' : ''}
-            ${(state.user.role === 'branch' || admin) ? '<div class="nav-item" data-nav="stockaudit"><span class="ico">📊</span><span class="t">재고조사 오차체크</span></div>' : ''}
+            ${isPriv() ? '<div class="nav-item" data-nav="stockaudit"><span class="ico">📊</span><span class="t">재고조사 오차체크</span></div>' : ''}
             <div class="nav-item" data-nav="serverstatus"><span class="ico">🖥️</span><span class="t">서버 상태</span></div>
             <div class="nav-item" data-nav="help"><span class="ico">❓</span><span class="t">도움말</span></div>
             <div class="nav-item" data-nav="settings"><span class="ico">⚙️</span><span class="t">설정</span></div>
@@ -174,7 +174,7 @@ const App = (() => {
     loadAll();
     loadBranches();
     // 재고조사 작업 중 재로딩됐다면(닫지 않고 이탈) 모달을 자동으로 다시 열어 그 목록 복원
-    try { if ((state.user.role === 'branch' || admin) && saSessionActive()) setTimeout(() => stockAuditModal(true), 350); } catch (_) {}
+    try { if (isPriv() && saSessionActive()) setTimeout(() => stockAuditModal(true), 350); } catch (_) {}
     loadAllowedExt();
     showNotices();
   }
@@ -389,7 +389,7 @@ const App = (() => {
         </div>
         <div class="head-right">
           <div class="breadcrumb" id="crumbs"></div>
-          <div class="usage-line"><span class="num">${UI.bytes(u.usedBytes)}</span><span class="muted">${u.unlimited ? '· 무제한' : (u.quotaBytes > 0 ? '/ ' + UI.bytes(u.quotaBytes) : '· 미할당')} · ${u.fileCount}개 파일</span>${!u.unlimited && u.quotaBytes > 0 ? `<span class="usage-bar"><span style="width:${pct}%"></span></span>` : ''}<button class="btn btn-ghost btn-sm" id="usage-report" title="용량 리포트">📊</button></div>
+          <div class="usage-line"><span class="num">${UI.bytes(u.usedBytes)}</span><span class="muted">${u.unlimited ? '· 무제한' : (u.quotaBytes > 0 ? '/ ' + UI.bytes(u.quotaBytes) : '· 미할당')}${u.pooled ? ' · <span title="담당자 계정과 소속 영업점이 함께 쓰는 공유 용량입니다">담당자 풀 공유</span>' : ''} · ${u.fileCount}개 파일</span>${!u.unlimited && u.quotaBytes > 0 ? `<span class="usage-bar"><span style="width:${pct}%"></span></span>` : ''}<button class="btn btn-ghost btn-sm" id="usage-report" title="용량 리포트">📊</button></div>
         </div>
       </div>
       ${state.search.on ? `<div class="search-banner">🔎 <b>${UI.escapeHtml(state.search.q)}</b> 검색 결과 · ${state.folders.length + state.files.length}건<div style="flex:1"></div><button class="btn btn-sm btn-ghost" id="search-exit">✕ 검색 나가기</button></div>` : ''}

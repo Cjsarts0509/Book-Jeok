@@ -33,15 +33,19 @@ function wrap(fn) {
 
 // 권한 규칙:
 //  - admin   : 모든 계정 접근(외부업체·영업점 포함)
-//  - manager : 본인 + 외부업체(role='user') 계정만 접근. 영업점(role='branch')은 접근 불가.
+//  - manager : 본인 + 외부업체(role='user') 전부 + '내 소속 영업점'(role='branch' AND manager_id=나)
 //  - user(외부업체)/branch(영업점) : 본인만
 // ownerId 소유자에 대한 접근 가능 여부를 판정 (owner 미존재 시 false)
 async function canAccessOwner(requester, ownerId) {
   if (Number(ownerId) === requester.id) return true;
   if (requester.role === 'admin') return true;
   if (requester.role === 'manager') {
-    const r = await query('SELECT role FROM users WHERE id = $1', [ownerId]);
-    return r.rowCount > 0 && r.rows[0].role === 'user';
+    const r = await query('SELECT role, manager_id FROM users WHERE id = $1', [ownerId]);
+    if (!r.rowCount) return false;
+    const row = r.rows[0];
+    if (row.role === 'user') return true;                                        // 외부업체는 모두
+    if (row.role === 'branch') return Number(row.manager_id) === Number(requester.id); // 영업점은 내 소속만
+    return false;
   }
   return false;
 }

@@ -274,6 +274,12 @@ const MIGRATIONS = [
   { id: '0004_audit_action_idx', sql: `
     CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_log(action, created_at DESC);
   ` },
+  // 계정 공유 용량 풀 — 영업점(branch) 계정을 담당자(manager)에 소속시켜 용량을 함께 쓴다.
+  //  manager_id 가 가리키는 계정이 풀 루트(담당자). NULL 이면 자기 혼자 풀(기존과 동일).
+  { id: '0005_account_pool', sql: `
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS manager_id INTEGER REFERENCES users(id) ON DELETE SET NULL;
+    CREATE INDEX IF NOT EXISTS idx_users_manager ON users(manager_id);
+  ` },
 ];
 
 // 적용 안 된 마이그레이션만 트랜잭션으로 실행하고 schema_migrations 에 기록.
