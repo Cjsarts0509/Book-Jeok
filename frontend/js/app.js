@@ -2595,22 +2595,24 @@ const App = (() => {
       Date.now() - (s.at || 0) < 6 * 60 * 60 * 1000 && (s.ownerId || null) === (state.ownerId || null)) ? s : null;
   }
   function stockAuditModal(auto, preload) {
+    // 전달받은 파일(.bjsa)로 열린 '작업 모드' — 엑셀 업로드/분석/영업점 전달은 필요 없음(이미 만들어 준 목록).
+    const isOpened = !!(preload && Array.isArray(preload.disc));
     const m = UI.modal(`<h3>📊 재고조사 오차체크</h3>
-      <p class="muted" style="font-size:12px;margin:-6px 0 12px">두 엑셀을 올리면 오차 항목(예외 제외·차이≠0)을 뽑아 서가별 실사수량과 함께 표로 보여줍니다.</p>
+      <p class="muted" style="font-size:12px;margin:-6px 0 12px">${isOpened ? '전달받은 재고조사 오차 목록입니다. 상품을 보고 사진 촬영·체크를 진행하세요.' : '두 엑셀을 올리면 오차 항목(예외 제외·차이≠0)을 뽑아 서가별 실사수량과 함께 표로 보여줍니다.'}</p>
       <div id="sa-resume"></div>
-      <div class="sa-inputs">
+      ${isOpened ? '' : `<div class="sa-inputs">
         <label class="sa-file"><span class="sa-lbl">① 결과확인리스트</span><input type="file" id="sa-f1" accept=".xlsx,.xls"><span class="sa-name" id="sa-n1">파일 선택…</span></label>
         <label class="sa-file"><span class="sa-lbl">② 서가별스캔데이터</span><input type="file" id="sa-f2" accept=".xlsx,.xls"><span class="sa-name" id="sa-n2">파일 선택…</span></label>
-      </div>
-      <div class="modal-actions"><span class="muted" id="sa-status" style="flex:1;font-size:12px"></span><button class="btn btn-ghost" id="sa-close">닫기</button><button class="btn btn-primary" id="sa-run">분석</button></div>
+      </div>`}
+      <div class="modal-actions"><span class="muted" id="sa-status" style="flex:1;font-size:12px"></span><button class="btn btn-ghost" id="sa-close">닫기</button>${isOpened ? '' : '<button class="btn btn-primary" id="sa-run">분석</button>'}</div>
       <div id="sa-result" style="margin-top:12px"></div>`,
       { onClose: () => saSessionSave({ closed: true }) });   // 닫으면 자동 복귀 대상에서 제외
     m.el.querySelector('.modal').classList.add('sa-modal');
     m.q('#sa-close').addEventListener('click', m.close);
-    const status = (t) => { m.q('#sa-status').textContent = t || ''; };
+    const status = (t) => { const s = m.q('#sa-status'); if (s) s.textContent = t || ''; };
     let lastAoa = null; // 다운로드용(헤더+데이터)
-    m.q('#sa-f1').addEventListener('change', (e) => { m.q('#sa-n1').textContent = e.target.files[0]?.name || '파일 선택…'; });
-    m.q('#sa-f2').addEventListener('change', (e) => { m.q('#sa-n2').textContent = e.target.files[0]?.name || '파일 선택…'; });
+    m.q('#sa-f1')?.addEventListener('change', (e) => { m.q('#sa-n1').textContent = e.target.files[0]?.name || '파일 선택…'; });
+    m.q('#sa-f2')?.addEventListener('change', (e) => { m.q('#sa-n2').textContent = e.target.files[0]?.name || '파일 선택…'; });
 
     const num = (v) => { const n = Number(String(v == null ? '' : v).replace(/[^\d.-]/g, '')); return isNaN(n) ? 0 : n; };
     async function readSheet(XLSX, file) {
@@ -2627,7 +2629,7 @@ const App = (() => {
     let saCurrentFolder = (preload && preload.folder) || state.folder || '/';  // 사진 저장·확인 대상 폴더
     let saBranches = [];   // 전달 가능한 영업점 목록(담당자·관리자만 로드됨)
     // 담당자·관리자면 전달 대상 영업점 목록을 불러온다(영업점 계정 자체는 이 목록 안 씀).
-    if (isPriv()) API.stockAuditBranches().then((r) => { saBranches = r.branches || []; const sel = m.q('#sa-branch'); if (sel) fillBranchSelect(sel); }).catch(() => {});
+    if (isPriv() && !isOpened) API.stockAuditBranches().then((r) => { saBranches = r.branches || []; const sel = m.q('#sa-branch'); if (sel) fillBranchSelect(sel); }).catch(() => {});
     let saPhotoStems = new Set();   // 현재 폴더에 이미 사진이 있는 ISBN
     let saSort = { col: null, dir: 1 };  // 항목 정렬 열(null=원래 순서)·방향. 서가는 '항목 안에서' 중분류로 정렬.
     let saFilterFields = new Set();  // 분야 필터(비어있으면 전체, 아니면 선택된 분야만)
@@ -2941,7 +2943,7 @@ const App = (() => {
           ${window.ISBN ? '<button class="btn btn-secondary btn-sm" id="sa-scan">📷 바코드로 찾기</button>' : ''}
           <button class="btn btn-secondary btn-sm" id="sa-save">💾 저장</button>
           <button class="btn btn-primary btn-sm" id="sa-dl">⬇ 엑셀 다운로드</button>
-          ${isPriv() ? `<span class="sa-deliver-wrap"><label class="sa-foldersel">🏬 <select id="sa-branch"><option value="">영업점 선택…</option>${saBranches.map((a) => `<option value="${a.id}">${esc(a.displayName)}</option>`).join('')}</select></label><button class="btn btn-accent btn-sm" id="sa-deliver" title="선택한 영업점의 재고조사오차_&lt;년도&gt; 폴더에 재고조사 파일을 전달(영업점이 열어 사진·체크)">📤 영업점에 전달</button></span>` : ''}
+          ${isPriv() && !isOpened ? `<span class="sa-deliver-wrap"><label class="sa-foldersel">🏬 <select id="sa-branch"><option value="">영업점 선택…</option>${saBranches.map((a) => `<option value="${a.id}">${esc(a.displayName)}</option>`).join('')}</select></label><button class="btn btn-accent btn-sm" id="sa-deliver" title="선택한 영업점의 재고조사오차_&lt;년도&gt; 폴더에 재고조사 파일을 전달(영업점이 열어 사진·체크)">📤 영업점에 전달</button></span>` : ''}
         </div>
         <div class="table-wrap sa-tablewrap" id="sa-tablewrap"></div>`;
       m.q('#sa-dl')?.addEventListener('click', downloadXlsx);
@@ -3089,7 +3091,7 @@ const App = (() => {
       });
     }
 
-    m.q('#sa-run').addEventListener('click', async () => {
+    m.q('#sa-run')?.addEventListener('click', async () => {
       const f1 = m.q('#sa-f1').files[0], f2 = m.q('#sa-f2').files[0];
       if (!f1 || !f2) return UI.toast('두 파일을 모두 선택하세요', 'error');
       const btn = m.q('#sa-run'); btn.disabled = true;
