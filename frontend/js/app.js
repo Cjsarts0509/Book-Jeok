@@ -3029,6 +3029,17 @@ const App = (() => {
         for (const s of shelves) rows.push([d.field, d.isbn, d.name, d.pub, d.sys, d.real, d.miss, d.exc, d.scan, d.diff, s.maj, s.mid, s.min, s.qty]);
       }
       const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+      // 앞자리 0이 있는 코드 열(ISBN·대/중/소분류)은 '텍스트' 셀로 못박는다.
+      //  xlsx 는 셀 타입이 파일에 들어가므로 CSV 와 달리 엑셀 버전/자동변환 설정과 무관하게 0이 보존되지만,
+      //  서식까지 텍스트(@)로 지정해 두면 사용자가 셀을 편집·재저장해도 숫자로 바뀌지 않는다.
+      const TEXT_COLS = [1, 10, 11, 12];   // ISBN, 대분류, 중분류, 소분류
+      for (let r = 1; r <= rows.length; r++) {
+        for (const c of TEXT_COLS) {
+          const cell = ws[XLSX.utils.encode_cell({ r, c })];
+          if (!cell || cell.v === '' || cell.v == null) continue;
+          cell.t = 's'; cell.v = String(cell.v); cell.z = '@';
+        }
+      }
       const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, '재고오차');
       return wb;
     }
