@@ -11,9 +11,11 @@ const fsp = require('fs/promises');
 const crypto = require('crypto');
 const rateLimit = require('express-rate-limit');
 const config = require('../config');
-const { query } = require('../db');
+const { query, withTransaction } = require('../db');
 const { wrap, rateKey } = require('../util');
 const { verifyPassword } = require('../crypto');
+const { diskGate } = require('../disk');
+const { poolRootId, poolUsage } = require('../pool');
 const { isAllowed, allowedLabel, getAllowedExtensions } = require('../settings');
 const filetype = require('../filetype');
 const yara = require('../yara');
@@ -67,7 +69,9 @@ const uploadLimiter = rateLimit({ windowMs: 10 * 60 * 1000, max: 40, standardHea
 // 비밀번호 무차별 대입 방어: 실패(4xx/5xx)만 카운트
 const attemptLimiter = rateLimit({ windowMs: 10 * 60 * 1000, max: 15, skipSuccessfulRequests: true, standardHeaders: true, legacyHeaders: false, keyGenerator: rateKey, message: { error: '시도가 너무 많습니다. 잠시 후 다시 시도하세요.' } });
 
-// 검증(존재·상태·비밀번호)을 multer 이전에 수행
+// 검증(존재·상태·비밀번호)을 multer 이전에 수행.
+// 익명 경로이므로 '디스크에 쓰기 전에' 선언된 크기(Content-Length)로 링크 잔여 용량·계정 풀 용량까지
+// 미리 막는다. (기록 후 삭제하면 그 사이 볼륨이 차서 Postgres 가 죽을 수 있음)
 async function gate(req, res, next) {
   const u = await loadReq(req.params.token);
   if (!u) return res.status(404).json({ error: '유효하지 않은 링크입니다.' });
@@ -78,35 +82,68 @@ async function gate(req, res, next) {
     const pw = String(req.headers['x-upload-password'] || '');
     if (!pw || !(await verifyPassword(pw, u.password_hash))) return res.status(401).json({ error: '비밀번호가 필요하거나 올바르지 않습니다.', needsPassword: true });
   }
+  // 선언 크기 기준 사전 차단 — 링크 잔여 용량과 계정(풀) 잔여 용량 중 작은 쪽을 넘으면 즉시 거절
+  const declared = Number(req.headers['content-length'] || 0);
+  if (declared > 0) {
+    if (u.max_bytes != null) {
+      const linkLeft = Math.max(0, Number(u.max_bytes) - Number(u.uploaded_bytes));
+      if (declared > linkLeft) return res.status(413).json({ error: '업로드 용량 제한을 초과했습니다.' });
+    }
+    const pool = await poolUsage(u.owner_id);
+    if (!pool.unlimited && pool.used + declared > pool.quota) {
+      return res.status(413).json({ error: '이 폴더의 저장 공간이 부족합니다.' });
+    }
+  }
   req._uploadReq = u; req._ownerId = u.owner_id;
+  // 이 링크가 허용하는 1회 최대 바이트 — multer 가 그 이상은 아예 받지 않도록 제한
+  req._maxBytes = u.max_bytes != null
+    ? Math.max(0, Number(u.max_bytes) - Number(u.uploaded_bytes))
+    : MAX_UPLOAD_BYTES;
   next();
 }
 
-const upload = multer({
-  storage: multer.diskStorage({
-    destination: (req, file, cb) => { const d = userDir(req._ownerId); fs.mkdirSync(d, { recursive: true }); cb(null, d); },
-    filename: (req, file, cb) => cb(null, crypto.randomUUID()),
-  }),
-  limits: { fileSize: parseInt(process.env.MAX_UPLOAD_BYTES || String(2 * 1024 * 1024 * 1024), 10), files: 30 },
-  fileFilter: (req, file, cb) => {
-    const name = Buffer.from(file.originalname, 'latin1').toString('utf8');
-    if (!isAllowed(extOf(name))) return cb(Object.assign(new Error(`허용되지 않는 파일 형식입니다. 가능: ${allowedLabel()}`), { status: 415 }));
-    cb(null, true);
-  },
-});
+const MAX_UPLOAD_BYTES = parseInt(process.env.MAX_UPLOAD_BYTES || String(2 * 1024 * 1024 * 1024), 10);
 
-router.post('/:token', uploadLimiter, attemptLimiter, wrap(gate), upload.array('file', 30), wrap(async (req, res) => {
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => { const d = userDir(req._ownerId); fs.mkdirSync(d, { recursive: true }); cb(null, d); },
+  filename: (req, file, cb) => cb(null, crypto.randomUUID()),
+});
+const fileFilter = (req, file, cb) => {
+  const name = Buffer.from(file.originalname, 'latin1').toString('utf8');
+  if (!isAllowed(extOf(name))) return cb(Object.assign(new Error(`허용되지 않는 파일 형식입니다. 가능: ${allowedLabel()}`), { status: 415 }));
+  cb(null, true);
+};
+// 링크마다 허용 용량이 다르므로 요청 시점에 multer 를 구성한다(gate 가 계산한 _maxBytes 적용).
+// → 링크 잔여 용량을 넘는 파일은 디스크에 다 쓰이기 전에 multer 가 중단한다.
+function upload(req, res, next) {
+  // 잔여 0 이면 fileSize:0 → 어떤 파일도 받지 않는다(|| 로 쓰면 0이 기본값으로 뒤집히므로 주의)
+  const lim = Number.isFinite(req._maxBytes) ? Math.min(req._maxBytes, MAX_UPLOAD_BYTES) : MAX_UPLOAD_BYTES;
+  multer({ storage, fileFilter, limits: { fileSize: lim, files: 30 } })
+    .array('file', 30)(req, res, next);
+}
+
+router.post('/:token', uploadLimiter, attemptLimiter, wrap(gate), wrap(diskGate), upload, wrap(async (req, res) => {
   const u = req._uploadReq; const owner = u.owner_id;
   if (!req.files || !req.files.length) return res.status(400).json({ error: '업로드할 파일이 없습니다.' });
   const incoming = req.files.reduce((s, f) => s + f.size, 0);
   const cleanup = () => Promise.all(req.files.map((f) => fsp.unlink(f.path).catch(() => {})));
   if (u.max_files != null && u.uploaded_count + req.files.length > u.max_files) { await cleanup(); return res.status(413).json({ error: '업로드 개수 제한을 초과했습니다.' }); }
   if (u.max_bytes != null && Number(u.uploaded_bytes) + incoming > Number(u.max_bytes)) { await cleanup(); return res.status(413).json({ error: '업로드 용량 제한을 초과했습니다.' }); }
-  const ow = await query('SELECT quota_bytes, role FROM users WHERE id=$1', [owner]);
-  if (ow.rows[0].role !== 'admin') {
-    const quota = Number(ow.rows[0].quota_bytes);
-    const used = await query('SELECT COALESCE(SUM(size_bytes),0) AS s FROM files WHERE owner_id=$1 AND deleted_at IS NULL', [owner]);
-    if (quota === 0 || Number(used.rows[0].s) + incoming > quota) { await cleanup(); return res.status(413).json({ error: '이 폴더의 저장 공간이 부족합니다.' }); }
+  // 계정(공유 풀) 용량 재확인 — 동시 업로드 경합(TOCTOU) 방지를 위해 풀 루트 락 안에서 검사
+  try {
+    await withTransaction(async (client) => {
+      const qc = client.query.bind(client);
+      const rootId = await poolRootId(owner, qc);
+      await client.query('SELECT pg_advisory_xact_lock($1)', [rootId]);
+      const pool = await poolUsage(rootId, qc, true);
+      if (!pool.unlimited && (pool.quota === 0 || pool.used + incoming > pool.quota)) {
+        const e = new Error('이 폴더의 저장 공간이 부족합니다.'); e.status = 413; throw e;
+      }
+    });
+  } catch (err) {
+    await cleanup();
+    if (err.status === 413) return res.status(413).json({ error: err.message });
+    throw err;
   }
   await ensureFolder(owner, u.folder);
   // 요청에 사유가 있으면 업로드된 파일의 비고에 사유를 넣는다(없으면 기본 문구).

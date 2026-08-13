@@ -11,9 +11,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       fonts-noto-cjk \
     && rm -rf /var/lib/apt/lists/*
 
-# 의존성 먼저 설치 (레이어 캐시)
-COPY package.json ./
-RUN npm install --omit=dev
+# 의존성 먼저 설치 (레이어 캐시).
+# package-lock.json 을 함께 복사해 npm ci 로 '잠긴 버전 그대로' 설치한다.
+#  → 재빌드마다 의존성이 떠다니지 않고(재현 가능), 보안 패치가 적용된 버전이 그대로 배포된다.
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev
 
 COPY src ./src
 COPY yara-rules ./yara-rules

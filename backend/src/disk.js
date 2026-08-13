@@ -59,4 +59,19 @@ async function validateAllocation(newQuota, excludeId) {
   return { ok: true };
 }
 
-module.exports = { diskTotalBytes, allocatedBytes, validateAllocation, diskUsage, dirSize };
+// 저장 볼륨(=pgdata 공용) 여유공간 가드: 임계치 이하로 떨어지면 새 쓰기를 거절해
+// 디스크 풀로 Postgres 가 죽는 것을 막는다. statfs 실패 시엔 통과(기존 동작 유지).
+// 인증 업로드(files) · 공개 업로드 링크(uploadLink) · 재고조사 전달이 공용으로 쓴다.
+const DISK_HEADROOM = 2 * 1024 * 1024 * 1024; // 최소 2GB 여유 확보
+async function diskGate(req, res, next) {
+  try {
+    const { avail, total } = await diskUsage();
+    const headroom = Math.max(DISK_HEADROOM, Math.floor(total * 0.03)); // 2GB 또는 3% 중 큰 값
+    if (total > 0 && avail < headroom) {
+      return res.status(507).json({ error: '서버 저장 공간이 부족합니다. 관리자에게 문의하세요.' });
+    }
+  } catch (_) { /* 측정 실패 → 통과 */ }
+  next();
+}
+
+module.exports = { diskTotalBytes, allocatedBytes, validateAllocation, diskUsage, dirSize, diskGate };

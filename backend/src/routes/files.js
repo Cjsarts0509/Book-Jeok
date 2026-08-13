@@ -14,7 +14,7 @@ const { generateToken, hashPassword } = require('../crypto');
 const filetype = require('../filetype');
 const yara = require('../yara');
 const officePdf = require('../officePdf');
-const { diskUsage } = require('../disk');
+const { diskGate } = require('../disk');
 const { poolRootId, poolUsage } = require('../pool');
 const notify = require('../notify');
 const { isAllowed, allowedLabel, getAllowedExtensions, trashRetentionDays, shareQrEnabled } = require('../settings');
@@ -112,19 +112,7 @@ async function resolveOwner(req, res, next) {
   next();
 }
 
-// 저장 볼륨(=pgdata 공용) 여유공간 가드: 임계치 이하로 떨어지면 새 쓰기를 거절해
-// 디스크 풀로 Postgres 가 죽는 것을 막는다. statfs 실패 시엔 통과(기존 동작 유지).
-const DISK_HEADROOM = 2 * 1024 * 1024 * 1024; // 최소 2GB 여유 확보
-async function diskGate(req, res, next) {
-  try {
-    const { avail, total } = await diskUsage();
-    const headroom = Math.max(DISK_HEADROOM, Math.floor(total * 0.03)); // 2GB 또는 3% 중 큰 값
-    if (total > 0 && avail < headroom) {
-      return res.status(507).json({ error: '서버 저장 공간이 부족합니다. 관리자에게 문의하세요.' });
-    }
-  } catch (_) { /* 측정 실패 → 통과 */ }
-  next();
-}
+// diskGate(저장 볼륨 여유공간 가드)는 disk.js 로 이동 — 공개 업로드 링크와 공용.
 
 const fileRow = (r) => ({
   id: r.id, name: r.original_name, folder: r.folder, size: Number(r.size_bytes),

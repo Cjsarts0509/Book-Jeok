@@ -5,7 +5,7 @@ const jwt = require('jsonwebtoken');
 const rateLimit = require('express-rate-limit');
 const config = require('../config');
 const { query } = require('../db');
-const { hashPassword, verifyPassword, encryptSecret, decryptSecret } = require('../crypto');
+const { hashPassword, verifyPassword, encryptSecret, decryptSecret, DUMMY_HASH } = require('../crypto');
 const { authenticate } = require('../middleware/auth');
 const { audit, wrap, clientIp, rateKey } = require('../util');
 const { shareQrEnabled } = require('../settings');
@@ -84,8 +84,8 @@ router.post('/login', loginLimiter, wrap(async (req, res) => {
     [username]
   );
   const user = result.rows[0];
-  // 타이밍 공격 완화를 위해 계정 없어도 검증 수행
-  const ok = user ? await verifyPassword(password, user.password_hash) : await verifyPassword(password, '$2a$12$invalidinvalidinvalidinvalidinvalidinvalidinv');
+  // 타이밍 공격 완화를 위해 계정이 없어도 동일한 비용의 검증을 수행(DUMMY_HASH 는 유효한 60자 해시)
+  const ok = user ? await verifyPassword(password, user.password_hash) : await verifyPassword(password, DUMMY_HASH);
   if (!user || !ok || !user.is_active) {
     await audit(req, 'login_failed', username);
     return res.status(401).json({ error: '아이디 또는 비밀번호가 올바르지 않습니다.' });

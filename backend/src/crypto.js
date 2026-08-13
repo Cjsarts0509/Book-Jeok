@@ -18,6 +18,11 @@ async function verifyPassword(plain, hash) {
   return bcrypt.compare(plain, hash);
 }
 
+// 계정이 없을 때도 '진짜' bcrypt 검증을 1회 수행해 응답시간을 맞추기 위한 더미 해시.
+// (형식이 잘못된 문자열이면 bcryptjs 가 길이 검사에서 즉시 false 를 반환해 KDF 를 건너뛰고,
+//  그 결과 존재하는 계정과 없는 계정의 응답시간 차이로 아이디가 노출된다 → 반드시 유효한 60자 해시)
+const DUMMY_HASH = bcrypt.hashSync(crypto.randomBytes(32).toString('hex'), 12);
+
 // ── 관리자 열람용 가역 암호화 (AES-256-GCM) ────────────
 // 주의: 이 기능은 "관리자가 암호를 열람 가능"이라는 요구사항 때문에 존재합니다.
 // 보안상 권장되는 방식은 아니며, 마스터 키는 DB와 분리된 곳(서버 env/KMS)에 보관해야 합니다.
@@ -61,4 +66,5 @@ module.exports = {
   decryptSecret,
   generatePassword,
   generateToken,
+  DUMMY_HASH,
 };
