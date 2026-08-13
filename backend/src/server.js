@@ -45,6 +45,7 @@ app.use(helmet({
       frameAncestors: ["'none'"],                // 클릭재킹 차단(X-Frame-Options 보다 강함)
       baseUri: ["'self'"],
       formAction: ["'self'"],
+      reportUri: ['/api/csp-report'],            // 위반을 서버 로그로 모아 정책을 안전하게 검증
     },
   },
   crossOriginResourcePolicy: { policy: 'cross-origin' },  // 프런트/API 가 분리 호스트일 수 있어 유지
@@ -59,6 +60,39 @@ app.use(cors({
   credentials: true,
   exposedHeaders: ['Content-Disposition'], // 브라우저 JS가 다운로드 파일명을 읽을 수 있도록
 }));
+
+// ── CSP 위반 수집 ───────────────────────────────────
+// 브라우저가 정책 위반을 여기로 보고한다. Report-Only 로 운영하는 동안 실제 사용 경로에서
+// 무엇이 막힐지 로그로 확인한 뒤 CSP_ENFORCE=1 로 켜기 위한 장치.
+//   확인:  docker logs bookjeok-api | grep CSP
+// 인증 불필요(브라우저가 보냄) → 자체 레이트리밋을 두고 전역 리밋 '앞'에 배치해
+// 보고 폭주가 정상 API 호출 예산을 잠식하지 않게 한다. 같은 위반은 합산해 로그를 더럽히지 않는다.
+const cspSeen = new Map();
+app.post('/api/csp-report',
+  rateLimit({ windowMs: 60 * 1000, max: 60, keyGenerator: rateKey, standardHeaders: false, legacyHeaders: false, message: {} }),
+  express.json({ type: ['application/csp-report', 'application/reports+json', 'application/json'], limit: '32kb' }),
+  (req, res) => {
+    res.status(204).end();   // 브라우저는 응답 본문을 쓰지 않는다 — 먼저 끊고 로깅
+    try {
+      const body = req.body || {};
+      // report-uri(구형)는 {"csp-report":{...}}, Reporting API(신형)는 [{type,body},...]
+      const items = Array.isArray(body) ? body.map((x) => x && x.body).filter(Boolean)
+        : (body['csp-report'] ? [body['csp-report']] : []);
+      for (const r of items) {
+        const directive = r['effective-directive'] || r.effectiveDirective || r['violated-directive'] || r.violatedDirective || '?';
+        const blocked = String(r['blocked-uri'] || r.blockedURL || '?').slice(0, 200);
+        const page = String(r['document-uri'] || r.documentURL || '?').slice(0, 200);
+        const key = `${directive}|${blocked}`;
+        const n = (cspSeen.get(key) || 0) + 1;
+        cspSeen.set(key, n);
+        // 같은 위반은 1·10·100… 번째만 출력(정책 검증엔 '무엇이' 막히는지가 중요, 횟수는 부차)
+        if (n === 1 || n === 10 || n === 100 || n % 1000 === 0) {
+          console.warn(`[CSP] 위반 directive=${directive} blocked=${blocked} page=${page} (${n}회)`);
+        }
+      }
+      if (cspSeen.size > 500) cspSeen.clear();   // 메모리 무한 증가 방지
+    } catch (_) { /* 보고 파싱 실패는 무시 */ }
+  });
 
 app.use(express.json({ limit: '16mb' })); // 공지 리치텍스트(이미지 임베드) 대비
 app.use(express.urlencoded({ extended: true, limit: '1mb' }));
