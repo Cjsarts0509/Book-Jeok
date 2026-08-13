@@ -1023,11 +1023,13 @@ const App = (() => {
     bar.classList.toggle('empty', dis);
     const nImg = window.ISBN ? [...state.selected.values()].filter((it) => it.type === 'file' && isImage(it.name)).length : 0;
     const nFile = [...state.selected.values()].filter((it) => it.type === 'file').length;
+    // 단일 '파일'이면 압축 없이(다운로드/공유링크), 그 외(다중·단일 폴더)는 ZIP
+    const singleFile = state.selected.size === 1 && [...state.selected.values()][0].type === 'file';
     bar.innerHTML = `<b>${n > 0 ? `${n}개 선택` : '항목을 선택하세요'}</b><div style="flex:1"></div>
       <button class="btn btn-sm btn-ghost" id="sel-rename" ${n !== 1 ? 'disabled' : ''}>✏️ 이름변경</button>
       <button class="btn btn-sm btn-ghost" id="sel-bulkname" ${nFile < 2 ? 'disabled' : ''} title="선택 파일을 규칙(원본·연번·날짜)으로 한 번에 이름변경">🔢 일괄이름</button>
       ${window.ISBN ? `<button class="btn btn-sm btn-ghost" id="sel-barcode" ${nImg === 0 ? 'disabled' : ''} title="이미지에서 바코드/ISBN을 읽어 제목 변경">📕 바코드 제목변경</button>` : ''}
-      <button class="btn btn-sm btn-primary" id="sel-dl" ${dis ? 'disabled' : ''}>⬇️ 다운로드(ZIP)</button>
+      <button class="btn btn-sm btn-primary" id="sel-dl" ${dis ? 'disabled' : ''}>${singleFile ? '⬇️ 다운로드' : '⬇️ 다운로드(ZIP)'}</button>
       <button class="btn btn-sm btn-secondary" id="sel-move" ${dis ? 'disabled' : ''}>📂 폴더이동</button>
       <button class="btn btn-sm btn-ghost" id="sel-copy" ${nFile === 0 ? 'disabled' : ''} title="선택 파일을 다른 폴더로 복사">📄 복사</button>
       <button class="btn btn-sm btn-danger" id="sel-del" ${dis ? 'disabled' : ''}>🗑️ 삭제</button>
@@ -1078,6 +1080,8 @@ const App = (() => {
   const lastSeg = (p) => (p && p !== '/') ? p.split('/').filter(Boolean).pop() : '';
   async function bulkDownload() {
     const items = [...state.selected.values()];
+    // 단일 '파일'(폴더 아님)이면 압축 없이 처리 — 그대로 다운로드 or 공유링크
+    if (items.length === 1 && items[0].type === 'file') return singleFileActionModal(items[0]);
     const ids = items.filter((i) => i.type === 'file').map((i) => i.id);
     const folders = items.filter((i) => i.type === 'folder').map((i) => i.path);
     if (!ids.length && !folders.length) return;
@@ -1094,6 +1098,20 @@ const App = (() => {
     } catch (err) { UI.toast(err.message || '압축 실패', 'error'); return; }
     finally { if (btn) { btn.disabled = false; btn.innerHTML = '⬇️ 다운로드(ZIP)'; } }
     zipActionModal(bundle);
+  }
+
+  // 단일 파일: 압축 없이 그대로 다운로드 하거나 공유링크 생성
+  function singleFileActionModal(item) {
+    const m = UI.modal(`<h3>⬇️ ${UI.escapeHtml(item.name)}</h3>
+      <p class="muted" style="font-size:12px;margin-bottom:14px">단일 파일은 압축 없이 그대로 받거나 공유링크를 만들 수 있어요.</p>
+      <div class="zip-actions">
+        <button class="btn btn-primary" id="fdl">⬇️ 내 기기로 다운로드</button>
+        <button class="btn btn-secondary" id="fshare">🔗 공유링크 만들기</button>
+      </div>
+      <div class="modal-actions"><button class="btn btn-ghost" id="fclose">닫기</button></div>`);
+    m.q('#fclose').addEventListener('click', m.close);
+    m.q('#fdl').addEventListener('click', () => { m.close(); downloadFile(item.id); });
+    m.q('#fshare').addEventListener('click', () => { m.close(); shareModal(item.id); });
   }
 
   // 압축 완료 후: 내 기기로 다운로드 / 공유링크 만들기 선택
