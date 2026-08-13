@@ -33,7 +33,9 @@ function scanFile(filePath) {
   return new Promise((resolve) => {
     if (DISABLED || !hasRules() || !binaryAvailable()) return resolve({ ok: true, skipped: true });
     // yara [OPTIONS] RULES FILE → 매칭 시 "<rulename> <path>" 한 줄씩 stdout, 매칭 없으면 빈 출력.
-    execFile('yara', ['--no-warnings', '-f', RULES, filePath], { timeout: TIMEOUT, maxBuffer: 1024 * 1024 }, (err, stdout) => {
+    // 환경변수는 최소만 전달 — 업로드된(신뢰 불가) 파일을 파싱하는 프로세스에 앱 시크릿을 넘기지 않는다.
+    const childEnv = { PATH: process.env.PATH || '/usr/local/bin:/usr/bin:/bin', LC_ALL: 'C.UTF-8' };
+    execFile('yara', ['--no-warnings', '-f', RULES, filePath], { timeout: TIMEOUT, maxBuffer: 1024 * 1024, env: childEnv }, (err, stdout) => {
       if (err) {
         if (err.code === 'ENOENT') { if (!binaryMissing) console.warn('[yara] yara 미설치 — 검사 건너뜀'); binaryMissing = true; }
         else console.warn('[yara] 검사 오류 — 통과:', err.message);

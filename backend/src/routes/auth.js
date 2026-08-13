@@ -58,9 +58,10 @@ const loginLimiter = rateLimit({
 
 function issueToken(res, user) {
   const token = jwt.sign(
-    { sub: user.id, username: user.username, role: user.role },
+    // tv(token_version): 로그아웃·비번변경·2FA변경 시 서버에서 올려 기존 토큰을 무효화하는 값
+    { sub: user.id, username: user.username, role: user.role, tv: Number(user.token_version || 0) },
     config.jwtSecret,
-    { expiresIn: config.jwtExpiresIn }
+    { expiresIn: config.jwtExpiresIn, algorithm: 'HS256' }
   );
   res.cookie(config.cookieName, token, {
     httpOnly: true,
@@ -80,7 +81,7 @@ router.post('/login', loginLimiter, wrap(async (req, res) => {
   }
 
   const result = await query(
-    'SELECT id, username, display_name, role, password_hash, is_active, totp_enabled, totp_secret FROM users WHERE username = $1',
+    'SELECT id, username, display_name, role, password_hash, is_active, totp_enabled, totp_secret, token_version FROM users WHERE username = $1',
     [username]
   );
   const user = result.rows[0];
@@ -124,6 +125,8 @@ router.post('/login', loginLimiter, wrap(async (req, res) => {
 // POST /api/auth/logout
 router.post('/logout', authenticate, wrap(async (req, res) => {
   res.clearCookie(config.cookieName);
+  // 쿠키만 지우면 localStorage 의 Bearer 토큰이 8시간 그대로 살아있다 → token_version 을 올려 실제로 폐기
+  await query('UPDATE users SET token_version = token_version + 1 WHERE id=$1', [req.user.id]);
   await audit(req, 'logout', '');
   res.json({ ok: true });
 }));
@@ -148,8 +151,17 @@ router.get('/me', authenticate, wrap(async (req, res) => {
 }));
 
 // ── 2단계 인증(TOTP) ──────────
-// 등록 시작: 새 시크릿을 pending에 저장하고 QR 반환(기존 활성 2FA는 확인 전까지 유지)
-router.post('/2fa/setup', authenticate, wrap(async (req, res) => {
+// 이미 2FA 가 켜져 있으면 재등록을 막는다(해제 → 재등록 순서만 허용).
+//  해제는 비밀번호를 요구하므로, 토큰만 훔친 공격자가 2FA 를 자기 것으로 갈아끼우는 경로가 닫힌다.
+//  (프런트도 켜져 있을 땐 '해제'만 노출하므로 동작 변화 없음. 관리자가 인증기를 분실하면 DB 초기화로 해결)
+function blockReenroll(req, res, next) {
+  if (req.user.totp_enabled) {
+    return res.status(403).json({ error: '이미 2단계 인증이 켜져 있습니다. 다시 등록하려면 먼저 해제하세요.' });
+  }
+  next();
+}
+// 등록 시작: 새 시크릿을 pending에 저장하고 QR 반환
+router.post('/2fa/setup', authenticate, blockReenroll, wrap(async (req, res) => {
   const secret = totp.generateSecret();
   await query('UPDATE users SET totp_pending=$1 WHERE id=$2', [encryptSecret(secret), req.user.id]);
   const url = totp.otpauthURL(req.user.username, secret);
@@ -157,7 +169,7 @@ router.post('/2fa/setup', authenticate, wrap(async (req, res) => {
   res.json({ secret, otpauthUrl: url, qr });
 }));
 // 등록 확인: pending 시크릿으로 코드 검증 후 활성화
-router.post('/2fa/enable', authenticate, wrap(async (req, res) => {
+router.post('/2fa/enable', authenticate, blockReenroll, wrap(async (req, res) => {
   const code = String(req.body.token || '').trim();
   const r = await query('SELECT totp_pending FROM users WHERE id=$1', [req.user.id]);
   const pending = r.rows[0] && r.rows[0].totp_pending;
@@ -165,18 +177,22 @@ router.post('/2fa/enable', authenticate, wrap(async (req, res) => {
   let sec = '';
   try { sec = decryptSecret(pending); } catch (_) { sec = ''; }
   if (!totp.verify(sec, code)) return res.status(400).json({ error: '인증 코드가 올바르지 않습니다. 앱의 최신 코드를 입력하세요.' });
-  await query("UPDATE users SET totp_secret=$1, totp_enabled=true, totp_pending='' WHERE id=$2", [pending, req.user.id]);
+  // 2FA 활성화 = 인증 상태 변화 → 기존 토큰 폐기(다른 기기/침입자 세션 축출) 후 본인 세션만 재발급
+  await query("UPDATE users SET totp_secret=$1, totp_enabled=true, totp_pending='', token_version = token_version + 1 WHERE id=$2", [pending, req.user.id]);
   await audit(req, '2fa_enabled', '');
-  res.json({ ok: true });
+  const u = await query('SELECT id, username, role, token_version FROM users WHERE id=$1', [req.user.id]);
+  res.json({ ok: true, token: issueToken(res, u.rows[0]) });
 }));
 // 해제: 관리자는 불가(필수). 비밀번호 확인 후 해제.
 router.post('/2fa/disable', authenticate, wrap(async (req, res) => {
   if (req.user.role === 'admin') return res.status(403).json({ error: '관리자는 2단계 인증을 해제할 수 없습니다.' });
   const r = await query('SELECT password_hash FROM users WHERE id=$1', [req.user.id]);
   if (!(await verifyPassword(String(req.body.password || ''), r.rows[0].password_hash))) return res.status(400).json({ error: '비밀번호가 올바르지 않습니다.' });
-  await query("UPDATE users SET totp_secret='', totp_enabled=false, totp_pending='' WHERE id=$1", [req.user.id]);
+  // 2FA 해제도 인증 상태의 변화 → 기존 토큰 폐기(본인 세션은 아래에서 재발급)
+  await query("UPDATE users SET totp_secret='', totp_enabled=false, totp_pending='', token_version = token_version + 1 WHERE id=$1", [req.user.id]);
   await audit(req, '2fa_disabled', '');
-  res.json({ ok: true });
+  const u2 = await query('SELECT id, username, role, token_version FROM users WHERE id=$1', [req.user.id]);
+  res.json({ ok: true, token: issueToken(res, u2.rows[0]) });
 }));
 
 // PATCH /api/auth/settings  (본인 설정: 동일이름 처리 등. 제공된 필드만 갱신)
@@ -213,12 +229,16 @@ router.post('/change-password', authenticate, wrap(async (req, res) => {
 
   const hash = await hashPassword(next);
   const enc = encryptSecret(next);
+  // 비밀번호를 바꾸면 다른 기기/침입자의 기존 세션도 함께 끊어야 의미가 있다 → token_version 증가
   await query(
-    'UPDATE users SET password_hash = $1, password_enc = $2, updated_at = now() WHERE id = $3',
+    'UPDATE users SET password_hash = $1, password_enc = $2, token_version = token_version + 1, updated_at = now() WHERE id = $3',
     [hash, enc, req.user.id]
   );
   await audit(req, 'change_password_self', '');
-  res.json({ ok: true });
+  // 본인 세션은 유지되도록 새 토큰을 재발급(비번 변경 후 즉시 로그아웃되는 불편 방지)
+  const u = await query('SELECT id, username, role, token_version FROM users WHERE id=$1', [req.user.id]);
+  const token = issueToken(res, u.rows[0]);
+  res.json({ ok: true, token });
 }));
 
 module.exports = router;

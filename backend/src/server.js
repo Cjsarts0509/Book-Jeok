@@ -14,9 +14,41 @@ const app = express();
 app.set('trust proxy', 1); // Cloudflare / nginx 프록시 뒤에서 실제 IP 인식
 
 // ── 보안 헤더 ───────────────────────────────────────
+// CSP: 프런트를 같은 서버에서 서빙(SERVE_FRONTEND=1, compose 기본값)하므로 반드시 필요하다.
+//  인라인 스크립트/핸들러를 전부 외부 .js 로 분리했기 때문에 'unsafe-inline' 없이 script-src 'self' 가 가능.
+//  → XSS 가 생기더라도 스크립트 실행 자체가 차단되어 세션 탈취로 이어지지 않는다.
+//  styleSrc 만 'unsafe-inline' 유지(코드 전반의 style="..." 속성 때문. 스타일은 스크립트 실행이 불가).
+// 실제로 쓰는 출처만 열어둔다(하나라도 빠지면 기능이 깨지므로 근거를 함께 남긴다):
+//  · API_ORIGIN  : 프런트가 분리 호스팅일 때 호출 대상(frontend/config.js 의 BOOKJEOK_API). CSP_API_ORIGIN 로 지정.
+//  · 교보 표지    : app.js 가 표지 이미지를 직접 로드
+//  · jsdelivr    : isbn.js 가 OCR(tesseract.js)을 동적 로드
+//  · blob:(frame): PDF 미리보기를 <iframe src="blob:"> 로 띄움
+const API_ORIGIN = (process.env.CSP_API_ORIGIN || '').split(',').map((s) => s.trim()).filter(Boolean);
+const TESS_CDN = 'https://cdn.jsdelivr.net';
 app.use(helmet({
-  contentSecurityPolicy: false, // 정적 프런트는 별도 호스팅(CF Pages) 가정
-  crossOriginResourcePolicy: { policy: 'cross-origin' },
+  contentSecurityPolicy: {
+    useDefaults: false,
+    // 기본은 위반 '보고만'(차단 안 함). 배포 후 콘솔에 위반이 없는지 확인하고
+    // CSP_ENFORCE=1 로 실제 차단을 켠다 — 잘못된 정책으로 서비스가 멈추는 것을 막기 위함.
+    reportOnly: process.env.CSP_ENFORCE !== '1',
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'", TESS_CDN],
+      styleSrc: ["'self'", "'unsafe-inline'"],   // 코드 전반의 style="..." 속성(스타일은 스크립트 실행 불가)
+      imgSrc: ["'self'", 'data:', 'blob:', 'https://contents.kyobobook.co.kr'],
+      connectSrc: ["'self'", 'blob:', TESS_CDN, ...API_ORIGIN],
+      fontSrc: ["'self'", 'data:'],
+      mediaSrc: ["'self'", 'blob:'],
+      workerSrc: ["'self'", 'blob:'],
+      frameSrc: ["'self'", 'blob:'],             // PDF 미리보기
+      objectSrc: ["'none'"],
+      frameAncestors: ["'none'"],                // 클릭재킹 차단(X-Frame-Options 보다 강함)
+      baseUri: ["'self'"],
+      formAction: ["'self'"],
+    },
+  },
+  crossOriginResourcePolicy: { policy: 'cross-origin' },  // 프런트/API 가 분리 호스트일 수 있어 유지
+  hsts: { maxAge: 31536000, includeSubDomains: true },
 }));
 
 app.use(cors({

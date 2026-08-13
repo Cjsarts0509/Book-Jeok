@@ -280,6 +280,11 @@ const MIGRATIONS = [
     ALTER TABLE users ADD COLUMN IF NOT EXISTS manager_id INTEGER REFERENCES users(id) ON DELETE SET NULL;
     CREATE INDEX IF NOT EXISTS idx_users_manager ON users(manager_id);
   ` },
+  // 토큰 무효화(세션 폐기) — 발급된 JWT 에 이 값을 담고 매 요청 대조한다.
+  // 로그아웃·비밀번호 변경·2FA 변경 시 값을 올려 기존 토큰을 즉시 무효화(기존엔 8시간 살아있었음).
+  { id: '0006_token_version', sql: `
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS token_version INTEGER NOT NULL DEFAULT 0;
+  ` },
 ];
 
 // 적용 안 된 마이그레이션만 트랜잭션으로 실행하고 schema_migrations 에 기록.

@@ -37,11 +37,13 @@ const API = (() => {
     // auth
     login: (username, password, token) => req('POST', '/auth/login', { username, password, token }),
     setup2fa: () => req('POST', '/auth/2fa/setup'),
-    enable2fa: (token) => req('POST', '/auth/2fa/enable', { token }),
-    disable2fa: (password) => req('POST', '/auth/2fa/disable', { password }),
+    // 2FA 변경·비밀번호 변경은 서버가 기존 토큰을 전부 폐기(token_version)하고 본인 것만 재발급한다.
+    // → 응답의 새 토큰을 즉시 저장해야 현재 창이 로그아웃되지 않는다.
+    enable2fa: async (token) => { const r = await req('POST', '/auth/2fa/enable', { token }); if (r && r.token) setToken(r.token); return r; },
+    disable2fa: async (password) => { const r = await req('POST', '/auth/2fa/disable', { password }); if (r && r.token) setToken(r.token); return r; },
     logout: () => req('POST', '/auth/logout'),
     me: () => req('GET', '/auth/me'),
-    changePassword: (currentPassword, newPassword) => req('POST', '/auth/change-password', { currentPassword, newPassword }),
+    changePassword: async (currentPassword, newPassword) => { const r = await req('POST', '/auth/change-password', { currentPassword, newPassword }); if (r && r.token) setToken(r.token); return r; },
     updateSettings: (data) => req('PATCH', '/auth/settings', data),
     notifications: (limit = 20) => req('GET', `/files/notifications?limit=${limit}`),
     markNotificationsRead: (ids) => req('POST', '/files/notifications/read', ids ? { ids } : {}),

@@ -1,0 +1,65 @@
+/* folder.html 페이지 스크립트 — CSP(script-src 'self') 적용을 위해 인라인에서 분리 */
+(function () {
+  const BASE = (window.BOOKJEOK_API || '').replace(/\/$/, '');
+  const fv = document.getElementById('fv');
+  const token = new URLSearchParams(location.search).get('t');
+  const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const fmt = (n) => { n = Number(n) || 0; if (!n) return '0 B'; const u = ['B', 'KB', 'MB', 'GB', 'TB']; const i = Math.floor(Math.log(n) / Math.log(1024)); return (n / Math.pow(1024, i)).toFixed(i ? 1 : 0) + ' ' + u[i]; };
+  if (!token) { fv.innerHTML = '<p class="muted" style="text-align:center">잘못된 링크입니다.</p>'; return; }
+  let info = null, pw = '';
+  const H = () => pw ? { 'x-folder-password': pw } : {};
+
+  async function start() {
+    try {
+      const r = await fetch(`${BASE}/api/folder-share/${encodeURIComponent(token)}`);
+      info = await r.json(); if (!r.ok) throw new Error(info.error || '유효하지 않은 링크입니다.');
+      if (info.status === 'expired') return msg('만료된 링크입니다.', true);
+      if (info.status === 'disabled') return msg('중지된 링크입니다.', true);
+      document.getElementById('title').textContent = info.label || '공유 폴더';
+      if (info.needsPassword) askPassword(); else list(info.base);
+    } catch (e) { msg(e.message, true); }
+  }
+  const msg = (t, danger) => { fv.innerHTML = `<p class="muted" style="text-align:center;${danger ? 'color:var(--danger)' : ''}">${esc(t)}</p>`; };
+
+  function askPassword() {
+    fv.innerHTML = `<div class="field"><label>비밀번호</label><input class="input" type="password" id="pw" placeholder="폴더 비밀번호"></div>
+      <button class="btn btn-primary" id="go" style="width:100%">열기</button><p id="pm" class="muted" style="margin-top:8px;font-size:13px;text-align:center"></p>`;
+    const go = () => { pw = document.getElementById('pw').value; list(info.base); };
+    document.getElementById('go').addEventListener('click', go);
+    document.getElementById('pw').addEventListener('keydown', (e) => { if (e.key === 'Enter') go(); });
+  }
+
+  async function list(path) {
+    fv.innerHTML = '<p class="muted" style="text-align:center">불러오는 중…</p>';
+    try {
+      const r = await fetch(`${BASE}/api/folder-share/${encodeURIComponent(token)}/list?path=${encodeURIComponent(path)}`, { headers: H() });
+      const d = await r.json();
+      if (r.status === 401) { pw = ''; info.needsPassword = true; askPassword(); document.getElementById('pm').textContent = '비밀번호가 필요하거나 올바르지 않습니다.'; return; }
+      if (!r.ok) throw new Error(d.error || '불러오기 실패');
+      render(d);
+    } catch (e) { msg(e.message, true); }
+  }
+
+  function render(d) {
+    // 공유 폴더(base)를 루트로 하는 브레드크럼
+    const relParts = (d.base === '/' ? d.path : d.path.slice(d.base.length)).split('/').filter(Boolean);
+    let acc = d.base; const crumbs = [`<a data-p="${esc(d.base)}">🏠 ${esc(info.label || '공유 폴더')}</a>`];
+    for (const seg of relParts) { acc = (acc === '/' ? '' : acc) + '/' + seg; crumbs.push(`<span class="sep">/</span><a data-p="${esc(acc)}">${esc(seg)}</a>`); }
+    const folders = d.folders.map((f) => `<div class="fs-row" data-open="${esc(f.path)}"><span>📁 ${esc(f.name)}</span><span class="muted">폴더</span></div>`).join('');
+    const files = d.files.map((f) => `<div class="fs-row"><span>📄 ${esc(f.name)}</span><span><span class="muted" style="margin-right:8px">${fmt(f.size)}</span><button class="btn btn-sm btn-secondary" data-dl="${f.id}" data-name="${esc(f.name)}">⬇️</button></span></div>`).join('');
+    fv.innerHTML = `<div class="breadcrumb" style="margin-bottom:10px">${crumbs.join('')}</div>
+      ${folders || files ? folders + files : '<p class="muted" style="text-align:center;padding:20px">빈 폴더입니다.</p>'}`;
+    fv.querySelectorAll('[data-p]').forEach((el) => el.addEventListener('click', () => list(el.dataset.p)));
+    fv.querySelectorAll('[data-open]').forEach((el) => el.addEventListener('click', () => list(el.dataset.open)));
+    fv.querySelectorAll('[data-dl]').forEach((el) => el.addEventListener('click', () => download(el.dataset.dl, el.dataset.name)));
+  }
+
+  async function download(id, name) {
+    try {
+      const r = await fetch(`${BASE}/api/folder-share/${encodeURIComponent(token)}/download?fileId=${encodeURIComponent(id)}`, { headers: H() });
+      if (!r.ok) { let e = '다운로드 실패'; try { e = (await r.json()).error || e; } catch (_) {} throw new Error(e); }
+      const b = await r.blob(); const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = name || 'download'; a.click(); URL.revokeObjectURL(a.href);
+    } catch (e) { alert(e.message); }
+  }
+  start();
+})();

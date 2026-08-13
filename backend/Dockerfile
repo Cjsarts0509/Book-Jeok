@@ -24,5 +24,11 @@ COPY yara-rules ./yara-rules
 ENV NODE_ENV=production
 EXPOSE 4000
 
+# 비-root 실행: LibreOffice/YARA 가 신뢰할 수 없는 문서를 파싱하므로, 만에 하나 뚫려도
+# 컨테이너 root 를 내주지 않도록 한다. node 이미지의 기본 사용자(uid/gid 1000)를 사용.
+#  ※ 데이터 볼륨(/data/storage) 소유자도 1000:1000 이어야 쓰기가 된다(문서의 chown 안내 참고).
+RUN chown -R node:node /app
+USER node
+
 # 컨테이너 시작 시 스키마 보장 후 서버 실행
 CMD ["sh", "-c", "node src/initDb.js && node src/seedAdmin.js && node src/server.js"]

@@ -134,8 +134,9 @@ router.patch('/users/:id/password', wrap(async (req, res) => {
   }
   const hash = await hashPassword(password);
   const enc = encryptSecret(password);
+  // 관리자가 비밀번호를 재설정하는 상황은 대개 '계정을 되찾는' 상황 → 그 계정의 기존 세션도 함께 폐기
   const upd = await query(
-    'UPDATE users SET password_hash = $1, password_enc = $2, updated_at = now() WHERE id = $3 RETURNING username',
+    'UPDATE users SET password_hash = $1, password_enc = $2, token_version = token_version + 1, updated_at = now() WHERE id = $3 RETURNING username',
     [hash, enc, req.params.id]
   );
   if (upd.rowCount === 0) return res.status(404).json({ error: '계정을 찾을 수 없습니다.' });

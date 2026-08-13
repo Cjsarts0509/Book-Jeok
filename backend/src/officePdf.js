@@ -46,7 +46,12 @@ async function convert(srcPath, ext, cacheKey) {
       const args = ['--headless', '--norestore', '--nolockcheck',
         `-env:UserInstallation=file://${path.join(work, 'profile')}`,
         '--convert-to', 'pdf', '--outdir', work, input];
-      const p = spawn('soffice', args, { env: { ...process.env, HOME: work } });
+      // 환경변수를 통째로 물려주지 않는다. LibreOffice 는 신뢰할 수 없는 문서를 파싱하는 최대 공격면이라,
+      // 만에 하나 문서 파싱 취약점으로 장악돼도 MASTER_KEY·JWT_SECRET·DB_PASSWORD 가 새지 않도록
+      // 실행에 꼭 필요한 값만 넘긴다.
+      const p = spawn('soffice', args, {
+        env: { HOME: work, PATH: process.env.PATH || '/usr/local/bin:/usr/bin:/bin', LC_ALL: 'C.UTF-8', TMPDIR: work },
+      });
       let errBuf = '';
       p.stderr.on('data', (d) => { errBuf += d.toString(); });
       const timer = setTimeout(() => { try { p.kill('SIGKILL'); } catch (_) {} }, 90000);
