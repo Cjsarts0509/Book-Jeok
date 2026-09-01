@@ -285,6 +285,13 @@ const MIGRATIONS = [
   { id: '0006_token_version', sql: `
     ALTER TABLE users ADD COLUMN IF NOT EXISTS token_version INTEGER NOT NULL DEFAULT 0;
   ` },
+  // 감사로그에 '대상 계정'(어느 클라우드에서 벌어진 일인지)을 구조화해 기록.
+  //  기존엔 detail 문자열에 owner=N 으로만 섞여 있어 계정별 조회가 불가능했다.
+  //  → 관리자 로그의 '대상 계정' 열, 계정별 사이드바 최근활동 패널이 이 컬럼을 쓴다.
+  { id: '0007_audit_owner', sql: `
+    ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS owner_id INTEGER REFERENCES users(id) ON DELETE SET NULL;
+    CREATE INDEX IF NOT EXISTS idx_audit_owner ON audit_log(owner_id, created_at DESC);
+  ` },
 ];
 
 // 적용 안 된 마이그레이션만 트랜잭션으로 실행하고 schema_migrations 에 기록.

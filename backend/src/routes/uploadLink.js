@@ -12,7 +12,7 @@ const crypto = require('crypto');
 const rateLimit = require('express-rate-limit');
 const config = require('../config');
 const { query, withTransaction } = require('../db');
-const { wrap, rateKey } = require('../util');
+const { wrap, rateKey, audit } = require('../util');
 const { verifyPassword } = require('../crypto');
 const { diskGate } = require('../disk');
 const { poolRootId, poolUsage } = require('../pool');
@@ -160,6 +160,8 @@ router.post('/:token', uploadLimiter, attemptLimiter, wrap(gate), wrap(diskGate)
     saved++; savedBytes += f.size;
   }
   if (saved) await query('UPDATE upload_requests SET uploaded_count = uploaded_count + $2, uploaded_bytes = uploaded_bytes + $3 WHERE id=$1', [u.id, saved, savedBytes]);
+  // 외부(비로그인) 업로드도 감사로그에 남긴다 — 소유 계정의 활동 목록에 보이도록 owner 를 명시.
+  if (saved) await audit(req, 'upload', `외부 업로드 '${u.label}' count=${saved}`, owner);
   if (saved) {
     // 계정 소유자에게 항상 알림(외부 업로드)
     notify.push({ userId: owner, type: 'upload', title: `파일 ${saved}개가 업로드되었습니다`, body: `업로드 요청 '${u.label}' (${u.folder}) 으로 외부에서 파일 ${saved}개가 들어왔습니다.` }).catch(() => {});

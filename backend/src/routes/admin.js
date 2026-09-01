@@ -231,9 +231,13 @@ router.get('/backup-status', wrap(async (req, res) => {
 // GET /api/admin/audit  감사 로그
 router.get('/audit', wrap(async (req, res) => {
   const limit = Math.min(200, parseInt(req.query.limit || '50', 10));
+  // owner_* = 어느 계정의 클라우드에서 벌어진 일인지(업로드·다운로드가 남의 계정에서 일어날 수 있음)
   const result = await query(`
-    SELECT a.id, a.action, a.detail, a.ip, a.created_at, u.username
-    FROM audit_log a LEFT JOIN users u ON u.id = a.user_id
+    SELECT a.id, a.action, a.detail, a.ip, a.created_at, u.username,
+           o.username AS owner_username, o.display_name AS owner_display_name
+    FROM audit_log a
+    LEFT JOIN users u ON u.id = a.user_id
+    LEFT JOIN users o ON o.id = a.owner_id
     ORDER BY a.created_at DESC LIMIT $1
   `, [limit]);
   res.json({ logs: result.rows });

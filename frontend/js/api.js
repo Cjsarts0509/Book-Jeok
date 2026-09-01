@@ -55,6 +55,7 @@ const API = (() => {
     stockAuditBranches: () => req('GET', '/files/stock-audit/branches'),
     stockAuditDeliver: (payload) => req('POST', '/files/stock-audit/deliver', payload),
     tree: (ownerId) => req('GET', `/files/tree${ownerId ? '?ownerId=' + ownerId : ''}`),
+    activity: (ownerId, limit = 30) => req('GET', `/files/activity?limit=${limit}${ownerId ? '&ownerId=' + ownerId : ''}`),
     accounts: () => req('GET', '/files/accounts'),
     branches: () => req('GET', '/meta/branches'),
     activeNotices: () => req('GET', '/meta/notices/active'),

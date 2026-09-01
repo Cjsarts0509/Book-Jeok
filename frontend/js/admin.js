@@ -849,12 +849,13 @@ const Admin = (() => {
         <tr>
           <td class="num" style="color:var(--text-muted);white-space:nowrap">${new Date(l.created_at).toLocaleString('ko-KR')}</td>
           <td style="white-space:nowrap">${UI.escapeHtml(l.username || '—')}</td>
+          <td style="white-space:nowrap">${l.owner_username ? `${UI.escapeHtml(l.owner_display_name || l.owner_username)} <span class="muted" style="font-size:11px">@${UI.escapeHtml(l.owner_username)}</span>` : '<span class="muted">—</span>'}</td>
           <td style="white-space:nowrap"><code class="act-code">${UI.escapeHtml(l.action)}</code></td>
           <td style="white-space:nowrap"><span class="badge ${danger.has(l.action) ? 'off' : 'user'}">${UI.escapeHtml(actionKo(l.action))}</span></td>
           <td class="audit-detail">${UI.escapeHtml(l.detail)}</td>
           <td class="num" style="color:var(--text-muted);white-space:nowrap">${UI.escapeHtml(l.ip)}</td>
         </tr>`).join('');
-      view.innerHTML = `<div class="table-wrap"><table class="audit-table"><thead><tr><th>시각</th><th>사용자</th><th>동작코드</th><th>동작명</th><th style="width:99%">상세</th><th>IP</th></tr></thead><tbody>${rows || '<tr><td colspan=6>기록 없음</td></tr>'}</tbody></table></div>`;
+      view.innerHTML = `<div class="table-wrap"><table class="audit-table"><thead><tr><th>시각</th><th>사용자</th><th>대상 계정</th><th>동작코드</th><th>동작명</th><th style="width:99%">상세</th><th>IP</th></tr></thead><tbody>${rows || '<tr><td colspan=7>기록 없음</td></tr>'}</tbody></table></div>`;
     } catch (err) { view.innerHTML = `<div class="empty">⚠️ ${UI.escapeHtml(err.message)}</div>`; }
   }
 

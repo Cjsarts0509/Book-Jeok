@@ -216,9 +216,35 @@ router.post('/stock-audit/deliver', authenticate, wrap(async (req, res) => {
      VALUES ($1,$2,$3,$4,$5,'application/x-bookjeok-stockaudit') RETURNING id`,
     [branchId, folder, name, storedName, Buffer.byteLength(payload)]
   );
-  await audit(req, 'stock_audit_deliver', `branch=${branchId} items=${data.length} file=${name}`);
+  await audit(req, 'stock_audit_deliver', `items=${data.length} file=${name}`, branchId);
   notify.push({ userId: branchId, type: 'stockaudit', title: '재고조사 오차 파일이 도착했습니다', body: `${folder} 폴더의 '${name}'를 열어 사진·체크를 진행하세요.` }).catch(() => {});
   res.status(201).json({ ok: true, fileId: row.rows[0].id, folder, name });
+}));
+
+// ── 계정별 최근 활동(사이드바 패널) ──────────
+// 이 클라우드(owner)에서 벌어진 일들. 누가 했는지도 함께 — 담당자·관리자가 남의 계정에 올릴 수 있으므로.
+// 접근 권한은 resolveOwner/canAccessOwner 와 동일(내 계정 또는 접근 가능한 계정만).
+const ACTIVITY_ACTIONS = [
+  'upload', 'download', 'rename', 'update_note', 'trash_file', 'restore_file', 'self_restore_file',
+  'create_folder', 'rename_folder', 'trash_folder', 'folder_note', 'folder_style',
+  'bulk_move', 'bulk_copy', 'bulk_trash', 'bulk_zip',
+  'create_share', 'delete_share', 'create_folder_share', 'delete_folder_share',
+  'create_upload_request', 'delete_upload_request', 'stock_audit_deliver', 'stock_audit_save',
+];
+router.get('/activity', authenticate, wrap(resolveOwner), wrap(async (req, res) => {
+  const limit = Math.min(100, Math.max(1, parseInt(req.query.limit || '30', 10)));
+  const r = await query(`
+    SELECT a.id, a.action, a.detail, a.created_at, u.username, u.display_name
+    FROM audit_log a LEFT JOIN users u ON u.id = a.user_id
+    WHERE a.owner_id = $1 AND a.action = ANY($2::text[])
+    ORDER BY a.created_at DESC LIMIT $3
+  `, [req.targetOwnerId, ACTIVITY_ACTIONS, limit]);
+  res.json({
+    items: r.rows.map((x) => ({
+      id: x.id, action: x.action, detail: x.detail || '', at: x.created_at,
+      by: x.display_name || x.username || '알 수 없음',
+    })),
+  });
 }));
 
 // ── 폴더 트리 ──────────
@@ -247,7 +273,7 @@ router.post('/folders', authenticate, wrap(resolveOwner), wrap(async (req, res) 
   if (icon || color) {
     await query('UPDATE folders SET icon=$1, color=$2 WHERE owner_id=$3 AND path=$4', [icon, color, req.targetOwnerId, folder]);
   }
-  await audit(req, 'create_folder', `owner=${req.targetOwnerId} ${folder}`);
+  await audit(req, 'create_folder', `${folder}`);
   res.status(201).json({ ok: true, path: folder });
 }));
 
@@ -449,7 +475,7 @@ router.post('/upload', authenticate, wrap(resolveOwner), wrap(diskGate), upload.
     if (err.status === 413) return res.status(413).json({ error: err.message });
     throw err;
   }
-  await audit(req, 'upload', `owner=${req.targetOwnerId} count=${saved.length}`);
+  await audit(req, 'upload', `${folder} · ${saved.length}개`);
   // 다른 사람(담당자·관리자)이 내 계정에 올리면 소유자에게 인앱 알림
   if (saved.length && Number(req.user.id) !== Number(req.targetOwnerId)) {
     notify.push({ userId: req.targetOwnerId, type: 'upload', title: `파일 ${saved.length}개가 업로드되었습니다`, body: `${req.user.display_name || req.user.username}님이 '${folder}' 폴더에 파일 ${saved.length}개를 올렸습니다.` }).catch(() => {});
@@ -561,7 +587,7 @@ router.post('/upload/complete', authenticate, wrap(resolveOwner), wrap(diskGate)
      VALUES ($1,$2,$3,$4,$5,$6,$7,${note ? 'now()' : 'NULL'}) RETURNING id`,
     [owner, folder, name, storedName, size, mime, note]
   );
-  await audit(req, 'upload', `owner=${owner} count=1 (chunked ${totalChunks}조각)`);
+  await audit(req, 'upload', `${folder} · ${originalName}`);
   if (Number(req.user.id) !== Number(owner)) {
     notify.push({ userId: owner, type: 'upload', title: '파일 1개가 업로드되었습니다', body: `${req.user.display_name || req.user.username}님이 '${folder}' 폴더에 파일을 올렸습니다.` }).catch(() => {});
   }
@@ -592,7 +618,7 @@ router.get('/:id(\\d+)/download', authenticate, wrap(async (req, res) => {
   if (!(await canAccessOwner(req.user, file.owner_id))) return res.status(403).json({ error: '접근 권한이 없습니다.' });
   const disk = path.join(userDir(file.owner_id), file.stored_name);
   if (!fs.existsSync(disk)) return res.status(410).json({ error: '파일 실체가 존재하지 않습니다.' });
-  await audit(req, 'download', `file=${file.id}`);
+  await audit(req, 'download', `${file.folder} · ${file.original_name}`, file.owner_id);
   res.download(disk, file.original_name);
 }));
 
@@ -631,7 +657,7 @@ router.patch('/:id(\\d+)/note', authenticate, wrap(async (req, res) => {
   if (r.rowCount === 0) return res.status(404).json({ error: '파일을 찾을 수 없습니다.' });
   if (!(await canAccessOwner(req.user, r.rows[0].owner_id))) return res.status(403).json({ error: '권한이 없습니다.' });
   await query('UPDATE files SET note=$1, note_updated_at=now(), updated_at=now() WHERE id=$2', [note, req.params.id]);
-  await audit(req, 'update_note', `file=${req.params.id}`);
+  await audit(req, 'update_note', `file=${req.params.id}`, r.rows[0].owner_id);
   res.json({ ok: true });
 }));
 
@@ -645,7 +671,7 @@ router.patch('/:id(\\d+)/rename', authenticate, wrap(async (req, res) => {
   if (!isAllowed(extOf(newName))) return res.status(415).json({ error: `허용되지 않는 확장자입니다. 가능: ${allowedLabel()}` });
   const unique = await uniqueFileName(r.rows[0].owner_id, r.rows[0].folder, newName);
   await query('UPDATE files SET original_name=$1, updated_at=now() WHERE id=$2', [unique, req.params.id]);
-  await audit(req, 'rename', `file=${req.params.id} -> ${unique}`);
+  await audit(req, 'rename', `file=${req.params.id} -> ${unique}`, r.rows[0].owner_id);
   res.json({ ok: true, name: unique });
 }));
 
@@ -656,7 +682,7 @@ router.delete('/:id(\\d+)', authenticate, wrap(async (req, res) => {
   if (!file) return res.status(404).json({ error: '파일을 찾을 수 없습니다.' });
   if (!(await canAccessOwner(req.user, file.owner_id))) return res.status(403).json({ error: '삭제 권한이 없습니다.' });
   await query('UPDATE files SET deleted_at=now(), deleted_with_folder=NULL WHERE id=$1', [file.id]);
-  await audit(req, 'trash_file', `file=${file.id}`);
+  await audit(req, 'trash_file', `file=${file.id}`, file.owner_id);
   res.json({ ok: true });
 }));
 
@@ -828,7 +854,7 @@ router.post('/bulk/zip', authenticate, wrap(resolveOwner), wrap(diskGate), wrap(
     'INSERT INTO zip_bundles (owner_id, stored_name, display_name, size_bytes, created_by) VALUES ($1,$2,$3,$4,$5) RETURNING id',
     [owner, storedName, zipName, size, req.user.id]
   );
-  await audit(req, 'bulk_zip', `owner=${owner} count=${files.length} -> ${zipName}`);
+  await audit(req, 'bulk_zip', `${zipName} · ${files.length}개`);
   cleanupBundles(); // 비동기 정리(대기 안 함)
   res.status(201).json({ bundleId: ins.rows[0].id, name: zipName, size });
 }));

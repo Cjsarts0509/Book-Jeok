@@ -15,11 +15,15 @@ function clientIp(req) {
 // 이게 없으면 터널/프록시 홉의 req.ip 로 폴백(그래도 전역버킷화보다는 나음).
 function rateKey(req) { return clientIp(req) || req.ip || 'unknown'; }
 
-async function audit(req, action, detail = '') {
+// 감사 기록. ownerId = '어느 계정의 클라우드에서 벌어진 일인지'.
+//  생략하면 resolveOwner 가 세팅한 req.targetOwnerId(대부분의 파일 라우트) → 없으면 본인 계정으로 본다.
+//  계정 전환으로 남의 클라우드에서 한 작업도 그 클라우드 기준으로 남아, 계정별 활동 조회가 가능해진다.
+async function audit(req, action, detail = '', ownerId) {
   try {
+    const owner = ownerId !== undefined ? ownerId : (req.targetOwnerId ?? req.user?.id ?? null);
     await query(
-      'INSERT INTO audit_log (user_id, action, detail, ip) VALUES ($1, $2, $3, $4)',
-      [req.user?.id || null, action, detail, clientIp(req)]
+      'INSERT INTO audit_log (user_id, action, detail, ip, owner_id) VALUES ($1, $2, $3, $4, $5)',
+      [req.user?.id || null, action, detail, clientIp(req), owner || null]
     );
   } catch (err) {
     console.error('[audit] 기록 실패:', err.message);

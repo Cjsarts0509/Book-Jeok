@@ -117,6 +117,10 @@ const App = (() => {
           <aside class="tree-sidebar" id="tree-sidebar">
             <div class="tree-head"><span>폴더</span><div class="tree-head-btns"><button class="tree-hbtn" id="expand-all" title="전체 펴기">⊞</button><button class="tree-hbtn" id="collapse-all" title="전체 닫기">⊟</button></div></div>
             <div id="tree"></div>
+            <div class="act-panel">
+              <div class="act-head"><span>최근 활동</span><button class="act-refresh" id="act-refresh" title="새로고침">🔄</button></div>
+              <div class="act-list" id="act-list"></div>
+            </div>
           </aside>
           <div class="tree-backdrop" id="tree-backdrop"></div>
           <main class="content" id="view"></main>
@@ -169,6 +173,7 @@ const App = (() => {
     document.getElementById('brand-home').addEventListener('click', () => goTo('/'));
     document.getElementById('expand-all').addEventListener('click', expandAll);
     document.getElementById('collapse-all').addEventListener('click', collapseAll);
+    document.getElementById('act-refresh')?.addEventListener('click', loadActivity);
     if (isPriv()) setupAccountSwitcher();
     restoreLoc();   // 마지막 폴더로 복귀(모바일 재로딩 대비) — loadAll 전에 folder 설정
     loadAll();
@@ -217,13 +222,37 @@ const App = (() => {
   function toggleTree() { document.getElementById('tree-sidebar').classList.toggle('open'); document.getElementById('tree-backdrop').classList.toggle('show'); }
   function closeNavMenu() { document.getElementById('appbar-nav')?.classList.remove('open'); }
   const isMobile = () => window.matchMedia('(max-width: 640px)').matches;
-  function resetToOwn() { state.ownerId = null; state.ownerName = null; state.folder = '/'; state.selected.clear(); resetNav(); const sw = document.getElementById('account-switcher'); if (sw) sw.value = ''; thumbClear(); loadAll(); }
+  // 클라우드(계정)를 옮길 때는 보던 흔적을 전부 지우고 '처음 들어온 상태'로 만든다.
+  //  스크롤 위치·검색·필터·정렬·펼친 폴더가 남아 있으면 다른 계정에서 엉뚱한 화면이 보인다.
+  function resetViewState() {
+    state.folder = '/'; state.selected.clear(); resetNav();
+    state.search = { on: false, q: '' };
+    state.extFilter = new Set(); state.foldersOnly = false; state.favOnly = false; state.tagFilter = null;
+    state.sort = { key: 'name', dir: 'asc' };
+    state.expanded = new Set(['/']);
+    state.anchor = null; state.drag = null;
+    thumbClear();
+    const v = document.getElementById('view'); if (v) v.scrollTop = 0;
+  }
+  // 렌더가 끝난 뒤에도 한 번 더 올려준다(목록이 길면 브라우저가 스크롤을 유지하는 경우가 있음)
+  async function switchTo(fn) {
+    resetViewState(); fn();
+    await loadAll();
+    const v = document.getElementById('view'); if (v) v.scrollTop = 0;
+  }
+  function resetToOwn() {
+    switchTo(() => {
+      state.ownerId = null; state.ownerName = null;
+      const sw = document.getElementById('account-switcher'); if (sw) sw.value = '';
+    });
+  }
   // 다른 계정(외부업체·영업점) 공간으로 진입 — 계정전환 드롭다운/폴더카드 공용.
   function enterAccount(a) {
     if (!a) return;
-    state.ownerId = a.id; state.ownerName = a.displayName; state.folder = '/'; state.selected.clear(); resetNav(); thumbClear();
-    const sw = document.getElementById('account-switcher'); if (sw) sw.value = String(a.id);
-    loadAll();
+    switchTo(() => {
+      state.ownerId = a.id; state.ownerName = a.displayName;
+      const sw = document.getElementById('account-switcher'); if (sw) sw.value = String(a.id);
+    });
   }
 
   async function setupAccountSwitcher() {
@@ -266,7 +295,41 @@ const App = (() => {
 
   async function doLogout() { try { await API.logout(); } catch {} thumbClear(); API.setToken(null); state.user = null; renderLogin(); }
 
-  async function loadAll() { await Promise.all([loadTree(), loadFiles(), loadTags()]); markFresh(); }
+  async function loadAll() { await Promise.all([loadTree(), loadFiles(), loadTags(), loadActivity()]); markFresh(); }
+
+  // ── 사이드바 하단: 이 클라우드(계정)의 최근 활동 30개 ──
+  // 행위=큰 글씨, 경로/대상·수행자·시각=작은 글씨. 담당자·관리자가 남의 계정에 올린 것도 그 계정 기준으로 보인다.
+  const ACT_LABEL = {
+    upload: '업로드', download: '다운로드', rename: '이름 변경', update_note: '비고 수정',
+    trash_file: '파일 삭제', restore_file: '파일 복원', self_restore_file: '파일 복원',
+    create_folder: '폴더 생성', rename_folder: '폴더 이름변경', trash_folder: '폴더 삭제',
+    folder_note: '폴더 비고', folder_style: '폴더 색상/아이콘',
+    bulk_move: '일괄 이동', bulk_copy: '일괄 복사', bulk_trash: '일괄 삭제', bulk_zip: '압축 다운로드',
+    create_share: '공유 생성', delete_share: '공유 삭제',
+    create_folder_share: '폴더 공유', delete_folder_share: '폴더 공유 삭제',
+    create_upload_request: '업로드 요청 생성', delete_upload_request: '업로드 요청 삭제',
+    stock_audit_deliver: '재고조사 전달', stock_audit_save: '재고조사 저장',
+  };
+  const actAgo = (iso) => {
+    const s = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
+    if (s < 60) return '방금';
+    if (s < 3600) return Math.floor(s / 60) + '분 전';
+    if (s < 86400) return Math.floor(s / 3600) + '시간 전';
+    if (s < 7 * 86400) return Math.floor(s / 86400) + '일 전';
+    return UI.date(iso);
+  };
+  async function loadActivity() {
+    const box = document.getElementById('act-list'); if (!box) return;
+    try {
+      const { items } = await API.activity(state.ownerId, 30);
+      box.innerHTML = items.length ? items.map((it) => `
+        <div class="act-item">
+          <div class="act-act">${UI.escapeHtml(ACT_LABEL[it.action] || it.action)}</div>
+          ${it.detail ? `<div class="act-sub" title="${UI.escapeHtml(it.detail)}">${UI.escapeHtml(it.detail)}</div>` : ''}
+          <div class="act-sub">${UI.escapeHtml(it.by)} · ${UI.escapeHtml(actAgo(it.at))}</div>
+        </div>`).join('') : '<div class="act-empty">아직 기록이 없습니다.</div>';
+    } catch (_) { box.innerHTML = '<div class="act-empty">활동을 불러오지 못했습니다.</div>'; }
+  }
 
   // 다른 세션(같은 계정을 함께 쓰는 사람)이 파일을 바꾸면 목록이 오래됨 → 새로고침 힌트 표시.
   // loadAll 시 현재 리비전을 기억하고, 30초 폴링에서 더 최신이면 🔄 버튼에 표시 + 1회 안내.
