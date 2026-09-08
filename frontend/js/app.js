@@ -13,7 +13,7 @@ const App = (() => {
     sort: { key: 'name', dir: 'asc' }, // 리스트 정렬 기준
     nav: { stack: ['/'], idx: 0 }, // 폴더 이동 히스토리(뒤로/앞으로)
     search: { on: false, q: '' }, // 이름 검색 모드
-    anchor: null, drag: null, // 선택 앵커 / 드래그 중 항목
+    anchor: null, cursor: null, drag: null, // 선택 앵커 / 키보드 커서 / 드래그 중 항목
     extFilter: new Set(), // 확장자 필터(비어있으면 전체)
     foldersOnly: false,   // 폴더만 보기
     favOnly: false,       // 즐겨찾기만 보기
@@ -126,6 +126,9 @@ const App = (() => {
           <main class="content" id="view"></main>
           <aside class="preview-panel hidden" id="preview-panel" aria-hidden="true">
             <div class="pp-head">
+              <button class="icon-btn" id="pp-prev" title="이전 파일 (←)">◀</button>
+              <span class="pp-pos num" id="pp-pos"></span>
+              <button class="icon-btn" id="pp-next" title="다음 파일 (→)">▶</button>
               <span class="pp-name" id="pp-name" title=""></span>
               <button class="icon-btn" id="pp-dl" title="다운로드">⬇️</button>
               <button class="icon-btn" id="pp-close" title="닫기">✕</button>
@@ -169,7 +172,17 @@ const App = (() => {
     document.getElementById('pp-close')?.addEventListener('click', closePreview);
     document.getElementById('preview-backdrop')?.addEventListener('click', closePreview);
     document.getElementById('pp-dl')?.addEventListener('click', () => { if (pvCurrentId) downloadFile(pvCurrentId); });
-    document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && document.body.classList.contains('pv-open')) closePreview(); });
+    document.getElementById('pp-prev')?.addEventListener('click', () => pvStep(-1));
+    document.getElementById('pp-next')?.addEventListener('click', () => pvStep(1));
+    if (!pvKeysHooked) { pvKeysHooked = true; document.addEventListener('keydown', (e) => {
+      if (!document.body.classList.contains('pv-open')) return;
+      if (e.key === 'Escape') return closePreview();
+      const t = e.target;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+      if (document.querySelector('.modal-backdrop')) return;
+      if (e.key === 'ArrowLeft') { e.preventDefault(); pvStep(-1); }        // U5 · 미리보기 좌우 넘기기
+      else if (e.key === 'ArrowRight') { e.preventDefault(); pvStep(1); }
+    }); }
     document.getElementById('brand-home').addEventListener('click', () => goTo('/'));
     document.getElementById('expand-all').addEventListener('click', expandAll);
     document.getElementById('collapse-all').addEventListener('click', collapseAll);
@@ -230,29 +243,42 @@ const App = (() => {
     state.extFilter = new Set(); state.foldersOnly = false; state.favOnly = false; state.tagFilter = null;
     state.sort = { key: 'name', dir: 'asc' };
     state.expanded = new Set(['/']);
-    state.anchor = null; state.drag = null;
+    state.anchor = null; state.cursor = null; state.drag = null;
     thumbClear();
     const v = document.getElementById('view'); if (v) v.scrollTop = 0;
   }
   // 렌더가 끝난 뒤에도 한 번 더 올려준다(목록이 길면 브라우저가 스크롤을 유지하는 경우가 있음)
+  // 업로드 중 화면을 떠나려 할 때 확인 — 계정 전환·로그아웃 공용 (U11)
+  async function confirmLeaveWhileUploading(what) {
+    const n = Xfer.uploading();
+    if (!n) return true;
+    return UI.confirm({ title: '업로드가 진행 중입니다', danger: true, confirmText: '그래도 이동',
+      message: `아직 ${n}건을 올리는 중이에요.\n지금 ${what} 진행 중인 업로드가 취소됩니다.` });
+  }
   async function switchTo(fn) {
+    if (!(await confirmLeaveWhileUploading('이동하면'))) return false;
     resetViewState(); fn();
     await loadAll();
     const v = document.getElementById('view'); if (v) v.scrollTop = 0;
+    return true;
   }
-  function resetToOwn() {
-    switchTo(() => {
+  // 드롭다운은 이미 값이 바뀐 뒤 호출되므로, 이동이 취소되면 현재 계정으로 되돌린다
+  function syncSwitcher() { const sw = document.getElementById('account-switcher'); if (sw) sw.value = state.ownerId ? String(state.ownerId) : ''; }
+  async function resetToOwn() {
+    const ok = await switchTo(() => {
       state.ownerId = null; state.ownerName = null;
       const sw = document.getElementById('account-switcher'); if (sw) sw.value = '';
     });
+    if (!ok) syncSwitcher();
   }
   // 다른 계정(외부업체·영업점) 공간으로 진입 — 계정전환 드롭다운/폴더카드 공용.
-  function enterAccount(a) {
+  async function enterAccount(a) {
     if (!a) return;
-    switchTo(() => {
+    const ok = await switchTo(() => {
       state.ownerId = a.id; state.ownerName = a.displayName;
       const sw = document.getElementById('account-switcher'); if (sw) sw.value = String(a.id);
     });
+    if (!ok) syncSwitcher();
   }
 
   async function setupAccountSwitcher() {
@@ -293,7 +319,10 @@ const App = (() => {
     box.querySelectorAll('[data-acct]').forEach((b) => b.addEventListener('click', () => enterAccount(state.accounts.find((x) => String(x.id) === b.dataset.acct))));
   }
 
-  async function doLogout() { try { await API.logout(); } catch {} thumbClear(); API.setToken(null); state.user = null; renderLogin(); }
+  async function doLogout() {
+    if (!(await confirmLeaveWhileUploading('로그아웃하면'))) return;
+    try { await API.logout(); } catch {} thumbClear(); API.setToken(null); state.user = null; renderLogin();
+  }
 
   async function loadAll() { await Promise.all([loadTree(), loadFiles(), loadTags(), loadActivity()]); markFresh(); }
 
@@ -322,13 +351,30 @@ const App = (() => {
     const box = document.getElementById('act-list'); if (!box) return;
     try {
       const { items } = await API.activity(state.ownerId, 30);
+      // U24 · 서버가 '아직 휴지통에 남아 되돌릴 수 있는' 삭제에만 undo 를 실어 준다
+      state.actUndo = new Map(items.filter((it) => it.undo).map((it) => [String(it.id), it.undo]));
       box.innerHTML = items.length ? items.map((it) => `
         <div class="act-item">
-          <div class="act-act">${UI.escapeHtml(ACT_LABEL[it.action] || it.action)}</div>
+          <div class="act-act">${UI.escapeHtml(ACT_LABEL[it.action] || it.action)}${it.undo ? `<button type="button" class="act-undo" data-undo="${it.id}" title="이 삭제를 되돌립니다">↩ 되돌리기</button>` : ''}</div>
           ${it.detail ? `<div class="act-sub" title="${UI.escapeHtml(it.detail)}">${UI.escapeHtml(it.detail)}</div>` : ''}
           <div class="act-sub">${UI.escapeHtml(it.by)} · ${UI.escapeHtml(actAgo(it.at))}</div>
         </div>`).join('') : '<div class="act-empty">아직 기록이 없습니다.</div>';
+      box.querySelectorAll('[data-undo]').forEach((el) => el.addEventListener('click', () => undoActivity(el.dataset.undo, el)));
     } catch (_) { box.innerHTML = '<div class="act-empty">활동을 불러오지 못했습니다.</div>'; }
+  }
+  // 최근 활동의 '되돌리기' — 휴지통에서 원래 자리로 복원(보관기간이 지났으면 서버가 거절).
+  async function undoActivity(auditId, btn) {
+    const u = (state.actUndo || new Map()).get(String(auditId)); if (!u) return;
+    const oid = state.ownerId || undefined;
+    if (btn) { btn.disabled = true; btn.textContent = '되돌리는 중…'; }
+    let ok = 0, fail = 0;
+    for (const id of u.ids) {
+      try { await (u.type === 'folder' ? API.restoreSelfFolder(id, oid) : API.restoreSelfFile(id, oid)); ok++; }
+      catch (_) { fail++; }
+    }
+    if (ok) UI.toast(fail ? `${ok}개 복원 · ${fail}개 실패` : '복원되었습니다', fail ? 'info' : 'success');
+    else UI.toast('되돌릴 수 없습니다 (이미 복원됐거나 보관기간이 지났습니다)', 'error');
+    loadAll();
   }
 
   // 다른 세션(같은 계정을 함께 쓰는 사람)이 파일을 바꾸면 목록이 오래됨 → 새로고침 힌트 표시.
@@ -458,6 +504,7 @@ const App = (() => {
       ${state.search.on ? `<div class="search-banner">🔎 <b>${UI.escapeHtml(state.search.q)}</b> 검색 결과 · ${state.folders.length + state.files.length}건<div style="flex:1"></div><button class="btn btn-sm btn-ghost" id="search-exit">✕ 검색 나가기</button></div>` : ''}
       <div id="acct-shortcuts"></div>
       <div id="selbar" class="selbar empty"></div>
+      <div id="size-glance"></div>
       <div id="listing"></div>`;
     renderCrumbs(); renderAccountShortcuts(); renderListing(); wireContent();
   }
@@ -536,12 +583,62 @@ const App = (() => {
     ? `<span class="tag-chips">${tags.map((t) => `<span class="tag-chip" style="--tc:${UI.escapeHtml(t.color || '#118AB2')}">${UI.escapeHtml(t.name)}</span>`).join('')}</span>` : '';
   function renderListing() {
     const box = document.getElementById('listing');
-    if (state.folders.length === 0 && state.files.length === 0) { box.innerHTML = `<div class="empty"><div class="big">🗂️</div>아직 파일이 없어요. 첫 파일을 올려보세요!</div>`; return; }
-    if (filteredFolders().length === 0 && filteredFiles().length === 0) { box.innerHTML = `<div class="empty"><div class="big">🔍</div>필터에 해당하는 항목이 없습니다.</div>`; updateSelbar(); return; }
+    const glance = document.getElementById('size-glance');
+    if (state.folders.length === 0 && state.files.length === 0) { if (glance) glance.innerHTML = ''; box.innerHTML = `<div class="empty"><div class="big">🗂️</div>아직 파일이 없어요. 첫 파일을 올려보세요!</div>`; return; }
+    if (filteredFolders().length === 0 && filteredFiles().length === 0) { if (glance) glance.innerHTML = ''; box.innerHTML = `<div class="empty"><div class="big">🔍</div>필터에 해당하는 항목이 없습니다.</div>`; updateSelbar(); return; }
     // 모바일 리스트 뷰: 항목을 눌러 펼치는 아코디언 카드 + 텍스트 버튼
+    computeListingMax();
     if (isMobile() && state.view === 'list') box.innerHTML = mobileListHTML();
     else box.innerHTML = state.view === 'grid' ? gridHTML() : listHTML();
-    wireListing(); updateSelbar(); loadThumbs(); // 그리드 파일 썸네일 + 모든 뷰의 폴더 커버
+    wireListing(); updateSelbar(); renderSizeGlance(); loadThumbs(); // 그리드 파일 썸네일 + 모든 뷰의 폴더 커버
+  }
+
+  // ── U3 · 폴더 용량 한눈에 보기 ──────────
+  // 지금 보고 있는 폴더에서 무엇이 자리를 차지하는지 상위 항목을 막대로 보여준다.
+  const SG_KEY = 'bj_sizeglance';
+  const sgOpen = () => localStorage.getItem(SG_KEY) !== '0';
+  function renderSizeGlance() {
+    const box = document.getElementById('size-glance'); if (!box) return;
+    const items = [
+      ...filteredFolders().map((f) => ({ name: f.name, size: Number(f.size) || 0, folder: true, key: `folder:${f.path}` })),
+      ...filteredFiles().map((f) => ({ name: f.name, size: Number(f.size) || 0, folder: false, key: `file:${f.id}` })),
+    ].filter((x) => x.size > 0).sort((a, b) => b.size - a.size);
+    if (items.length < 2) { box.innerHTML = ''; return; }
+    const total = items.reduce((a, b) => a + b.size, 0);
+    const top = items.slice(0, 6);
+    const rest = items.length - top.length;
+    const restBytes = total - top.reduce((a, b) => a + b.size, 0);
+    const max = top[0].size || 1, esc = UI.escapeHtml, open = sgOpen();
+    const row = (it) => `<button type="button" class="sg-row" data-sg="${esc(it.key)}" title="${esc(it.name)} · ${UI.bytes(it.size)}">
+        <span class="sg-name">${it.folder ? '📁' : UI.fileIcon(it.name)} ${esc(it.name)}</span>
+        <span class="sg-bar"><span style="width:${Math.max(2, it.size / max * 100).toFixed(1)}%"></span></span>
+        <span class="sg-size num">${UI.bytes(it.size)}</span>
+        <span class="sg-pct num muted">${(it.size / total * 100).toFixed(0)}%</span>
+      </button>`;
+    box.innerHTML = `<div class="sizeglance${open ? '' : ' closed'}">
+      <button type="button" class="sg-head" id="sg-toggle">
+        <span class="sg-caret">${open ? '▾' : '▸'}</span><b>📊 이 폴더 용량</b>
+        <span class="muted">합계 ${UI.bytes(total)} · ${items.length}개 항목</span>
+      </button>
+      <div class="sg-body">${top.map(row).join('')}${rest > 0 ? `<div class="sg-rest muted">그 외 ${rest}개 · ${UI.bytes(restBytes)}</div>` : ''}</div>
+    </div>`;
+    box.querySelector('#sg-toggle').addEventListener('click', () => { localStorage.setItem(SG_KEY, sgOpen() ? '0' : '1'); renderSizeGlance(); });
+    box.querySelectorAll('[data-sg]').forEach((el) => el.addEventListener('click', () => {
+      const key = el.dataset.sg;
+      const order = orderedItems(); const hit = order.find((o) => o.key === key); if (!hit) return;
+      state.selected.clear(); state.selected.set(hit.key, hit.item); state.anchor = state.cursor = hit.key;
+      applySelectionClasses(); scrollRowIntoView(hit.key);
+    }));
+  }
+  // 목록 크기칸에 붙는 비중 막대(현재 목록에서 가장 큰 항목 대비)
+  function sizeBar(bytes) {
+    const b = Number(bytes) || 0; if (!b || !listingMaxSize) return '';
+    return `<span class="cell-bar"><span style="width:${Math.max(2, Math.min(100, b / listingMaxSize * 100)).toFixed(1)}%"></span></span>`;
+  }
+  let listingMaxSize = 0;
+  function computeListingMax() {
+    const sizes = [...filteredFolders().map((f) => Number(f.size) || 0), ...filteredFiles().map((f) => Number(f.size) || 0)];
+    listingMaxSize = sizes.length ? Math.max(...sizes) : 0;
   }
 
   // 모바일 전용: 기본정보(이름·크기·등록일)만 보이고, 탭하면 상세+기능이 펼쳐지는 카드
@@ -759,7 +856,7 @@ const App = (() => {
         <td><input type="checkbox" class="rowcheck" data-sel-folder="${UI.escapeHtml(f.path)}" data-name="${UI.escapeHtml(f.name)}" ${isSel(key) ? 'checked' : ''}></td>
         <td class="open-cell name-cell" data-open="${UI.escapeHtml(f.path)}" title="더블클릭하여 열기">${favBtn(true, f.path, f.fav)}<span class="ic${f.color ? ' tint' : ''}" style="${folderIcoStyle(f.color)}">${f.icon || '📁'}</span> ${UI.escapeHtml(f.name)}${updateBadge(f, true)}</td>
         <td class="path-cell" data-goto="${UI.escapeHtml(par)}" title="${UI.escapeHtml(par)}">${UI.escapeHtml(prettyPath(par))}</td>
-        <td class="num muted" data-label="크기">${UI.bytes(f.size)}</td>
+        <td class="num muted size-cell" data-label="크기">${UI.bytes(f.size)}${sizeBar(f.size)}</td>
         <td class="num muted" data-label="등록">${sdt(f.createdAt)}</td>
         <td class="num muted" data-label="수정">${sdt(f.noteUpdatedAt)}</td>
         <td class="note-cell" data-fnote="${UI.escapeHtml(f.path)}" title="클릭하여 비고 편집">${f.note ? UI.escapeHtml(f.note) : '<span class="muted">+ 비고</span>'}</td>
@@ -772,7 +869,7 @@ const App = (() => {
         <td><input type="checkbox" class="rowcheck" data-sel-file="${f.id}" data-name="${UI.escapeHtml(f.name)}" ${isSel(key) ? 'checked' : ''}></td>
         <td class="name-cell">${favBtn(false, f.id, f.fav)}<span class="ic">${UI.fileIcon(f.name)}</span> ${UI.escapeHtml(f.name)}${updateBadge(f, false)}${tagChips(f.tags)}</td>
         <td class="path-cell" data-goto="${UI.escapeHtml(f.folder || '/')}" title="${UI.escapeHtml(f.folder || '/')}">${UI.escapeHtml(prettyPath(f.folder))}</td>
-        <td class="num muted" data-label="크기">${UI.bytes(f.size)}</td>
+        <td class="num muted size-cell" data-label="크기">${UI.bytes(f.size)}${sizeBar(f.size)}</td>
         <td class="num muted" data-label="등록">${sdt(f.createdAt)}</td>
         <td class="num muted" data-label="수정">${sdt(f.updatedAt || f.createdAt)}</td>
         <td class="note-cell" data-note="${f.id}" title="클릭하여 비고 편집">${f.note ? UI.escapeHtml(f.note) : '<span class="muted">+ 비고</span>'}</td>
@@ -946,6 +1043,11 @@ const App = (() => {
       const panel = document.getElementById('extfilter-panel');
       if (panel && !panel.classList.contains('hidden') && !e.target.closest('#extfilter')) panel.classList.add('hidden');
     });
+    // U11 · 업로드가 진행 중이면 새로고침·창닫기 전에 브라우저 경고를 띄운다(전송이 끊기는 것을 방지)
+    window.addEventListener('beforeunload', (e) => {
+      if (!Xfer.uploading()) return;
+      e.preventDefault(); e.returnValue = ''; return '';   // 문구는 브라우저가 정한다(커스텀 문구 불가)
+    });
     let dragDepth = 0;
     const overlay = () => document.getElementById('drop-overlay');
     const hasFiles = (e) => Array.from(e.dataTransfer?.types || []).includes('Files');
@@ -964,7 +1066,18 @@ const App = (() => {
       if (e.key === 'Escape') { if (state.selected.size) { state.selected.clear(); applySelectionClasses(); } return; }
       if (e.key === 'Delete') { if (state.selected.size) { e.preventDefault(); bulkDelete(); } return; }
       if (e.key === 'F2') { if (state.selected.size === 1) { e.preventDefault(); const it = [...state.selected.values()][0]; inlineRename(it.type, it.type === 'file' ? it.id : it.path); } return; }
-      if (e.key === 'Enter') { if (state.selected.size === 1) { const it = [...state.selected.values()][0]; if (it.type === 'folder') openFolder(it.path); else downloadFile(it.id); } return; }
+      if (e.key === 'Enter') {
+        if (state.selected.size === 1) { const it = [...state.selected.values()][0]; if (it.type === 'folder') openFolder(it.path); else if (isStockAuditFile(it.name)) openStockAuditFile(it); else downloadFile(it.id); }
+        return;
+      }
+      // U32 · 방향키/Home/End 로 목록 이동 (Shift = 범위 확장, Ctrl+Space = 개별 토글)
+      if (document.body.classList.contains('pv-open')) return;   // 미리보기 열려 있으면 좌우는 미리보기 몫
+      if (e.key === ' ' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); toggleCursorItem(); return; }
+      const cols = gridCols();
+      const step = { ArrowUp: -cols, ArrowDown: cols, ArrowLeft: -1, ArrowRight: 1 }[e.key];
+      if (step !== undefined) { e.preventDefault(); moveCursor(step, e.shiftKey); return; }
+      if (e.key === 'Home') { e.preventDefault(); moveCursorTo(0, e.shiftKey); return; }
+      if (e.key === 'End') { e.preventDefault(); moveCursorTo(orderedItems().length - 1, e.shiftKey); return; }
     });
   }
 
@@ -979,6 +1092,7 @@ const App = (() => {
       const on = state.selected.has(el.dataset.rowKey);
       el.classList.toggle('sel', on);
       el.classList.toggle('previewing', pvCurrentId != null && el.dataset.file != null && String(el.dataset.file) === String(pvCurrentId));
+      el.classList.toggle('kbcursor', state.cursor === el.dataset.rowKey);   // U32 키보드 커서 표시
       const cb = el.querySelector('.rowcheck'); if (cb) cb.checked = on;
     });
     const all = document.getElementById('check-all');
@@ -986,6 +1100,51 @@ const App = (() => {
     updateSelbar();
   }
   function selectAllItems() { state.selected.clear(); orderedItems().forEach((o) => state.selected.set(o.key, o.item)); applySelectionClasses(); }
+
+  // ── U32 · 키보드 커서 이동 ──────────
+  // 그리드 뷰는 실제 렌더된 열 수만큼 위/아래로 뛴다. 리스트/모바일 카드는 1행씩.
+  function gridCols() {
+    const g = document.querySelector('#listing .file-grid');
+    if (!g) return 1;
+    const n = getComputedStyle(g).gridTemplateColumns.split(' ').filter(Boolean).length;
+    return Math.max(1, n);
+  }
+  function cursorIndex(order) {
+    if (state.cursor) { const i = order.findIndex((o) => o.key === state.cursor); if (i >= 0) return i; }
+    if (state.anchor) { const i = order.findIndex((o) => o.key === state.anchor); if (i >= 0) return i; }
+    const last = [...state.selected.keys()].pop();
+    if (last) { const i = order.findIndex((o) => o.key === last); if (i >= 0) return i; }
+    return -1;
+  }
+  function moveCursor(delta, extend) {
+    const order = orderedItems(); if (!order.length) return;
+    const cur = cursorIndex(order);
+    moveCursorTo(cur < 0 ? (delta > 0 ? 0 : order.length - 1) : cur + delta, extend, order);
+  }
+  function moveCursorTo(idx, extend, order) {
+    order = order || orderedItems(); if (!order.length) return;
+    const i = Math.max(0, Math.min(order.length - 1, idx));
+    if (extend && state.anchor) {
+      const a = order.findIndex((o) => o.key === state.anchor);
+      if (a >= 0) {
+        state.selected.clear();
+        const [lo, hi] = a < i ? [a, i] : [i, a];
+        for (let k = lo; k <= hi; k++) state.selected.set(order[k].key, order[k].item);
+      }
+    } else { state.selected.clear(); state.selected.set(order[i].key, order[i].item); state.anchor = order[i].key; }
+    state.cursor = order[i].key;
+    applySelectionClasses(); scrollRowIntoView(order[i].key);
+  }
+  function toggleCursorItem() {
+    const order = orderedItems(); const i = cursorIndex(order); if (i < 0) return;
+    const o = order[i];
+    if (state.selected.has(o.key)) state.selected.delete(o.key); else state.selected.set(o.key, o.item);
+    applySelectionClasses();
+  }
+  function scrollRowIntoView(key) {
+    const el = document.querySelector(`#listing [data-row-key="${CSS.escape(key)}"]`);
+    if (el) el.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  }
   function selectClick(e, key, item) {
     const order = orderedItems();
     if (e.shiftKey && state.anchor) {
@@ -995,6 +1154,7 @@ const App = (() => {
       if (state.selected.has(key)) state.selected.delete(key); else state.selected.set(key, item);
       state.anchor = key;
     } else { state.selected.clear(); state.selected.set(key, item); state.anchor = key; }
+    state.cursor = key;
     applySelectionClasses();
   }
   function moveDraggedTo(targetPath) {
@@ -1279,7 +1439,7 @@ const App = (() => {
   // ── 전송(업로드/다운로드) 현황 패널 ── 하단 고정, 다건·실시간 진행바·취소·실패사유 표시
   // 진행률 갱신 시 전체를 다시 그리지 않고 각 행의 막대/퍼센트만 직접 수정(버튼 DOM 유지 → 클릭 안정)
   const Xfer = (() => {
-    let panel = null, listEl = null, countEl = null, activeCount = 0;
+    let panel = null, listEl = null, countEl = null, activeCount = 0, activeUp = 0;
     function ensurePanel() {
       if (panel) return;
       panel = document.createElement('div');
@@ -1307,7 +1467,7 @@ const App = (() => {
       const errEl = row.querySelector('.xfer-err');
       const xBtn = row.querySelector('.xfer-x');
       let status = 'active', total = 0, aborter = null;
-      activeCount++; refreshCount();
+      activeCount++; if (dir === 'up') activeUp++; refreshCount();
       function end(kind, label, errMsg) {
         if (status !== 'active') return;
         status = kind;
@@ -1316,7 +1476,9 @@ const App = (() => {
         pctEl.textContent = label;
         if (errMsg) { errEl.textContent = errMsg; errEl.title = errMsg; errEl.hidden = false; }
         xBtn.remove();
-        activeCount = Math.max(0, activeCount - 1); refreshCount();
+        activeCount = Math.max(0, activeCount - 1);
+        if (dir === 'up') activeUp = Math.max(0, activeUp - 1);
+        refreshCount();
         setTimeout(() => { row.remove(); refreshCount(); }, 4000);
       }
       xBtn.addEventListener('click', () => { if (status !== 'active') return; try { if (aborter) aborter(); } catch (_) { /* noop */ } end('canceled', '취소', '취소됨'); });
@@ -1334,7 +1496,7 @@ const App = (() => {
         canceled: () => status === 'canceled',
       };
     }
-    return { add };
+    return { add, uploading: () => activeUp, busy: () => activeCount };
   })();
 
   // 업로드 진행률을 얻기 위해 XHR 사용(fetch는 업로드 진행 이벤트 미지원). t로 취소(abort) 연결.
@@ -1895,7 +2057,7 @@ const App = (() => {
   const PV_PPT = new Set(['pptx', 'ppsx']);                    // 서버 변환 실패 시 텍스트+이미지 폴백 가능
   const PV_DOC = new Set(['ppt', 'pptx', 'ppsx', 'pps', 'doc', 'docx', 'odp', 'odt', 'rtf']); // 서버 PDF 로 완전 레이아웃 렌더
   const canPreview = (name) => { const e = (name.split('.').pop() || '').toLowerCase(); return PV_IMG.has(e) || PV_TXT.has(e) || PV_OFFICE.has(e) || PV_DOC.has(e) || e === 'pdf'; };
-  let pvObjUrl = null, pvCurrentId = null, pvExtraUrls = [];
+  let pvObjUrl = null, pvCurrentId = null, pvExtraUrls = [], pvKeysHooked = false;
   function revokeExtra() { pvExtraUrls.forEach((u) => { try { URL.revokeObjectURL(u); } catch (_) {} }); pvExtraUrls = []; }
   function closePreview() {
     const panel = document.getElementById('preview-panel'); if (!panel) return;
@@ -1906,6 +2068,26 @@ const App = (() => {
     if (pvObjUrl) { URL.revokeObjectURL(pvObjUrl); pvObjUrl = null; }
     revokeExtra();
     pvCurrentId = null; applySelectionClasses();
+  }
+  // U5 · 지금 목록(정렬·필터 반영)에서 미리보기 가능한 파일들 — 좌우 넘기기 대상
+  function pvSiblings() {
+    return sortItems(filteredFiles(), false).filter((f) => canPreview(f.name)).map((f) => ({ id: String(f.id), name: f.name }));
+  }
+  function pvStep(delta) {
+    const sib = pvSiblings(); if (sib.length < 2 || pvCurrentId == null) return;
+    const i = sib.findIndex((f) => f.id === String(pvCurrentId));
+    if (i < 0) return;
+    const next = sib[(i + delta + sib.length) % sib.length];   // 끝에서 순환
+    if (next && next.id !== String(pvCurrentId)) openPreview(next.id);
+  }
+  function pvUpdateNav() {
+    const pos = document.getElementById('pp-pos'), prev = document.getElementById('pp-prev'), next = document.getElementById('pp-next');
+    if (!pos || !prev || !next) return;
+    const sib = pvSiblings(); const i = sib.findIndex((f) => f.id === String(pvCurrentId));
+    const many = sib.length > 1 && i >= 0;
+    pos.textContent = many ? `${i + 1}/${sib.length}` : '';
+    prev.disabled = next.disabled = !many;
+    prev.classList.toggle('hidden', !many); next.classList.toggle('hidden', !many); pos.classList.toggle('hidden', !many);
   }
   function openPreview(id) {
     const panel = document.getElementById('preview-panel'); if (!panel) return;
@@ -1918,6 +2100,7 @@ const App = (() => {
     document.getElementById('preview-backdrop')?.classList.add('show');
     document.body.classList.add('pv-open');
     const nm = document.getElementById('pp-name'); nm.textContent = name; nm.title = name;
+    pvUpdateNav();
     applySelectionClasses();
     const body = document.getElementById('pp-body');
     body.innerHTML = '<p class="muted pp-msg">불러오는 중…</p>';
@@ -1973,26 +2156,41 @@ const App = (() => {
     xlsxLoading = new Promise((res, rej) => { const s = document.createElement('script'); s.src = 'vendor/xlsx.min.js?v=95'; s.onload = () => res(window.XLSX); s.onerror = () => { xlsxLoading = null; rej(new Error('엑셀 뷰어를 불러오지 못했습니다.')); }; document.head.appendChild(s); });
     return xlsxLoading;
   }
+  // U21 · 시트 탭: 탭 줄은 위에 고정하고 표만 갈아끼운다(탭을 눌러도 탭 위치가 흔들리지 않게).
+  //   탭마다 행×열 규모를 함께 보여주고, 빈 시트는 흐리게 표시한다.
   async function renderSheetPreview(body, blob) {
     let XLSX; try { XLSX = await ensureXLSX(); } catch (e) { body.innerHTML = `<p class="muted pp-msg">${UI.escapeHtml(e.message)}</p>`; return; }
     let wb; try { wb = XLSX.read(await blob.arrayBuffer(), { type: 'array' }); } catch (_) { body.innerHTML = '<p class="muted pp-msg">시트를 읽을 수 없습니다.</p>'; return; }
     const names = wb.SheetNames || []; const esc = UI.escapeHtml;
+    if (!names.length) { body.innerHTML = '<p class="muted pp-msg">시트가 없습니다.</p>'; return; }
+    const dims = {};
+    for (const n of names) {
+      const ws = wb.Sheets[n];
+      if (ws && ws['!ref']) { const r = XLSX.utils.decode_range(ws['!ref']); dims[n] = { rows: r.e.r - r.s.r + 1, cols: r.e.c - r.s.c + 1 }; }
+      else dims[n] = { rows: 0, cols: 0 };
+    }
+    const tabs = names.length > 1
+      ? `<div class="pp-sheet-tabs" role="tablist">${names.map((n) => `<button type="button" role="tab" class="pp-sheet-tab${dims[n].rows ? '' : ' pp-tab-blank'}" data-sheet="${esc(n)}" title="${esc(n)} · ${dims[n].rows}행 × ${dims[n].cols}열">${esc(n)}<span class="pp-tab-dim num">${dims[n].rows ? `${dims[n].rows}×${dims[n].cols}` : '비어있음'}</span></button>`).join('')}</div>`
+      : '';
+    body.innerHTML = tabs + '<div class="pp-sheet-pane" id="pp-sheet-pane"></div>';
+    const pane = body.querySelector('#pp-sheet-pane');
     const renderSheet = (sn) => {
-      const ws = wb.Sheets[sn]; if (!ws) return;
-      let truncated = false, totalRows = 0, totalCols = 0, range = null;
-      if (ws['!ref']) {
-        range = XLSX.utils.decode_range(ws['!ref']); totalRows = range.e.r - range.s.r + 1; totalCols = range.e.c - range.s.c + 1;
-        if (range.e.r > range.s.r + PV_MAX_ROWS - 1) { range.e.r = range.s.r + PV_MAX_ROWS - 1; truncated = true; }
-        if (range.e.c > range.s.c + PV_MAX_COLS - 1) { range.e.c = range.s.c + PV_MAX_COLS - 1; truncated = true; }
-      }
-      const rows = XLSX.utils.sheet_to_json(ws, { header: 1, range: range ? XLSX.utils.encode_range(range) : undefined, blankrows: false, defval: '' });
-      const tabs = names.length > 1 ? `<div class="pp-sheet-tabs">${names.map((n) => `<button type="button" class="pp-sheet-tab${n === sn ? ' on' : ''}" data-sheet="${esc(n)}">${esc(n)}</button>`).join('')}</div>` : '';
+      const ws = wb.Sheets[sn];
+      body.querySelectorAll('[data-sheet]').forEach((el) => el.classList.toggle('on', el.dataset.sheet === sn));
+      if (!ws || !ws['!ref']) { pane.innerHTML = '<p class="muted pp-msg">빈 시트입니다.</p>'; return; }
+      const range = XLSX.utils.decode_range(ws['!ref']);
+      const totalRows = dims[sn].rows, totalCols = dims[sn].cols;
+      let truncated = false;
+      if (range.e.r > range.s.r + PV_MAX_ROWS - 1) { range.e.r = range.s.r + PV_MAX_ROWS - 1; truncated = true; }
+      if (range.e.c > range.s.c + PV_MAX_COLS - 1) { range.e.c = range.s.c + PV_MAX_COLS - 1; truncated = true; }
+      const rows = XLSX.utils.sheet_to_json(ws, { header: 1, range: XLSX.utils.encode_range(range), blankrows: false, defval: '' });
       const note = truncated ? `<div class="pp-sheet-note">📏 표가 커서 앞 ${Math.min(PV_MAX_ROWS, totalRows)}행 × ${Math.min(PV_MAX_COLS, totalCols)}열만 표시 · 전체 ${totalRows}행 × ${totalCols}열 (전체는 다운로드)</div>` : '';
       const table = `<div class="pp-sheet-scroll"><table class="pp-sheet"><tbody>${rows.map((r) => `<tr>${r.map((c) => `<td>${esc(c == null ? '' : String(c))}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
-      body.innerHTML = tabs + note + table;
-      body.querySelectorAll('[data-sheet]').forEach((el) => el.addEventListener('click', () => renderSheet(el.dataset.sheet)));
+      pane.innerHTML = note + table;
+      pane.scrollTop = 0;
     };
-    renderSheet(names[0]);
+    body.querySelectorAll('[data-sheet]').forEach((el) => el.addEventListener('click', () => renderSheet(el.dataset.sheet)));
+    renderSheet(names.find((n) => dims[n].rows) || names[0]);   // 첫 '내용 있는' 시트부터
   }
   // ── PPTX 미리보기 — 슬라이드별 이미지 + 텍스트 (pptx 는 XML 압축파일) ──────────
   const PV_MAX_SLIDES = 40;

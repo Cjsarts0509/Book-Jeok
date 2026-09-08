@@ -231,19 +231,72 @@ const ACTIVITY_ACTIONS = [
   'create_share', 'delete_share', 'create_folder_share', 'delete_folder_share',
   'create_upload_request', 'delete_upload_request', 'stock_audit_deliver', 'stock_audit_save',
 ];
+const UNDOABLE = new Set(['trash_file', 'bulk_trash', 'trash_folder']);
+// 감사기록 detail 에 박아둔 대상 id 들을 뽑는다 ('file=12', 'ids=12,13,14')
+function auditFileIds(detail) {
+  const out = [];
+  const one = /(?:^|\s)file=(\d+)/.exec(detail || '');
+  if (one) out.push(Number(one[1]));
+  const many = /(?:^|\s)ids=([\d,]+)/.exec(detail || '');
+  if (many) for (const t of many[1].split(',')) { const n = Number(t); if (n) out.push(n); }
+  return out;
+}
+// 화면에 보일 detail — 내부 식별자(file=12, ids=…)는 지우고 파일 이름으로 바꾼다
+function prettyDetail(detail, nameById) {
+  let d = String(detail || '');
+  d = d.replace(/(?:^|\s)ids=[\d,]+/g, '').trim();
+  d = d.replace(/(?:^|\s)file=(\d+)/g, (m, id) => ' ' + (nameById.get(Number(id)) || `#${id}`)).trim();
+  d = d.replace(/^count=(\d+)/, '$1개').replace(/->/g, '→');
+  return d;
+}
 router.get('/activity', authenticate, wrap(resolveOwner), wrap(async (req, res) => {
+  const owner = req.targetOwnerId;
   const limit = Math.min(100, Math.max(1, parseInt(req.query.limit || '30', 10)));
   const r = await query(`
     SELECT a.id, a.action, a.detail, a.created_at, u.username, u.display_name
     FROM audit_log a LEFT JOIN users u ON u.id = a.user_id
     WHERE a.owner_id = $1 AND a.action = ANY($2::text[])
     ORDER BY a.created_at DESC LIMIT $3
-  `, [req.targetOwnerId, ACTIVITY_ACTIONS, limit]);
+  `, [owner, ACTIVITY_ACTIONS, limit]);
+
+  // 이름 표시 + '되돌리기' 가능 여부 판정에 필요한 정보를 한 번에 모아 온다
+  const fileIds = [...new Set(r.rows.flatMap((x) => auditFileIds(x.detail)))];
+  const nameById = new Map(); const inTrash = new Set();
+  if (fileIds.length) {
+    const fr = await query(
+      'SELECT id, original_name, deleted_at FROM files WHERE id = ANY($1::bigint[]) AND owner_id = $2',
+      [fileIds, owner]);
+    const cutoff = trashCutoff();
+    for (const f of fr.rows) {
+      nameById.set(Number(f.id), f.original_name);
+      if (f.deleted_at && new Date(f.deleted_at).toISOString() > cutoff) inTrash.add(Number(f.id));
+    }
+  }
+  const folderIdByPath = new Map();
+  if (r.rows.some((x) => x.action === 'trash_folder')) {
+    const fo = await query(
+      'SELECT id, path FROM folders WHERE owner_id=$1 AND deleted_at IS NOT NULL AND deleted_at > $2',
+      [owner, trashCutoff()]);
+    for (const f of fo.rows) folderIdByPath.set(f.path, Number(f.id));
+  }
+
   res.json({
-    items: r.rows.map((x) => ({
-      id: x.id, action: x.action, detail: x.detail || '', at: x.created_at,
-      by: x.display_name || x.username || '알 수 없음',
-    })),
+    items: r.rows.map((x) => {
+      let undo = null;
+      if (UNDOABLE.has(x.action)) {
+        if (x.action === 'trash_folder') {
+          const id = folderIdByPath.get(String(x.detail || '').trim());
+          if (id) undo = { type: 'folder', ids: [id] };
+        } else {
+          const ids = auditFileIds(x.detail).filter((id) => inTrash.has(id));
+          if (ids.length) undo = { type: 'file', ids };
+        }
+      }
+      return {
+        id: x.id, action: x.action, detail: prettyDetail(x.detail, nameById), at: x.created_at,
+        by: x.display_name || x.username || '알 수 없음', undo,
+      };
+    }),
   });
 }));
 
@@ -686,6 +739,11 @@ router.delete('/:id(\\d+)', authenticate, wrap(async (req, res) => {
   res.json({ ok: true });
 }));
 
+// 선택 항목이 모두 한 계정의 것이면 그 계정 id (감사기록을 '어느 클라우드에서'로 남기기 위함)
+function soleOwner(files) {
+  const owners = [...new Set((files || []).map((f) => Number(f.owner_id)))];
+  return owners.length === 1 ? owners[0] : undefined;
+}
 async function loadAccessibleFiles(user, ids) {
   const list = (Array.isArray(ids) ? ids : []).map(Number).filter(Boolean);
   if (list.length === 0) return [];
@@ -700,7 +758,7 @@ router.post('/bulk/delete', authenticate, wrap(async (req, res) => {
   const files = await loadAccessibleFiles(req.user, req.body.ids);
   if (files.length === 0) return res.status(400).json({ error: '삭제할 항목이 없습니다.' });
   await query('UPDATE files SET deleted_at=now(), deleted_with_folder=NULL WHERE id = ANY($1::bigint[])', [files.map((f) => f.id)]);
-  await audit(req, 'bulk_trash', `count=${files.length}`);
+  await audit(req, 'bulk_trash', `count=${files.length} ids=${files.slice(0, 200).map((f) => f.id).join(',')}`, soleOwner(files));
   res.json({ ok: true, deleted: files.length });
 }));
 
@@ -715,7 +773,7 @@ router.post('/bulk/move', authenticate, wrap(async (req, res) => {
     const name = await uniqueFileName(f.owner_id, folder, f.original_name);
     await query('UPDATE files SET folder=$1, original_name=$2, updated_at=now() WHERE id=$3', [folder, name, f.id]);
   }
-  await audit(req, 'bulk_move', `count=${files.length} -> ${folder}`);
+  await audit(req, 'bulk_move', `count=${files.length} -> ${folder}`, soleOwner(files));
   res.json({ ok: true, moved: files.length });
 }));
 
@@ -757,7 +815,7 @@ router.post('/bulk/copy', authenticate, wrap(async (req, res) => {
     );
     copied++;
   }
-  await audit(req, 'bulk_copy', `count=${copied} -> ${folder}`);
+  await audit(req, 'bulk_copy', `count=${copied} -> ${folder}`, soleOwner(files));
   res.json({ ok: true, copied });
 }));
 
@@ -854,7 +912,7 @@ router.post('/bulk/zip', authenticate, wrap(resolveOwner), wrap(diskGate), wrap(
     'INSERT INTO zip_bundles (owner_id, stored_name, display_name, size_bytes, created_by) VALUES ($1,$2,$3,$4,$5) RETURNING id',
     [owner, storedName, zipName, size, req.user.id]
   );
-  await audit(req, 'bulk_zip', `${zipName} · ${files.length}개`);
+  await audit(req, 'bulk_zip', `${zipName} · ${files.length}개`, owner);
   cleanupBundles(); // 비동기 정리(대기 안 함)
   res.status(201).json({ bundleId: ins.rows[0].id, name: zipName, size });
 }));
