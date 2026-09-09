@@ -3,6 +3,7 @@
 const jwt = require('jsonwebtoken');
 const config = require('../config');
 const { query } = require('../db');
+const accountLimit = require('../accountLimit');
 
 // 요청에서 JWT 를 추출해 검증하고 req.user 를 채웁니다.
 async function authenticate(req, res, next) {
@@ -39,6 +40,10 @@ async function authenticate(req, res, next) {
     if (req.user.role === 'admin' && !req.user.totp_enabled && !req.baseUrl.startsWith('/api/auth')) {
       return res.status(403).json({ error: '보안을 위해 2단계 인증을 먼저 설정해야 합니다.', code: 'need_2fa' });
     }
+    // S16 · 계정 단위 제한. 전역 제한(IP)만으로는 같은 사무실에서 한 사람의 폭주가
+    // 옆자리까지 막고, 반대로 한 계정이 여러 기기로 붙으면 IP 제한을 우회한다.
+    // 여기서 한 번만 걸면 인증이 필요한 모든 경로가 함께 보호된다.
+    if (!accountLimit.check(req, res)) return;
     next();
   } catch (err) {
     return res.status(401).json({ error: '인증에 실패했습니다.' });

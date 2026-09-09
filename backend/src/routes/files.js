@@ -698,7 +698,9 @@ router.get('/:id(\\d+)/pdf', authenticate, wrap(async (req, res) => {
       else res.destroy();
     });
     rs.pipe(res);
-  } catch (_) {
+  } catch (e) {
+    // 변환기가 밀려서 거절한 경우(S23)는 서버 오류가 아니라 '지금 붐빔' — 사용자에게 그대로 알린다
+    if (e && e.code === 'converter_busy') return res.status(503).json({ error: e.message, code: 'converter_busy' });
     res.status(500).json({ error: '문서를 변환하지 못했습니다.' });
   }
 }));

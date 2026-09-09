@@ -21,15 +21,62 @@ function sofficeAvailable() {
   return sofficeOk;
 }
 
-// soffice 는 동시에 여러 개 띄우면 프로필 충돌·메모리 폭증 → 한 번에 하나씩 직렬 처리
+// soffice 는 동시에 여러 개 띄우면 프로필 충돌·메모리 폭증 → 한 번에 하나씩 직렬 처리.
+//
+// S23 · 백프레셔: 직렬 처리만으로는 부족하다. 여러 사람이 동시에 문서를 열면 요청이
+// 끝없이 줄을 서고, 뒤에 선 사람은 몇 분씩 하얀 화면을 본다. 그래서
+//   · 줄 길이에 상한을 두고(넘으면 즉시 '지금 붐빕니다'로 거절 — 무한 대기보다 낫다)
+//   · 줄에서 기다리는 시간에도 상한을 둔다(내 차례가 와도 이미 늦었으면 의미가 없다).
+const QUEUE_MAX = parseInt(process.env.PDF_QUEUE_MAX || '12', 10);
+const QUEUE_WAIT_MS = parseInt(process.env.PDF_QUEUE_WAIT_MS || '60000', 10);
 const jobs = []; let busy = false;
-function enqueue(fn) { return new Promise((resolve, reject) => { jobs.push({ fn, resolve, reject }); pump(); }); }
-async function pump() {
-  if (busy) return; const j = jobs.shift(); if (!j) return;
-  busy = true;
-  try { j.resolve(await j.fn()); } catch (e) { j.reject(e); }
-  finally { busy = false; if (jobs.length) pump(); }
+const convertStats = { queued: 0, running: 0, done: 0, failed: 0, rejected: 0, timedOut: 0, peakQueue: 0, lastMs: 0 };
+
+class BusyError extends Error {
+  constructor(msg) { super(msg); this.status = 503; this.code = 'converter_busy'; }
 }
+
+function enqueue(fn) {
+  if (jobs.length >= QUEUE_MAX) {
+    convertStats.rejected++;
+    return Promise.reject(new BusyError(`문서 변환이 밀려 있습니다(대기 ${jobs.length}건). 잠시 후 다시 열어 주세요.`));
+  }
+  return new Promise((resolve, reject) => {
+    const job = { fn, resolve, reject, at: Date.now(), timedOut: false };
+    // 줄에서 너무 오래 기다렸으면 시작하지 않고 포기한다 — 이미 사용자는 떠났을 것이다
+    job.timer = setTimeout(() => {
+      job.timedOut = true;
+      const i = jobs.indexOf(job);
+      if (i >= 0) jobs.splice(i, 1);
+      convertStats.timedOut++;
+      convertStats.queued = jobs.length;
+      reject(new BusyError('문서 변환 대기가 너무 길어 취소했습니다. 잠시 후 다시 시도해 주세요.'));
+    }, QUEUE_WAIT_MS);
+    job.timer.unref();
+    jobs.push(job);
+    convertStats.queued = jobs.length;
+    convertStats.peakQueue = Math.max(convertStats.peakQueue, jobs.length);
+    pump();
+  });
+}
+async function pump() {
+  if (busy) return;
+  const j = jobs.shift();
+  convertStats.queued = jobs.length;
+  if (!j) return;
+  clearTimeout(j.timer);
+  if (j.timedOut) return pump();          // 대기 중 포기된 작업은 건너뛴다
+  busy = true; convertStats.running = 1;
+  const started = Date.now();
+  try { j.resolve(await j.fn()); convertStats.done++; }
+  catch (e) { convertStats.failed++; j.reject(e); }
+  finally {
+    busy = false; convertStats.running = 0;
+    convertStats.lastMs = Date.now() - started;
+    if (jobs.length) pump();
+  }
+}
+const stats = () => ({ ...convertStats, queueMax: QUEUE_MAX, waitMaxMs: QUEUE_WAIT_MS });
 
 // srcPath: 저장된 실물(확장자 없음) · ext: 원본 확장자 · cacheKey: 파일별 불변 키(stored_name)
 // 반환: 캐시된 PDF 경로. 이미 있으면 즉시 반환.
@@ -78,4 +125,4 @@ async function dropCache(cacheKey) {
   try { await fsp.unlink(path.join(CACHE_DIR, `${cacheKey}.pdf`)); } catch (_) { /* noop */ }
 }
 
-module.exports = { canConvert, sofficeAvailable, convert, dropCache, CACHE_DIR };
+module.exports = { canConvert, sofficeAvailable, convert, dropCache, stats, CACHE_DIR };

@@ -622,7 +622,12 @@ th { background: var(--bg); font-weight: 700; color: var(--text-muted); font-siz
 .filetable .note-cell { cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .filetable .row-actions { white-space: nowrap; text-align: right; }
 .filetable .note-cell:hover { color: var(--secondary); }
-.row-actions { display: flex; gap: 4px; }
+/* row-actions 는 <td> 다. display:flex 를 주면 표 셀에서 빠져나와(브라우저가 익명 셀로 감싼다)
+   행 배경도 안 받고 다른 칸과 줄이 어긋난다 → 표 셀로 두고, 버튼만 인라인으로 늘어놓는다.
+   (.icon-btn 이 display:grid 라 그대로 두면 한 줄에 하나씩 쌓인다) */
+.row-actions { white-space: nowrap; }
+.row-actions > .icon-btn { display: inline-grid; vertical-align: middle; }
+.row-actions > * + * { margin-left: 4px; }
 .rowcheck, #check-all { width: 16px; height: 16px; accent-color: var(--secondary); cursor: pointer; }
 
 .badge { display: inline-block; padding: 3px 10px; border-radius: 99px; font-size: 12px; font-weight: 700; }
