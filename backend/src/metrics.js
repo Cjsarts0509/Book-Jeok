@@ -107,7 +107,9 @@ function evaluateMemory() {
   const mb = (b) => (b / 1048576).toFixed(0);
   const leaking = s.growthPerHour > 32 * 1048576 && s.heapPct >= MEM_WARN_PCT;  // 시간당 32MB↑ + 힙 포화
   if (leaking) alerts.raise('heap-leak', 'warn', '메모리가 계속 늘고 있습니다', `최근 ${s.windowMinutes}분 추세로 시간당 약 ${mb(s.growthPerHour)}MB 증가 · 힙 ${s.heapPct}% (${mb(s.heapUsed)}/${mb(s.heapTotal)}MB) — 누수가 의심됩니다.`);
-  else if (s.heapPct >= 95) alerts.raise('heap-leak', 'warn', '힙 메모리가 거의 찼습니다', `힙 ${s.heapPct}% (${mb(s.heapUsed)}/${mb(s.heapTotal)}MB)`);
+  // 힙 비율만 높은 것은 신호가 아니다 — V8 은 필요할 때 heapTotal 을 늘리므로
+  // 갓 뜬 프로세스도 80~90%를 오간다. 절대량이 충분히 클 때만 의미를 둔다.
+  else if (s.heapPct >= 95 && s.heapUsed >= 256 * 1048576) alerts.raise('heap-leak', 'warn', '힙 메모리가 거의 찼습니다', `힙 ${s.heapPct}% (${mb(s.heapUsed)}/${mb(s.heapTotal)}MB)`);
   else alerts.clear('heap-leak');
 }
 

@@ -170,7 +170,10 @@ const Admin = (() => {
 
     const loop = d.loop, mem = d.memory, disk = d.disk, dbp = d.dbPool, err = d.errors, pr = d.process;
     const loopLevel = loop.p95 >= loop.dangerMs ? 'danger' : loop.p95 >= loop.warnMs ? 'warn' : 'ok';
-    const memLevel = mem.heapPct >= 95 ? 'danger' : mem.heapPct >= 80 ? 'warn' : 'ok';
+    // 힙 '비율'은 그 자체로 신호가 아니다(V8 은 필요할 때 heapTotal 을 늘린다).
+    // 서버의 누수 판정과 같은 기준 — 우상향 추세 + 힙 포화, 또는 절대량이 큰 채로 거의 참.
+    const memLeaking = mem.growthPerHour > 32 * 1048576 && mem.heapPct >= 80;
+    const memLevel = (mem.heapPct >= 95 && mem.heapUsed >= 256 * 1048576) ? 'danger' : memLeaking ? 'warn' : 'ok';
     const poolLevel = dbp.waiting > 0 ? 'warn' : dbp.inUse / Math.max(1, dbp.max) >= 0.8 ? 'info' : 'ok';
     const errLevel = err.errorPct >= 20 ? 'danger' : err.errorPct >= 5 ? 'warn' : 'ok';
     const mb = (b) => (b / 1048576).toFixed(0) + 'MB';
