@@ -55,7 +55,12 @@ app.use(helmet({
 app.use(cors({
   origin(origin, cb) {
     if (!origin || config.corsOrigins.includes(origin)) return cb(null, true);
-    cb(new Error('CORS 정책에 의해 차단되었습니다.'));
+    // status 를 붙이지 않으면 전역 핸들러가 500 으로 처리해 '서버 오류'로 보이고
+    // 요청마다 스택트레이스가 로그에 쌓인다. 실제로는 설정 문제이므로 그렇게 알려 준다.
+    cb(Object.assign(
+      new Error(`허용되지 않은 접속 위치입니다: ${origin} — 서버 .env 의 CORS_ORIGINS 에 이 주소를 넣어 주세요.`),
+      { status: 403 }
+    ));
   },
   credentials: true,
   exposedHeaders: ['Content-Disposition'], // 브라우저 JS가 다운로드 파일명을 읽을 수 있도록
@@ -168,6 +173,14 @@ if (process.env.SERVE_FRONTEND === '1') {
 // ── 에러 핸들러 ─────────────────────────────────────
 // multer 가 요청을 거절하는 경우는 대부분 '서버 잘못'이 아니라 '보낸 쪽 잘못'이다.
 // 500 + "서버 오류" 로 뭉뚱그리면 사용자는 무엇을 고쳐야 할지 알 수 없다.
+// body-parser 가 던지는 오류는 메시지가 영어라 그대로 나가면 사용자가 읽을 수 없다.
+const BODY_MESSAGES = {
+  'entity.too.large': [413, '보낸 내용이 너무 큽니다.'],
+  'entity.parse.failed': [400, '요청 형식이 올바르지 않습니다. 페이지를 새로고침한 뒤 다시 시도해 주세요.'],
+  'entity.verify.failed': [400, '요청 형식이 올바르지 않습니다.'],
+  'request.aborted': [400, '요청이 중간에 끊겼습니다. 다시 시도해 주세요.'],
+};
+
 const MULTER_MESSAGES = {
   LIMIT_FILE_SIZE: [413, '파일 용량이 허용 한도를 초과했습니다.'],
   LIMIT_FILE_COUNT: [400, `한 번에 보낼 수 있는 파일은 ${config.uploadMaxFiles}개까지입니다. 나눠서 올려 주세요.`],
@@ -179,7 +192,7 @@ const MULTER_MESSAGES = {
 };
 
 app.use((err, req, res, next) => {
-  const known = MULTER_MESSAGES[err.code];
+  const known = MULTER_MESSAGES[err.code] || BODY_MESSAGES[err.type] || BODY_MESSAGES[err.code];
   if (known) return res.status(known[0]).json({ error: known[1] });
   const status = err.status || 500;
   if (status >= 500) {

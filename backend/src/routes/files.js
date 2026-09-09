@@ -773,6 +773,9 @@ router.get('/:id(\\d+)/pdf', authenticate, wrap(async (req, res) => {
 
 // ── 비고 ──────────
 router.patch('/:id(\\d+)/note', authenticate, wrap(async (req, res) => {
+  // note 를 안 보내면 지우지 않고 거절한다 — 본문이 깨진 요청 하나로 남의 비고가
+  // 조용히 없어지면 안 된다. 지울 때는 빈 문자열을 명시해서 보낸다.
+  if (req.body.note === undefined) return res.status(400).json({ error: '비고 내용이 없습니다.' });
   const note = String(req.body.note ?? '').slice(0, 2000);
   const r = await query('SELECT owner_id FROM files WHERE id=$1 AND deleted_at IS NULL', [req.params.id]);
   if (r.rowCount === 0) return res.status(404).json({ error: '파일을 찾을 수 없습니다.' });
