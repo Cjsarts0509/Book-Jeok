@@ -107,6 +107,11 @@ app.use('/api/', rateLimit({
   keyGenerator: rateKey,
 }));
 
+// ── 요청 결과 집계(에러율·응답시간) ─────────────────
+// 라우트보다 먼저 붙여 모든 응답의 status 를 본다. 집계는 res 'finish' 에서만 하므로 지연이 없다.
+const metrics = require('./metrics');
+app.use('/api/', metrics.requestMetrics);
+
 // ── 라우트 ──────────────────────────────────────────
 app.get('/api/health', (req, res) => res.json({ ok: true, service: 'book-jeok', time: new Date().toISOString() }));
 app.use('/api/auth', require('./routes/auth'));
@@ -146,6 +151,7 @@ fs.mkdirSync(config.storageRoot, { recursive: true });
 require('./settings').loadSettings(); // 허용 확장자 캐시 로드
 require('./purge').startPurgeScheduler(); // 휴지통 1년 경과분 자동 영구삭제
 require('./scheduler').start(); // 주간 리포트 자동 발송(SMTP 설정 시)
+metrics.start(); // 이벤트루프·메모리·디스크·DB풀·에러율 상시 감시 + 예기치 않은 재시작 감지
 const server = app.listen(config.port, () => {
   console.log(`북적북적 API 서버 실행 중 → http://localhost:${config.port}  (env: ${config.env})`);
   console.log(`파일 저장 경로: ${config.storageRoot}`);
@@ -167,6 +173,7 @@ const { pool } = require('./db');
 for (const sig of ['SIGTERM', 'SIGINT']) {
   process.on(sig, () => {
     console.log(`[${sig}] 종료 신호 수신 — 서버 정리 중…`);
+    metrics.markCleanShutdown();   // 계획된 종료임을 남긴다(S27 오탐 방지)
     server.close(() => { pool.end().catch(() => {}).finally(() => process.exit(0)); });
     setTimeout(() => process.exit(0), 10000).unref();
   });

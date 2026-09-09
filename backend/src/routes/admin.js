@@ -632,4 +632,26 @@ router.post('/report/send', wrap(async (req, res) => {
 }));
 function mailer_to() { try { return require('../mailer').recipients().join(', '); } catch (_) { return ''; } }
 
+// ══════════ 시스템 상태 (S1) ══════════
+// 상시 감시 중인 수치를 한 번에 반환 — 이벤트루프 지연·메모리 추세·디스크 단계·
+// DB 커넥션 풀·에러율·재시작 이력·현재 떠 있는 경보.
+router.get('/health', wrap(async (req, res) => {
+  const metrics = require('../metrics');
+  const os = require('os');
+  const [l1] = os.loadavg();
+  const cores = os.cpus().length || 1;
+  let db;
+  try { db = { connected: true, ...(await healthStats()) }; } catch (e) { db = { connected: false, error: e.message }; }
+  res.json({
+    ...metrics.snapshot(),
+    host: { cores, load1: l1, loadPct: Math.min(100, Math.round((l1 / cores) * 100)), uptime: os.uptime() },
+    db,
+  });
+}));
+
+// 인덱스 사용률 점검 (S22) — 통계 조회가 가벼운 편은 아니라 별도 호출 + 5분 캐시
+router.get('/health/indexes', wrap(async (req, res) => {
+  res.json(await require('../metrics').indexReport(req.query.force === '1'));
+}));
+
 module.exports = router;
