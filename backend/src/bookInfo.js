@@ -6,9 +6,8 @@
 // 도서 정보 API 는 대부분 발급받은 키가 필요하므로, 어느 곳을 쓸지 환경변수로 고른다.
 // 아무것도 설정하지 않으면 키가 필요 없는 OpenLibrary 로 시도한다(국내서는 적중률이 낮다).
 //
-//   BOOK_API_PROVIDER=aladin  BOOK_API_KEY=<TTB키>          알라딘 (국내서 정확)
-//   BOOK_API_PROVIDER=naver   BOOK_API_KEY=<ID>:<SECRET>    네이버 책
-//   BOOK_API_PROVIDER=openlibrary                            키 불필요(해외서 위주)
+//   BOOK_API_PROVIDER=naver        BOOK_API_KEY=<ID>:<SECRET>   네이버 책 (국내서)
+//   BOOK_API_PROVIDER=openlibrary                               키 불필요(해외서 위주)
 //
 // 서버가 대신 불러 준다 — 브라우저에서 직접 부르면 CORS 에 막히고 API 키가 노출된다.
 // 결과는 메모리에 캐시한다. 같은 ISBN 을 여러 번 찍는 일이 흔하고, 외부 호출은 느리고 한도가 있다.
@@ -47,19 +46,6 @@ const shape = (o) => ({
   source: o.source || PROVIDER,
 });
 
-async function lookupAladin(isbn) {
-  const url = 'https://www.aladin.co.kr/ttb/api/ItemLookUp.aspx'
-    + `?ttbkey=${encodeURIComponent(KEY)}&itemIdType=ISBN13&ItemId=${encodeURIComponent(isbn)}`
-    + '&output=js&Version=20131101&Cover=Big';
-  const d = await fetchJson(url);
-  const it = (d.item || [])[0];
-  if (!it) return null;
-  return shape({
-    isbn, title: it.title, author: it.author, publisher: it.publisher,
-    pubDate: it.pubDate, cover: it.cover, description: it.description, source: 'aladin',
-  });
-}
-
 async function lookupNaver(isbn) {
   const [id, secret] = KEY.split(':');
   if (!id || !secret) throw new Error('네이버는 BOOK_API_KEY 를 "클라이언트ID:시크릿" 형식으로 넣어야 합니다.');
@@ -88,7 +74,7 @@ async function lookupOpenLibrary(isbn) {
   });
 }
 
-const PROVIDERS = { aladin: lookupAladin, naver: lookupNaver, openlibrary: lookupOpenLibrary };
+const PROVIDERS = { naver: lookupNaver, openlibrary: lookupOpenLibrary };
 
 async function lookup(rawIsbn) {
   const isbn = normalizeIsbn(rawIsbn);
@@ -96,7 +82,7 @@ async function lookup(rawIsbn) {
   if (!configured()) {
     return {
       ok: false, notConfigured: true,
-      error: '도서정보 조회가 설정되지 않았습니다. 서버 .env 에 BOOK_API_PROVIDER 와 BOOK_API_KEY 를 넣어 주세요.',
+      error: '도서정보 조회가 설정되지 않았습니다. 서버 .env 에 BOOK_API_PROVIDER=naver 와 BOOK_API_KEY=<클라이언트ID>:<시크릿> 을 넣어 주세요.',
     };
   }
   const c = cache.get(isbn);
@@ -104,7 +90,12 @@ async function lookup(rawIsbn) {
   stats.miss++;
 
   const fn = PROVIDERS[PROVIDER];
-  if (!fn) return { ok: false, error: `알 수 없는 제공처입니다: ${PROVIDER}` };
+  if (!fn) {
+    return {
+      ok: false, notConfigured: true,
+      error: `알 수 없는 제공처입니다: ${PROVIDER}. 쓸 수 있는 값은 ${Object.keys(PROVIDERS).join(' · ')} 입니다.`,
+    };
+  }
   try {
     const book = await fn(isbn);
     if (!book) return { ok: false, error: '해당 ISBN 의 도서를 찾지 못했습니다.', isbn };
