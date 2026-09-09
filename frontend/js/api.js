@@ -139,6 +139,7 @@ const API = (() => {
     checkups: () => req('GET', '/admin/checkups'),
     runCheckup: (name, deep) => req('POST', `/admin/checkups/${name}/run` + (deep ? '?deep=1' : '')),
     retryMailQueue: () => req('POST', '/admin/mail-queue/retry'),
+    verifyAuditChain: (limit) => req('GET', '/admin/audit/verify' + (limit ? `?limit=${limit}` : '')),
     // trash
     trash: () => req('GET', '/admin/trash'),
     restoreFile: (id) => req('POST', `/admin/trash/file/${id}/restore`),

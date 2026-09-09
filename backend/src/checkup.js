@@ -29,7 +29,7 @@ async function load(name) {
   try { return JSON.parse(await fsp.readFile(path.join(DIR, `${name}.json`), 'utf8')); } catch { return null; }
 }
 async function loadAll() {
-  const names = ['integrity', 'cleanup', 'backup-verify', 'restore-drill', 'deps', 'deploy'];
+  const names = ['integrity', 'cleanup', 'audit-chain', 'backup-verify', 'restore-drill', 'deps', 'deploy'];
   const out = {};
   for (const n of names) out[n] = await load(n);
   return out;

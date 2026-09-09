@@ -122,7 +122,10 @@ async function purgeOrphanUploads() {
 // 오래된 감사로그/로그인이벤트 정리(무한증가 방지). 보안 추적용이라 넉넉히 보관.
 async function purgeOldLogs() {
   try {
+    // 사슬 검증(S5)이 '정상적인 정리'를 변조로 오해하지 않도록, 잘라낸 지점을 먼저 확인해 기록한다
+    const cut = await query("SELECT MAX(chain_seq) AS s FROM audit_log WHERE created_at < now() - interval '365 days' AND chain_seq IS NOT NULL");
     const a = await query("DELETE FROM audit_log WHERE created_at < now() - interval '365 days'");
+    if (cut.rows[0].s) await require('./auditChain').notePrune(Number(cut.rows[0].s));
     const l = await query("DELETE FROM login_events WHERE created_at < now() - interval '180 days'");
     if (a.rowCount || l.rowCount) console.log(`[purge] 오래된 로그 정리: 감사 ${a.rowCount}건, 로그인 ${l.rowCount}건`);
   } catch (err) {

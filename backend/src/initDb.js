@@ -311,6 +311,24 @@ const MIGRATIONS = [
     );
     CREATE INDEX IF NOT EXISTS idx_mail_queue_due ON mail_queue(status, next_attempt_at);
   ` },
+  // 감사로그 변조 탐지(S5) — 각 기록을 앞 기록의 해시와 엮어 사슬로 만든다.
+  // 한 줄을 고치거나 지우면 그 뒤 사슬이 전부 어긋나므로 조용한 조작을 알아챌 수 있다.
+  { id: '0009_audit_chain', sql: `
+    ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS chain_seq  BIGINT;
+    ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS prev_hash  TEXT;
+    ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS chain_hash TEXT;
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_audit_chain_seq ON audit_log(chain_seq) WHERE chain_seq IS NOT NULL;
+
+    -- 사슬의 머리. 한 행만 존재하며, 감사 기록을 넣을 때 이 행을 잠가 순서를 보장한다.
+    CREATE TABLE IF NOT EXISTS audit_chain (
+      id         INTEGER PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+      last_hash  TEXT NOT NULL DEFAULT '',
+      seq        BIGINT NOT NULL DEFAULT 0,
+      pruned_seq BIGINT NOT NULL DEFAULT 0,   -- 보관기간이 지나 잘라낸 앞부분(검증 시작점)
+      started_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    INSERT INTO audit_chain (id) VALUES (1) ON CONFLICT (id) DO NOTHING;
+  ` },
 ];
 
 // ── S18 · 마이그레이션 드라이런 ────────────────────────

@@ -654,6 +654,15 @@ router.get('/health', wrap(async (req, res) => {
   });
 }));
 
+// 감사로그 사슬 검증 (S5) — 전체를 다시 계산하므로 요청 시에만.
+// limit 을 주면 최근 N건만 빠르게 훑는다.
+router.get('/audit/verify', wrap(async (req, res) => {
+  const limit = Math.max(0, parseInt(req.query.limit || '0', 10));
+  const r = await require('../auditChain').verify({ limit });
+  await require('../checkup').save('audit-chain', r);   // 점검 탭에서 최근 결과를 볼 수 있게
+  res.json(r);
+}));
+
 // 실패로 접힌 메일을 다시 시도시킨다(설정을 고친 뒤 · S14)
 router.post('/mail-queue/retry', wrap(async (req, res) => {
   const r = await require('../mailQueue').retryFailed();

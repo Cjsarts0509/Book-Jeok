@@ -105,7 +105,8 @@ router.post('/login', loginLimiter, wrap(async (req, res) => {
   }
 
   const token = issueToken(res, user);
-  await audit({ ...req, user }, 'login', '');
+  // req 를 펼쳐 복사하면 headers 가 따라오지 않아 IP 를 못 읽는다 — 행위자만 따로 넘긴다
+  await audit(req, 'login', '', user.id, user);
   await checkNewLocation(user, req);
   // 관리자는 2FA 필수 — 미설정 시 강제 설정 안내
   const mustSetup2fa = user.role === 'admin' && !user.totp_enabled;

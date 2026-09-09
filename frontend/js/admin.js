@@ -308,6 +308,7 @@ const Admin = (() => {
   const CK_META = {
     integrity:       { icon: '🧩', title: '파일 실물 ↔ DB 정합성', how: 'app',  every: '매주',  desc: '목록엔 보이는데 실제 파일이 없는 것, 크기가 기록과 다른 것, 주인 없는 파일을 찾습니다.' },
     cleanup:         { icon: '🧹', title: '좀비 리소스 정리 리포트', how: 'app',  every: '매일',  desc: '지금 지우면 얼마나 회수되는지 — 휴지통·캐시·중단된 업로드·만료 번들.' },
+    'audit-chain':   { icon: '🔗', title: '감사로그 변조 탐지',      how: 'app',  every: '필요할 때', desc: '감사 기록을 앞 기록의 해시와 엮어 둡니다. 누가 한 줄이라도 고치거나 지우면 여기서 드러납니다.' },
     'backup-verify': { icon: '🔐', title: '백업 무결성 검증',        how: 'host', every: '매일',  desc: '백업이 끝까지 풀리는지, 덤프가 잘리지 않았는지, 해시가 그대로인지 확인합니다.',
       cmd: './scripts/bookjeok-verify-backups.sh' },
     'restore-drill': { icon: '🚑', title: '백업 복원 리허설',        how: 'host', every: '매주',  desc: '최신 백업을 임시 DB에 실제로 복원해 봅니다. 운영 DB는 건드리지 않습니다.',
@@ -423,6 +424,20 @@ const Admin = (() => {
           : '');
     }
 
+    if (key === 'audit-chain') {
+      if (r.reason === 'not_initialized') return `<p class="ck-bad">🚨 ${esc(r.message)}</p>`;
+      const TYPE = { modified: '내용이 바뀜', missing: '기록이 사라짐', broken_link: '연결이 끊김', tail_mismatch: '마지막이 안 맞음', tail_missing: '마지막이 사라짐' };
+      return `<div class="ck-sum">${r.checked.toLocaleString()}건 검증 · ${r.elapsedMs}ms${r.prunedSeq ? ` · 보관기간 지나 정리된 앞부분 ${r.prunedSeq}건은 정상으로 봄` : ''}</div>`
+        + (r.ok
+          ? '<p class="ck-good">✅ 모든 기록이 남긴 그대로입니다. 고쳐지거나 지워진 흔적이 없습니다.</p>'
+          : `<p class="ck-bad">🚨 ${r.problemCount}건의 이상이 발견됐습니다 — 누군가 DB를 직접 건드렸을 수 있습니다.</p>
+             <table class="hl-table"><thead><tr><th>종류</th><th>위치</th><th>설명</th></tr></thead><tbody>
+             ${r.problems.map((p) => `<tr><td style="color:var(--danger);font-weight:700">${esc(TYPE[p.type] || p.type)}</td><td class="num">${p.seq || (p.from ? `${p.from}~${p.to}` : '—')}</td><td>${esc(p.message)}</td></tr>`).join('')}
+             </tbody></table>`)
+        + (r.legacyRows ? `<p class="muted" style="font-size:11px">사슬 도입 전 기록 ${r.legacyRows.toLocaleString()}건은 해시가 없어 검증 대상이 아닙니다.</p>` : '')
+        + `<p class="muted" style="font-size:11px">${esc(r.note || '')}</p>`;
+    }
+
     if (key === 'deploy') {
       return `<div class="ck-sum">${esc(r.fromCommit || '?')} → ${esc(r.toCommit || '?')} · ${r.elapsedSec}초 · 단계 ${esc(r.stage || '')}</div>`
         + `<p class="${r.ok ? 'ck-good' : 'ck-bad'}">${r.ok ? '✅' : r.rolledBack ? '↩️' : '🚨'} ${esc(r.detail || '')}</p>`
@@ -462,7 +477,8 @@ const Admin = (() => {
     const box = document.getElementById('ck-' + name);
     if (box) box.innerHTML = '<p class="muted">검사 중… (파일이 많으면 몇 분 걸릴 수 있습니다)</p>';
     try {
-      const r = await API.runCheckup(name, deep);
+      // 감사로그 검증은 전용 엔드포인트를 쓴다(전체를 다시 계산하므로)
+      const r = name === 'audit-chain' ? await API.verifyAuditChain() : await API.runCheckup(name, deep);
       if (box) box.innerHTML = ckBody(name, r);
       UI.toast('점검을 마쳤습니다', 'success');
       loadCheckups();   // 마지막 실행 시각·색상까지 새로 반영
