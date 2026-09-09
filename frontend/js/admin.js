@@ -258,6 +258,15 @@ const Admin = (() => {
         `변환 ${cv.done}건 완료 · 실패 ${cv.failed} · 붐벼서 거절 ${cv.rejected} · 대기중 취소 ${cv.timedOut}<br>최근 변환 ${(cv.lastMs / 1000).toFixed(1)}초 · 최대 대기열 ${cv.peakQueue}`,
         cv.queued >= cv.queueMax ? 'danger' : cv.queued > 0 ? 'warn' : 'ok'));
     }
+    const mq = d.mailQueue;
+    if (mq && !mq.error) {
+      const lvl = mq.breakerOpen || mq.failed > 0 ? 'warn' : mq.pending > 0 ? 'info' : 'ok';
+      out.push(hcard('메일 재시도 큐', `${mq.pending}`,
+        `대기 ${mq.pending} · 발송완료 ${mq.sent} · 끝내 실패 ${mq.failed}<br>${
+          !mq.enabled ? 'SMTP 미설정'
+            : mq.breakerOpen ? `<b style="color:var(--danger)">연속 실패로 잠시 중지</b> (${new Date(mq.breakerUntil).toLocaleTimeString('ko-KR')}까지)`
+              : mq.nextAttemptAt ? `다음 시도 ${new Date(mq.nextAttemptAt).toLocaleTimeString('ko-KR')}` : '보낼 것 없음'}`, lvl));
+    }
     if (al) {
       const top = (al.top || [])[0];
       out.push(hcard('계정별 요청량', `${top ? top.count : 0}`,
@@ -305,6 +314,8 @@ const Admin = (() => {
       cmd: './scripts/bookjeok-restore-drill.sh' },
     deps:            { icon: '📦', title: '의존성 취약점 점검',      how: 'host', every: '매주',  desc: '쓰고 있는 패키지에 새로 공개된 취약점이 있는지 확인합니다.',
       cmd: './scripts/bookjeok-audit-deps.sh' },
+    deploy:          { icon: '🚀', title: '마지막 배포',              how: 'host', every: '필요할 때', desc: '배포 결과입니다. 건강검진에 실패하면 자동으로 이전 버전으로 되돌립니다.',
+      cmd: './scripts/bookjeok-deploy.sh --pull' },
   };
   const ckAgo = (iso) => {
     if (!iso) return '아직 실행된 적 없음';
@@ -312,8 +323,10 @@ const Admin = (() => {
     const t = s < 3600 ? `${Math.max(1, Math.floor(s / 60))}분 전` : s < 86400 ? `${Math.floor(s / 3600)}시간 전` : `${Math.floor(s / 86400)}일 전`;
     return `${t} · ${new Date(iso).toLocaleString('ko-KR')}`;
   };
-  // 마지막 실행이 예정 주기의 3배를 넘겼으면 '점검이 멈춘 것' — 결과보다 이게 더 큰 문제다
+  // 마지막 실행이 예정 주기의 3배를 넘겼으면 '점검이 멈춘 것' — 결과보다 이게 더 큰 문제다.
+  // 배포처럼 '주기가 없는' 것은 오래됐다고 문제가 아니다.
   const ckStale = (iso, every) => {
+    if (every === '필요할 때') return false;
     if (!iso) return true;
     const limit = (every === '매일' ? 1 : 7) * 3 * 86400000;
     return Date.now() - new Date(iso) > limit;
@@ -408,6 +421,12 @@ const Admin = (() => {
               ${r.tables.map((t) => `<tr><td>${esc(t.table)}</td><td class="num"${t.odd ? ' style="color:var(--danger);font-weight:700"' : ''}>${Number(t.restored).toLocaleString()}</td><td class="num">${Number(t.live).toLocaleString()}</td></tr>`).join('')}
             </tbody></table><p class="muted" style="font-size:11px">백업 시점 이후의 변경분만큼은 차이가 나는 것이 정상입니다.</p>`
           : '');
+    }
+
+    if (key === 'deploy') {
+      return `<div class="ck-sum">${esc(r.fromCommit || '?')} → ${esc(r.toCommit || '?')} · ${r.elapsedSec}초 · 단계 ${esc(r.stage || '')}</div>`
+        + `<p class="${r.ok ? 'ck-good' : 'ck-bad'}">${r.ok ? '✅' : r.rolledBack ? '↩️' : '🚨'} ${esc(r.detail || '')}</p>`
+        + (r.rolledBack ? '<p class="muted" style="font-size:12px">서비스는 이전 버전으로 계속 돌아가고 있습니다. 원인을 고친 뒤 다시 배포하세요.</p>' : '');
     }
 
     if (key === 'deps') {

@@ -292,7 +292,115 @@ const MIGRATIONS = [
     ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS owner_id INTEGER REFERENCES users(id) ON DELETE SET NULL;
     CREATE INDEX IF NOT EXISTS idx_audit_owner ON audit_log(owner_id, created_at DESC);
   ` },
+  // 메일 재시도 큐(S14) — 보내다 실패한 메일을 메모리가 아니라 DB에 남겨,
+  // 서버가 재시작되어도 잃어버리지 않고 백오프로 다시 시도한다.
+  { id: '0008_mail_queue', sql: `
+    CREATE TABLE IF NOT EXISTS mail_queue (
+      id              BIGSERIAL PRIMARY KEY,
+      recipients      TEXT NOT NULL,
+      subject         TEXT NOT NULL,
+      html            TEXT NOT NULL DEFAULT '',
+      body_text       TEXT NOT NULL DEFAULT '',
+      kind            VARCHAR(32) NOT NULL DEFAULT 'general',
+      status          VARCHAR(16) NOT NULL DEFAULT 'pending',
+      attempts        INTEGER NOT NULL DEFAULT 0,
+      last_error      TEXT NOT NULL DEFAULT '',
+      next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+      sent_at         TIMESTAMPTZ
+    );
+    CREATE INDEX IF NOT EXISTS idx_mail_queue_due ON mail_queue(status, next_attempt_at);
+  ` },
 ];
+
+// ── S18 · 마이그레이션 드라이런 ────────────────────────
+// "적용해 보고, 무엇이 바뀌는지 확인한 뒤, 되돌린다."
+// 배포 직전에 이걸 돌려 보면 운영 DB를 건드리지 않고도
+//   · SQL 이 실제로 통과하는지 (오타·타입 불일치·제약 위반)
+//   · 어떤 테이블/컬럼/인덱스가 생기고 사라지는지
+//   · 기존 데이터가 제약에 걸리지는 않는지
+// 를 미리 볼 수 있다. 트랜잭션을 반드시 롤백하므로 흔적이 남지 않는다.
+async function snapshotSchema(client) {
+  const cols = await client.query(`
+    SELECT table_name || '.' || column_name || ' ' || data_type ||
+           CASE WHEN is_nullable='NO' THEN ' NOT NULL' ELSE '' END AS sig
+    FROM information_schema.columns WHERE table_schema='public'`);
+  const idx = await client.query("SELECT indexname AS sig FROM pg_indexes WHERE schemaname='public'");
+  const con = await client.query(`
+    SELECT conrelid::regclass || ':' || conname AS sig FROM pg_constraint
+    WHERE connamespace = 'public'::regnamespace`);
+  return {
+    columns: new Set(cols.rows.map((r) => r.sig)),
+    indexes: new Set(idx.rows.map((r) => r.sig)),
+    constraints: new Set(con.rows.map((r) => r.sig)),
+  };
+}
+const diffSets = (before, after) => ({
+  added: [...after].filter((x) => !before.has(x)).sort(),
+  removed: [...before].filter((x) => !after.has(x)).sort(),
+});
+
+async function dryRunMigrations() {
+  await query('CREATE TABLE IF NOT EXISTS schema_migrations (id TEXT PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT now())');
+  const done = new Set((await query('SELECT id FROM schema_migrations')).rows.map((r) => r.id));
+  const pending = MIGRATIONS.filter((m) => !done.has(m.id));
+  const result = { pending: pending.map((m) => m.id), applied: [...done], ok: true, steps: [], diff: null };
+
+  if (!pending.length) {
+    console.log('[dry-run] 적용할 마이그레이션이 없습니다. (이미 최신)');
+    return result;
+  }
+  console.log(`[dry-run] 미적용 ${pending.length}건: ${pending.map((m) => m.id).join(', ')}`);
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const before = await snapshotSchema(client);
+    for (const m of pending) {
+      const t0 = Date.now();
+      try {
+        await client.query(m.sql);
+        const ms = Date.now() - t0;
+        result.steps.push({ id: m.id, ok: true, ms });
+        console.log(`  ✅ ${m.id} (${ms}ms)`);
+      } catch (e) {
+        result.ok = false;
+        result.steps.push({ id: m.id, ok: false, error: e.message });
+        console.error(`  ❌ ${m.id} — ${e.message}`);
+        break;                                   // 첫 실패에서 멈춘다(뒤는 어차피 못 믿는다)
+      }
+    }
+    if (result.ok) {
+      const after = await snapshotSchema(client);
+      result.diff = {
+        columns: diffSets(before.columns, after.columns),
+        indexes: diffSets(before.indexes, after.indexes),
+        constraints: diffSets(before.constraints, after.constraints),
+      };
+    }
+  } finally {
+    await client.query('ROLLBACK').catch(() => {});   // 무슨 일이 있어도 되돌린다
+    client.release();
+  }
+
+  if (result.ok && result.diff) {
+    const d = result.diff;
+    const show = (label, x) => {
+      for (const a of x.added) console.log(`  + ${label} ${a}`);
+      for (const r of x.removed) console.log(`  - ${label} ${r}`);
+    };
+    console.log('\n[dry-run] 예상 변경:');
+    show('컬럼', d.columns); show('인덱스', d.indexes); show('제약', d.constraints);
+    if (!d.columns.added.length && !d.columns.removed.length && !d.indexes.added.length
+      && !d.indexes.removed.length && !d.constraints.added.length && !d.constraints.removed.length) {
+      console.log('  (스키마 구조 변화 없음 — 데이터만 바꾸는 마이그레이션일 수 있습니다)');
+    }
+    console.log('\n[dry-run] 모두 통과. 롤백했으므로 DB는 그대로입니다.');
+  } else if (!result.ok) {
+    console.error('\n[dry-run] 실패한 마이그레이션이 있습니다. 배포 전에 고쳐 주세요. (DB는 롤백되어 그대로입니다)');
+  }
+  return result;
+}
 
 // 적용 안 된 마이그레이션만 트랜잭션으로 실행하고 schema_migrations 에 기록.
 async function runMigrations() {
@@ -334,6 +442,13 @@ async function seed() {
 }
 
 async function main() {
+  // --dry-run: 적용해 보고 무엇이 바뀌는지만 보여준 뒤 되돌린다(S18)
+  if (process.argv.includes('--dry-run')) {
+    console.log('[dry-run] 마이그레이션 시험 적용 — DB는 바뀌지 않습니다.');
+    const r = await dryRunMigrations();
+    await pool.end();
+    process.exit(r.ok ? 0 : 1);
+  }
   console.log('[init-db] 스키마/마이그레이션 적용 중...');
   await query(SCHEMA);        // 기본 테이블(CREATE IF NOT EXISTS, 항상 안전)
   await runMigrations();      // 버전 관리 마이그레이션(미적용분만, 트랜잭션)

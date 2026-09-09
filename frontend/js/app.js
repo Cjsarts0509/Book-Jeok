@@ -3452,9 +3452,20 @@ const App = (() => {
 
   // ── 인앱 알림 ──────────
   let notifTimer = null, lastUnread = -1, visHooked = false, resizeHooked = false, lastMobile = null, backHooked = false;
+  // S15 · 폴링 백오프
+  // 서버가 잠깐 죽으면 열려 있는 모든 브라우저가 30초마다 계속 두드린다 — 서버가
+  // 일어나려는 순간에 가장 세게 맞는 셈이다. 실패가 이어지면 간격을 늘리고,
+  // 한 번 성공하면 원래대로 돌아온다. 지터를 섞어 여러 탭이 같은 순간에 몰리지 않게 한다.
+  const POLL_BASE_MS = 30000, POLL_MAX_MS = 300000;
+  let pollFails = 0;
+  function pollDelay() {
+    const backoff = Math.min(POLL_MAX_MS, POLL_BASE_MS * Math.pow(2, pollFails));
+    return Math.round(backoff * (0.85 + Math.random() * 0.3));
+  }
   async function refreshNotifBadge() {
     try {
       const d = await API.notifications(1);
+      if (pollFails) { pollFails = 0; reschedulePoll(); }   // 회복 → 즉시 정상 간격으로
       const badges = [document.getElementById('notif-badge'), document.getElementById('notif-badge-menu'), document.getElementById('notif-badge-tab')].filter(Boolean);
       if (!badges.length) return;
       badges.forEach((badge) => {
@@ -3464,12 +3475,29 @@ const App = (() => {
       // 새 알림이 늘었으면 토스트로만 알림(목록 자동 새로고침 없음 → 상단 🔄 버튼으로 수동)
       if (lastUnread >= 0 && d.unread > lastUnread) UI.toast(`🔔 새 알림 ${d.unread - lastUnread}건 · 🔄로 새로고침`, 'info');
       lastUnread = d.unread;
-    } catch {}
+    } catch (e) {
+      // 401(세션 만료)은 물러선다고 나아지지 않지만, 그래도 두드릴 이유는 없다
+      pollFails = Math.min(pollFails + 1, 4);
+      reschedulePoll();
+    }
     checkStale(); // 같은 계정을 다른 곳에서 변경했는지 함께 확인
   }
   // 폴링은 '화면에 보일 때만' 돈다(백그라운드 탭의 불필요한 트래픽 제거).
-  function pollResume() { if (notifTimer) return; refreshNotifBadge(); notifTimer = setInterval(refreshNotifBadge, 30000); }
-  function pollPause() { if (notifTimer) { clearInterval(notifTimer); notifTimer = null; } }
+  // setInterval 대신 매번 다시 예약한다 — 간격이 상황에 따라 바뀌기 때문.
+  function reschedulePoll() {
+    if (!notifTimer) return;                 // 멈춰 있으면 다시 켜지 않는다
+    clearTimeout(notifTimer);
+    notifTimer = setTimeout(pollTick, pollDelay());
+  }
+  async function pollTick() {
+    await refreshNotifBadge();
+    if (notifTimer) { clearTimeout(notifTimer); notifTimer = setTimeout(pollTick, pollDelay()); }
+  }
+  function pollResume() {
+    if (notifTimer) return;
+    notifTimer = setTimeout(pollTick, 0);    // 지금 한 번 확인하고 이어서 예약
+  }
+  function pollPause() { if (notifTimer) { clearTimeout(notifTimer); notifTimer = null; } }
   function startNotifPolling() {
     if (document.visibilityState === 'visible') pollResume(); else pollPause();  // 알림 배지 30초 폴링(보일 때만)
     if (!visHooked) { visHooked = true; document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') pollResume(); else pollPause(); }); }

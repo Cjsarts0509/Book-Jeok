@@ -648,9 +648,17 @@ router.get('/health', wrap(async (req, res) => {
     db,
     // 묶음4 · 요청 처리 하드닝의 현재 상태
     listCache: require('../listcache').snapshot(),          // S21 목록 캐시 적중률
+    mailQueue: await require('../mailQueue').stats(),        // S14 메일 재시도 큐
     converter: require('../officePdf').stats(),             // S23 문서 변환 대기열
     accountLimit: require('../accountLimit').snapshot(),     // S16 계정별 요청량
   });
+}));
+
+// 실패로 접힌 메일을 다시 시도시킨다(설정을 고친 뒤 · S14)
+router.post('/mail-queue/retry', wrap(async (req, res) => {
+  const r = await require('../mailQueue').retryFailed();
+  await audit(req, 'mail_retry', `requeued=${r.requeued}`);
+  res.json(r);
 }));
 
 // 인덱스 사용률 점검 (S22) — 통계 조회가 가벼운 편은 아니라 별도 호출 + 5분 캐시

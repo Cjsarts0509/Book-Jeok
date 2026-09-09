@@ -180,6 +180,7 @@ require('./purge').startPurgeScheduler(); // 휴지통 1년 경과분 자동 영
 require('./scheduler').start(); // 주간 리포트 자동 발송(SMTP 설정 시)
 metrics.start(); // 이벤트루프·메모리·디스크·DB풀·에러율 상시 감시 + 예기치 않은 재시작 감지
 require('./checkup').startScheduler(); // 정합성 검사(주간) · 좀비 리소스 정리 리포트(일간)
+require('./mailQueue').start();        // 메일 재시도 큐(실패분 백오프 재발송)
 const server = app.listen(config.port, () => {
   console.log(`북적북적 API 서버 실행 중 → http://localhost:${config.port}  (env: ${config.env})`);
   console.log(`파일 저장 경로: ${config.storageRoot}`);

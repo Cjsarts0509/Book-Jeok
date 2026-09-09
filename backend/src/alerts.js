@@ -40,10 +40,13 @@ async function deliver(level, title, body) {
   try {
     for (const id of await adminIds()) await notify.push({ userId: id, type: 'system', title: `${icon} ${title}`, body });
   } catch (e) { console.warn('[alert] 인앱 알림 실패:', e.message); }
-  // 메일은 심각한 것만(경고 폭주로 메일함이 잠기지 않도록)
+  // 메일은 심각한 것만(경고 폭주로 메일함이 잠기지 않도록).
+  // 발송은 큐를 거친다 — 경보 메일이야말로 "실패했는데 아무도 모른다"가 최악이다.
   if (level === 'danger' && mailer.enabled() && mailer.recipients().length) {
     try {
-      await mailer.send({
+      // 순환 참조 방지를 위해 여기서 늦게 부른다(mailQueue → alerts → mailQueue)
+      await require('./mailQueue').sendOrQueue({
+        kind: 'alert',
         subject: `[북적북적] ${icon} ${title}`,
         text: `${title}\n\n${body}\n\n발생: ${new Date().toLocaleString('ko-KR')}`,
         html: `<h3>${icon} ${escapeHtml(title)}</h3><p>${escapeHtml(body).replace(/\n/g, '<br>')}</p><p style="color:#868E96;font-size:12px">발생: ${new Date().toLocaleString('ko-KR')}</p>`,
