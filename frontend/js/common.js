@@ -207,6 +207,29 @@ const UI = (() => {
     });
   }
 
+  // 한 줄 입력을 받는 확인창. 취소하면 null, 확인하면 입력값(빈 문자열일 수 있음).
+  function prompt({ title = '입력', message = '', label = '', value = '', placeholder = '', confirmText = '확인' }) {
+    return new Promise((resolve) => {
+      const m = modal(
+        `<h3>${escapeHtml(title)}</h3>
+         ${message ? `<p style="color:var(--text-muted);line-height:1.6;white-space:pre-line;font-size:13px">${escapeHtml(message)}</p>` : ''}
+         <div class="field">${label ? `<label>${escapeHtml(label)}</label>` : ''}
+           <input class="input" data-in value="${escapeHtml(value)}" placeholder="${escapeHtml(placeholder)}"></div>
+         <div class="modal-actions">
+           <button class="btn btn-ghost" data-c>취소</button>
+           <button class="btn btn-primary" data-ok>${escapeHtml(confirmText)}</button>
+         </div>`,
+        { onClose: () => resolve(null) }
+      );
+      const input = m.q('[data-in]');
+      const done = () => { const v = input.value; resolve(v); m.close(); };
+      m.q('[data-c]').addEventListener('click', m.close);
+      m.q('[data-ok]').addEventListener('click', done);
+      input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); done(); } });
+      setTimeout(() => input.focus(), 30);
+    });
+  }
+
   // ── 폴더 계층 트리맵(SpaceSniffer식) ──────────────────────────
   // container: 렌더 대상 요소, folders: [{folder, used, files}], opts: {height, rootLabel}
   // 폴더를 한 단계씩 드릴다운(📁 하위 있음 / 📂 없음 / 📄 이 폴더 파일) + 브레드크럼.
@@ -292,5 +315,5 @@ const UI = (() => {
     return { redraw: draw };
   }
 
-  return { toast, busy, bytes, date, fileIcon, extIcon, EXT_CATALOG, escapeHtml, sanitizeHtml, isRecent, modal, confirm, folderTreemap };
+  return { toast, busy, bytes, date, fileIcon, extIcon, EXT_CATALOG, escapeHtml, sanitizeHtml, isRecent, modal, confirm, prompt, folderTreemap };
 })();

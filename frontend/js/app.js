@@ -485,6 +485,7 @@ const App = (() => {
           <button class="btn btn-primary btn-sm" id="upload-btn" title="허용: ${state.allowedExt.join(' · ')}">⬆️ <span class="label">업로드</span></button>
           <button class="btn btn-secondary btn-sm" id="smart-btn" title="파일명(지점·날짜)으로 폴더를 추천해 업로드">🧭 <span class="label">추천</span></button>
           <button class="btn btn-secondary btn-sm" id="new-folder">📂 <span class="label">새 폴더</span></button>
+          <button class="btn btn-secondary btn-sm" id="tpl-btn" title="폴더 템플릿 — 자주 쓰는 구조를 한 번에 만들기">📐 <span class="label">템플릿</span></button>
           <button class="btn btn-secondary btn-sm" id="refresh-btn" title="목록 새로고침">🔄 <span class="label">새로고침</span></button>
           <input type="file" id="file-input" multiple hidden accept="${state.allowedExt.map((e) => '.' + e).join(',')}">
           <input type="file" id="cam-input" accept="image/*" capture="environment" multiple hidden>
@@ -678,7 +679,7 @@ const App = (() => {
         <div class="mcard-head">
           <input type="checkbox" class="rowcheck" data-sel-file="${f.id}" data-name="${esc(f.name)}" ${isSel(key) ? 'checked' : ''}>
           <div class="mcard-main">
-            <div class="mcard-name"><span class="ic">${UI.fileIcon(f.name)}</span> ${esc(f.name)}${updateBadge(f, false)}</div>
+            <div class="mcard-name"><span class="ic">${UI.fileIcon(f.name)}</span> ${esc(f.name)}${lockBadge(f)}${updateBadge(f, false)}</div>
             <div class="mcard-sub">${UI.bytes(f.size)} · ${UI.date(f.createdAt)}</div>
             ${state.search.on ? `<div class="mcard-sub mcard-path" data-goto="${esc(f.folder || '/')}">📁 ${esc(prettyPath(f.folder))}</div>` : ''}
             ${tagChips(f.tags)}
@@ -736,7 +737,7 @@ const App = (() => {
         </div>
         ${favBtn(false, f.id, f.fav)}
         <div class="file-ico${isImage(f.name) ? ' thumb' : ''}"${isImage(f.name) ? ` data-thumb="${f.id}"` : ''}>${isImage(f.name) ? '🖼️' : UI.fileIcon(f.name)}</div>
-        <div class="file-name">${UI.escapeHtml(f.name)}${updateBadge(f, false)}</div>
+        <div class="file-name">${UI.escapeHtml(f.name)}${lockBadge(f)}${updateBadge(f, false)}</div>
         <div class="file-meta num">${UI.bytes(f.size)} · ${UI.date(f.createdAt)}</div>
         ${tagChips(f.tags)}
         ${f.note ? `<div class="file-note" title="${UI.escapeHtml(f.note)}">📝 ${UI.escapeHtml(f.note)}</div>` : ''}
@@ -869,7 +870,7 @@ const App = (() => {
       const key = `file:${f.id}`;
       return `<tr data-file="${f.id}" data-row-key="${UI.escapeHtml(key)}" draggable="true" class="${isSel(key) ? 'sel' : ''}">
         <td><input type="checkbox" class="rowcheck" data-sel-file="${f.id}" data-name="${UI.escapeHtml(f.name)}" ${isSel(key) ? 'checked' : ''}></td>
-        <td class="name-cell">${favBtn(false, f.id, f.fav)}<span class="ic">${UI.fileIcon(f.name)}</span> ${UI.escapeHtml(f.name)}${updateBadge(f, false)}${tagChips(f.tags)}</td>
+        <td class="name-cell">${favBtn(false, f.id, f.fav)}<span class="ic">${UI.fileIcon(f.name)}</span> ${UI.escapeHtml(f.name)}${lockBadge(f)}${updateBadge(f, false)}${tagChips(f.tags)}</td>
         <td class="path-cell" data-goto="${UI.escapeHtml(f.folder || '/')}" title="${UI.escapeHtml(f.folder || '/')}">${UI.escapeHtml(prettyPath(f.folder))}</td>
         <td class="num muted size-cell" data-label="크기">${UI.bytes(f.size)}${sizeBar(f.size)}</td>
         <td class="num muted" data-label="등록">${sdt(f.createdAt)}</td>
@@ -898,6 +899,7 @@ const App = (() => {
     cam.addEventListener('change', () => { if (cam.files.length) cameraReviewModal([...cam.files]); cam.value = ''; });
     document.getElementById('smart-btn')?.addEventListener('click', pickForSmartUpload);
     document.getElementById('new-folder').addEventListener('click', newFolderModal);
+    document.getElementById('tpl-btn')?.addEventListener('click', templateModal);
     document.getElementById('refresh-btn')?.addEventListener('click', async (e) => {
       const b = e.currentTarget; b.disabled = true; b.classList.add('spinning');
       try { await loadAll(); UI.toast('목록을 새로고침했습니다', 'success'); }
@@ -1166,9 +1168,10 @@ const App = (() => {
     if (folders.some((fo) => targetPath === fo.path || targetPath.startsWith(fo.path + '/'))) return UI.toast('폴더를 자기 자신/하위로 옮길 수 없습니다', 'error');
     (async () => {
       try {
-        if (files.length) await API.bulkMove(files.map((f) => f.id), targetPath);
+        let lockedMoved = 0;
+        if (files.length) { const r = await API.bulkMove(files.map((f) => f.id), targetPath); lockedMoved = r.locked || 0; }
         for (const fo of folders) { const target = (targetPath === '/' ? '' : targetPath) + '/' + fo.name; if (target !== fo.path) await API.renameFolder(fo.path, target, state.ownerId); }
-        UI.toast('이동 완료', 'success'); loadAll();
+        UI.toast(lockedMoved ? `이동 완료 · 잠긴 ${lockedMoved}개는 그대로 뒀습니다 🔒` : '이동 완료', lockedMoved ? 'info' : 'success'); loadAll();
       } catch (err) { UI.toast(err.message, 'error'); }
     })();
   }
@@ -1284,9 +1287,14 @@ const App = (() => {
     const fileIds = files.map((f) => f.id);
     const folderIds = folders.map((fo) => (state.folders.find((x) => x.path === fo.path) || {}).id).filter(Boolean);
     try {
-      if (files.length) await API.bulkDelete(fileIds);
+      let lockedCount = 0, deletedFiles = 0;
+      if (files.length) { const r = await API.bulkDelete(fileIds); lockedCount = r.locked || 0; deletedFiles = r.deleted || 0; }
       for (const fo of folders) await API.deleteFolder(fo.path, state.ownerId);
-      UI.toast(`${items.length}개 삭제됨 (휴지통 이동)`, 'success', undoOpts(fileIds, folderIds)); loadAll();
+      const n = deletedFiles + folders.length;
+      // 잠긴 파일은 건너뛰었다는 것을 분명히 알린다 — 조용히 빠지면 지운 줄 안다(U10)
+      UI.toast(lockedCount ? `${n}개 삭제됨 · 잠긴 ${lockedCount}개는 건너뜀 🔒` : `${n}개 삭제됨 (휴지통 이동)`,
+        lockedCount ? 'info' : 'success', undoOpts(fileIds, folderIds));
+      loadAll();
     } catch (err) { UI.toast(err.message, 'error'); }
   }
 
@@ -1319,7 +1327,8 @@ const App = (() => {
     if (btn) { btn.disabled = true; btn.textContent = '압축 중…'; }
     let bundle;
     try {
-      bundle = await API.bulkZip(ids, folders, state.folder, zipBase, state.ownerId);
+      // 파일이 많으면 몇 분씩 걸린다 — 끝나면 알려준다(U20)
+      bundle = await withCompletionNotice('압축', () => API.bulkZip(ids, folders, state.folder, zipBase, state.ownerId));
     } catch (err) { UI.toast(err.message || '압축 실패', 'error'); return; }
     finally { if (btn) { btn.disabled = false; btn.innerHTML = '⬇️ 다운로드(ZIP)'; } }
     zipActionModal(bundle);
@@ -1430,9 +1439,10 @@ const App = (() => {
           const r = await API.bulkCopy(files.map((f) => f.id), dest);
           m.close(); state.selected.clear(); UI.toast(`${(r && r.copied) || files.length}개 복사 완료`, 'success'); loadAll();
         } else {
-          if (files.length) await API.bulkMove(files.map((f) => f.id), dest);
+          let lockedMoved2 = 0;
+          if (files.length) { const r = await API.bulkMove(files.map((f) => f.id), dest); lockedMoved2 = r.locked || 0; }
           for (const fo of folders) { const target = (dest === '/' ? '' : dest) + '/' + fo.name; if (target !== fo.path) await API.renameFolder(fo.path, target, state.ownerId); }
-          m.close(); UI.toast('이동 완료', 'success'); loadAll();
+          m.close(); UI.toast(lockedMoved2 ? `이동 완료 · 잠긴 ${lockedMoved2}개는 그대로 뒀습니다 🔒` : '이동 완료', lockedMoved2 ? 'info' : 'success'); loadAll();
         }
       } catch (err) { UI.toast(err.message, 'error'); }
     });
@@ -1528,8 +1538,9 @@ const App = (() => {
 
   // 파일들을 하나씩 순차 업로드(각 파일이 전송 패널에 개별 항목·진행바로 표시)
   async function uploadFiles(fileList) {
-    const files = [...fileList];
+    let files = [...fileList];
     if (!files.length) return;
+    files = await prepareForUpload(files);   // U22 · 사진 자동 회전·압축
     let ok = 0, fail = 0;
     for (const f of files) {
       const t = Xfer.add(f.name, 'up');
@@ -1922,30 +1933,66 @@ const App = (() => {
     finally { URL.revokeObjectURL(url); }
   }
   // items: 선택 항목 배열({type,id,name}) 또는 단일 파일. 이미지 파일만 대상.
-  async function barcodeRename(items) {
+  function barcodeRename(items) {
     if (!window.ISBN) return UI.toast('ISBN 인식 모듈을 사용할 수 없습니다', 'error');
     const imgs = items.filter((it) => it.type === 'file' && isImage(it.name));
     if (!imgs.length) return UI.toast('이미지 파일을 선택하세요', 'info');
+    // 장수가 많으면 오래 걸린다 — 다른 탭에 가 있어도 끝난 걸 알 수 있게(U20)
+    return withCompletionNotice(`바코드 제목변경 ${imgs.length}장`, () => barcodeRenameRun(imgs));
+  }
+  async function barcodeRenameRun(imgs) {
     const m = UI.modal(`<h3>📕 바코드로 제목 변경 <span class="muted" style="font-size:13px;font-weight:400">· ${imgs.length}개</span></h3>
       <div id="bc-prog" class="muted" style="padding:8px 0">준비 중…</div>
       <div class="modal-actions"><button class="btn btn-ghost" id="bc-cancel">중단</button></div>`);
     let cancelled = false; m.q('#bc-cancel').addEventListener('click', () => { cancelled = true; m.close(); });
-    let done = 0, renamed = 0; const failed = [];
+    let done = 0, renamed = 0, titled = 0; const failed = []; const noteQueue = [];
     for (const it of imgs) {
       if (cancelled) break;
       m.q('#bc-prog').textContent = `${done + 1}/${imgs.length} 스캔 중… (${it.name})`;
       try {
         const r = await scanStoredImage(it.id);
-        if (r && r.isbn) { const ext = (it.name.split('.').pop() || '').toLowerCase(); await API.renameFile(it.id, r.isbn + (ext ? '.' + ext : '')); renamed++; }
-        else failed.push(it.name);
+        if (r && r.isbn) {
+          const ext = (it.name.split('.').pop() || '').toLowerCase();
+          // U12 · 도서정보가 설정돼 있으면 ISBN 숫자 대신 '제목(ISBN)' 으로 붙인다.
+          // 조회가 안 되면 지금까지처럼 ISBN 만 쓴다 — 이름변경 자체가 실패하면 안 되므로.
+          const book = bookLookupOn === false ? null : await lookupBook(r.isbn);
+          const base = book && book.title ? `${sanitizeName(book.title)} (${r.isbn})` : r.isbn;
+          await API.renameFile(it.id, base + (ext ? '.' + ext : ''));
+          if (book && book.title) { titled++; if (book.author || book.publisher) noteQueue.push({ id: it.id, note: [book.author, book.publisher, book.pubDate].filter(Boolean).join(' · ') }); }
+          renamed++;
+        } else failed.push(it.name);
       } catch (_) { failed.push(it.name); }
       done++;
     }
+    // 저자·출판사는 비고에 남겨 둔다(파일명이 길어지지 않게)
+    for (const q of noteQueue) { try { await API.setNote(q.id, q.note); } catch (_) { /* 비고 실패는 넘어간다 */ } }
     if (!cancelled) m.close();
     if (renamed) { state.selected.clear(); await loadFiles(); }
     if (!cancelled) {
-      const msg = `📕 ${renamed}개 제목 변경${failed.length ? ` · ${failed.length}개 실패(ISBN 못 찾음)` : ''}`;
+      const msg = `📕 ${renamed}개 제목 변경${titled ? ` · ${titled}개는 도서명까지` : ''}${failed.length ? ` · ${failed.length}개 실패(ISBN 못 찾음)` : ''}`;
       UI.toast(msg, failed.length && !renamed ? 'error' : 'success');
+    }
+  }
+
+  // ── U12 · ISBN → 도서정보 ──────────────────
+  // 서버가 대신 조회한다. 설정이 안 돼 있으면 한 번만 알려주고 그 뒤로는 조용히 건너뛴다.
+  let bookLookupOn = null;            // null=모름 · false=미설정 · true=사용 가능
+  const bookCache = new Map();
+  const sanitizeName = (s) => String(s).replace(/[/\\:*?"<>|]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80);
+  async function lookupBook(isbn) {
+    if (bookCache.has(isbn)) return bookCache.get(isbn);
+    try {
+      const r = await API.bookInfo(isbn);
+      bookLookupOn = true;
+      bookCache.set(isbn, r.book || null);
+      return r.book || null;
+    } catch (e) {
+      if (e.status === 501 || (e.data && e.data.notConfigured)) {
+        if (bookLookupOn === null) UI.toast('도서정보 자동 채우기가 아직 설정되지 않아 ISBN 만 사용합니다', 'info');
+        bookLookupOn = false;
+      }
+      bookCache.set(isbn, null);
+      return null;
     }
   }
 
@@ -2418,12 +2465,201 @@ const App = (() => {
     ctxEl = el;
     setTimeout(() => { document.addEventListener('click', closeCtx); document.addEventListener('keydown', ctxKey); window.addEventListener('scroll', closeCtx, true); }, 0);
   }
+  // 잠긴 파일에 자물쇠를 붙인다. 사유가 있으면 툴팁으로.
+  const lockBadge = (f) => (f && f.lockedBy ? `<span class="lock-badge" title="${UI.escapeHtml(f.lockNote || '잠긴 파일 — 지우기·이름변경·이동이 막혀 있습니다')}">🔒</span>` : '');
+
+  // ── U10 · 파일 잠금 ───────────────────────
+  const lockedFile = (id) => { const f = state.files.find((x) => String(x.id) === String(id)); return f && f.lockedBy ? f : null; };
+  async function toggleLock(id) {
+    const f = state.files.find((x) => String(x.id) === String(id));
+    if (!f) return;
+    try {
+      if (f.lockedBy) { await API.unlockFile(id); UI.toast('잠금을 풀었습니다', 'success'); }
+      else {
+        const note = await UI.prompt({ title: '🔒 파일 잠그기', label: '왜 잠그는지(선택)', placeholder: '예: 결산 확정본 — 수정 금지',
+          message: '잠긴 파일은 누구도 지우거나 이름을 바꾸거나 옮길 수 없습니다.\n(읽기·다운로드는 그대로 됩니다)' });
+        if (note === null) return;
+        await API.lockFile(id, note);
+        UI.toast('잠갔습니다 🔒', 'success');
+      }
+      loadFiles(true);
+    } catch (e) { UI.toast(e.message, 'error'); }
+  }
+
+  // ── U6 · 다운로드 이력 ────────────────────
+  const HIST_LABEL = { download: '⬇️ 다운로드', bulk_zip: '📦 압축 다운로드', create_share: '🔗 공유 생성',
+    lock_file: '🔒 잠금', unlock_file: '🔓 잠금 해제', rename: '✏️ 이름 변경', upload: '⬆️ 업로드' };
+  async function historyModal(id) {
+    const m = UI.modal(`<h3>📜 이 파일의 이력</h3><div id="hist-body"><p class="muted">불러오는 중…</p></div>
+      <div class="modal-actions"><button class="btn btn-primary" id="hc">닫기</button></div>`);
+    m.el.querySelector('.modal').classList.add('modal-wide');
+    m.q('#hc').addEventListener('click', m.close);
+    try {
+      const d = await API.fileHistory(id);
+      const esc = UI.escapeHtml;
+      const rows = d.items.map((it) => `<tr>
+        <td>${esc(HIST_LABEL[it.action] || it.action)}</td>
+        <td>${esc(it.by)}</td>
+        <td class="num muted">${new Date(it.at).toLocaleString('ko-KR')}</td>
+        <td class="muted" style="font-size:11px">${esc(it.ip || '')}</td></tr>`).join('');
+      m.q('#hist-body').innerHTML = `
+        <p class="muted" style="font-size:12px;margin:-4px 0 10px">${esc(d.file.folder)} · ${esc(d.file.name)}</p>
+        ${d.shares.links ? `<div class="hist-share">🔗 공유 링크 ${d.shares.links}개 · 이 링크로 ${d.shares.downloads}회 받아 갔습니다. <span class="muted">${esc(d.note)}</span></div>` : ''}
+        ${rows ? `<div class="table-wrap"><table class="hl-table"><thead><tr><th>행위</th><th>사람</th><th class="num">시각</th><th>IP</th></tr></thead><tbody>${rows}</tbody></table></div>`
+          : '<p class="muted">아직 기록이 없습니다.</p>'}`;
+    } catch (e) { m.q('#hist-body').innerHTML = `<p class="muted" style="color:var(--danger)">${UI.escapeHtml(e.message)}</p>`; }
+  }
+
+  // ── U9 · 폴더 템플릿 ──────────────────────
+  async function templateModal() {
+    const m = UI.modal(`<h3>📐 폴더 템플릿</h3>
+      <p class="muted" style="font-size:12px;margin:-6px 0 12px">자주 쓰는 폴더 구조를 저장해 두고, 원하는 위치에 한 번에 만듭니다.</p>
+      <div id="tpl-list"><p class="muted">불러오는 중…</p></div>
+      <div class="tpl-new">
+        <div class="dash-h" style="margin:14px 0 8px">새 템플릿 만들기</div>
+        <div class="field"><label>이름</label><input class="input" id="tpl-name" placeholder="예: 영업점 도면 세트"></div>
+        <div class="field"><label>폴더 구조 <span class="muted" style="font-weight:400">— 한 줄에 하나. <code>도면/1층</code> 처럼 하위 폴더도 가능</span></label>
+          <textarea class="input" id="tpl-paths" rows="5" placeholder="도면&#10;도면/1층&#10;도면/지하&#10;사진"></textarea></div>
+        ${state.user.role === 'admin' ? '<label class="tpl-shared"><input type="checkbox" id="tpl-shared"> 모든 계정이 쓰는 공용 템플릿으로 저장</label>' : ''}
+        <button class="btn btn-secondary btn-sm" id="tpl-save" style="margin-top:8px">저장</button>
+      </div>
+      <div class="modal-actions"><button class="btn btn-primary" id="tc">닫기</button></div>`);
+    m.el.querySelector('.modal').classList.add('modal-wide');
+    m.q('#tc').addEventListener('click', m.close);
+
+    async function refresh() {
+      try {
+        const { templates } = await API.folderTemplates(state.ownerId);
+        const esc = UI.escapeHtml;
+        m.q('#tpl-list').innerHTML = templates.length ? templates.map((t) => `
+          <div class="tpl-row">
+            <div class="tpl-main"><b>${esc(t.name)}</b>${t.shared ? '<span class="tpl-badge">공용</span>' : ''}
+              <div class="muted" style="font-size:11px">${esc(t.paths.slice(0, 6).join(' · '))}${t.paths.length > 6 ? ` 외 ${t.paths.length - 6}개` : ''}</div></div>
+            <button class="btn btn-sm btn-primary" data-apply="${t.id}">여기에 만들기</button>
+            <button class="btn btn-sm btn-ghost" data-tdel="${t.id}" title="템플릿 삭제">🗑️</button>
+          </div>`).join('') : '<p class="muted">아직 저장된 템플릿이 없습니다.</p>';
+        m.el.querySelectorAll('[data-apply]').forEach((el) => el.addEventListener('click', async () => {
+          el.disabled = true;
+          try {
+            const r = await API.applyTemplate(el.dataset.apply, state.folder, state.ownerId);
+            UI.toast(`${r.created.length}개 폴더를 만들었습니다 (${prettyPath(state.folder)})`, 'success');
+            m.close(); loadAll();
+          } catch (e) { UI.toast(e.message, 'error'); el.disabled = false; }
+        }));
+        m.el.querySelectorAll('[data-tdel]').forEach((el) => el.addEventListener('click', async () => {
+          if (!(await UI.confirm({ title: '템플릿 삭제', danger: true, message: '이 템플릿을 지울까요? (이미 만든 폴더는 그대로 남습니다)' }))) return;
+          try { await API.deleteFolderTemplate(el.dataset.tdel, state.ownerId); refresh(); } catch (e) { UI.toast(e.message, 'error'); }
+        }));
+      } catch (e) { m.q('#tpl-list').innerHTML = `<p class="muted" style="color:var(--danger)">${UI.escapeHtml(e.message)}</p>`; }
+    }
+    m.q('#tpl-save').addEventListener('click', async () => {
+      const name = m.q('#tpl-name').value.trim();
+      const paths = m.q('#tpl-paths').value.split('\n').map((x) => x.trim()).filter(Boolean);
+      if (!name) return UI.toast('이름을 입력하세요', 'error');
+      if (!paths.length) return UI.toast('폴더를 한 줄에 하나씩 입력하세요', 'error');
+      try {
+        await API.saveFolderTemplate({ name, paths, shared: !!m.q('#tpl-shared')?.checked }, state.ownerId);
+        m.q('#tpl-name').value = ''; m.q('#tpl-paths').value = '';
+        UI.toast('템플릿을 저장했습니다', 'success'); refresh();
+      } catch (e) { UI.toast(e.message, 'error'); }
+    });
+    refresh();
+  }
+
+  // ── U20 · 긴 작업 백그라운드 알림 ──────────
+  // 압축·일괄 처리는 몇 분씩 걸린다. 사람들은 그동안 다른 탭으로 가 있고,
+  // 돌아왔을 때 "끝났는지" 알 방법이 없다. 끝나면 알려준다 —
+  // 화면을 보고 있으면 토스트로, 다른 탭에 가 있었으면 브라우저 알림으로.
+  let notifPermAsked = false;
+  async function ensureDesktopNotice() {
+    if (!('Notification' in window)) return false;
+    if (Notification.permission === 'granted') return true;
+    if (Notification.permission === 'denied') return false;
+    if (notifPermAsked) return false;
+    notifPermAsked = true;
+    try { return (await Notification.requestPermission()) === 'granted'; } catch (_) { return false; }
+  }
+  // 오래 걸릴 수 있는 작업을 감싸면, 끝났을 때 상황에 맞게 알려준다.
+  //   label: 작업 이름 · minMs: 이보다 짧게 끝나면 굳이 알리지 않는다
+  async function withCompletionNotice(label, fn, { minMs = 4000 } = {}) {
+    const started = Date.now();
+    let wentAway = false;
+    const onHide = () => { if (document.visibilityState === 'hidden') wentAway = true; };
+    document.addEventListener('visibilitychange', onHide);
+    // 오래 걸릴 낌새가 보이면 미리 알림 권한을 물어 둔다(끝난 뒤에 묻는 건 늦다)
+    const askTimer = setTimeout(() => { ensureDesktopNotice(); }, 3000);
+    try {
+      const out = await fn();
+      const took = Date.now() - started;
+      if (took >= minMs) {
+        const msg = `${label} 완료 · ${Math.round(took / 1000)}초 걸렸습니다`;
+        if (wentAway && document.visibilityState === 'hidden' && await ensureDesktopNotice()) {
+          try {
+            const n = new Notification('북적북적', { body: msg, tag: 'bj-job', icon: 'assets/logo.svg' });
+            n.onclick = () => { window.focus(); n.close(); };
+          } catch (_) { UI.toast(msg, 'success'); }
+        } else UI.toast(msg, 'success');
+      }
+      return out;
+    } finally {
+      clearTimeout(askTimer);
+      document.removeEventListener('visibilitychange', onHide);
+    }
+  }
+
+  // ── U22 · 이미지 자동 회전·압축 ────────────
+  // 휴대폰 사진은 대개 4000px에 5MB가 넘고, EXIF 방향값 때문에 옆으로 누워 보이기도 한다.
+  // 올리기 전에 브라우저에서 바로 세우고 줄인다 — 전송도 빠르고 용량도 아낀다.
+  const IMG_MAX_SIDE = 2400;          // 긴 변 상한(문서·도면을 읽기엔 충분)
+  const IMG_MIN_BYTES = 900 * 1024;   // 이보다 작으면 건드리지 않는다
+  const IMG_QUALITY = 0.82;
+  const shrinkable = (f) => /^image\/(jpeg|png|webp)$/i.test(f.type || '') && f.size >= IMG_MIN_BYTES;
+
+  async function shrinkImage(file) {
+    try {
+      // createImageBitmap 이 EXIF 방향을 반영해 준다(imageOrientation:'from-image').
+      // 지원하지 않는 브라우저에서는 원본을 그대로 쓴다 — 실패해도 업로드는 되어야 한다.
+      let bmp;
+      try { bmp = await createImageBitmap(file, { imageOrientation: 'from-image' }); }
+      catch (_) { bmp = await createImageBitmap(file); }
+      const long = Math.max(bmp.width, bmp.height);
+      const scale = long > IMG_MAX_SIDE ? IMG_MAX_SIDE / long : 1;
+      const w = Math.round(bmp.width * scale), h = Math.round(bmp.height * scale);
+      const cv = document.createElement('canvas');
+      cv.width = w; cv.height = h;
+      cv.getContext('2d').drawImage(bmp, 0, 0, w, h);
+      bmp.close && bmp.close();
+      const blob = await new Promise((res) => cv.toBlob(res, 'image/jpeg', IMG_QUALITY));
+      if (!blob || blob.size >= file.size) return null;      // 오히려 커지면 원본이 낫다
+      const name = file.name.replace(/\.(png|webp|jpeg)$/i, '.jpg');
+      return { file: new File([blob], name, { type: 'image/jpeg', lastModified: file.lastModified }), before: file.size, after: blob.size };
+    } catch (_) { return null; }     // 무슨 일이 있어도 원본으로 넘어간다
+  }
+
+  // 업로드 직전에 이미지들을 손봐 준다. 바뀐 게 있으면 얼마나 줄었는지 알려준다.
+  async function prepareForUpload(files) {
+    const list = [...files];
+    const targets = list.filter(shrinkable);
+    if (!targets.length) return list;
+    let saved = 0, changed = 0;
+    const out = [];
+    for (const f of list) {
+      if (!shrinkable(f)) { out.push(f); continue; }
+      const r = await shrinkImage(f);
+      if (r) { out.push(r.file); saved += r.before - r.after; changed++; }
+      else out.push(f);
+    }
+    if (changed) UI.toast(`사진 ${changed}장을 자동으로 바로 세우고 줄였습니다 · ${UI.bytes(saved)} 절약`, 'info');
+    return out;
+  }
+
   function openContextFor(e, isFolder, item) {
     const items = isFolder ? [
       { icon: '📂', label: '열기', onClick: () => openFolder(item.path) },
       { icon: '🔗', label: '폴더 공유', onClick: () => folderShareModal(item.path) },
       { icon: '📥', label: '업로드 요청', onClick: () => uploadRequestModal(item.path) },
       { icon: '⚙️', label: '폴더 설정', onClick: () => folderSettingsModal(item.path) },
+      { icon: '📐', label: '템플릿으로 하위 폴더 만들기', onClick: () => { openFolder(item.path); setTimeout(templateModal, 250); } },
       { icon: '📝', label: '비고', onClick: () => folderNoteModal(item.path) },
       { icon: '✏️', label: '이름 변경', onClick: () => inlineRename('folder', item.path) },
       { sep: true },
@@ -2436,6 +2672,8 @@ const App = (() => {
       { icon: '🏷️', label: '태그', onClick: () => tagPickerModal(item.id) },
       { icon: '📝', label: '비고', onClick: () => noteModal(item.id) },
       { icon: '✏️', label: '이름 변경', onClick: () => inlineRename('file', item.id) },
+      { icon: '📜', label: '이력 보기', onClick: () => historyModal(item.id) },
+      { icon: lockedFile(item.id) ? '🔓' : '🔒', label: lockedFile(item.id) ? '잠금 해제' : '파일 잠금', onClick: () => toggleLock(item.id) },
       ...((window.ISBN && isImage(item.name)) ? [{ icon: '📕', label: '바코드로 제목변경', onClick: () => barcodeRename([{ type: 'file', id: String(item.id), name: item.name }]) }] : []),
       { sep: true },
       { icon: (state.files.find((x) => String(x.id) === String(item.id)) || {}).fav ? '⭐' : '☆', label: '즐겨찾기', onClick: () => toggleFavFile(item.id) },

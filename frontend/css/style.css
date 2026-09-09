@@ -1120,3 +1120,13 @@ th { background: var(--bg); font-weight: 700; color: var(--text-muted); font-siz
 .ck-bar { display: block; height: 8px; background: var(--bg); border-radius: 999px; overflow: hidden; }
 .ck-bar > span { display: block; height: 100%; background: linear-gradient(90deg, var(--secondary), var(--accent)); border-radius: 999px; }
 .ck-chip { display: inline-block; color: #fff; font-size: 11px; font-weight: 700; border-radius: 999px; padding: 2px 9px; margin-right: 5px; }
+
+/* ── 묶음6 · 파일 잠금 · 이력 · 템플릿 ─────────────────── */
+.lock-badge { margin-left: 5px; font-size: 12px; cursor: help; }
+.hist-share { padding: 8px 12px; margin-bottom: 10px; background: #E7F5FB; border: 1px solid #BFE3F1; border-radius: var(--radius-sm); font-size: 12px; }
+.tpl-row { display: flex; align-items: center; gap: 10px; padding: 9px 4px; border-bottom: 1px solid var(--border); }
+.tpl-main { flex: 1; min-width: 0; }
+.tpl-main b { font-size: 13px; }
+.tpl-badge { display: inline-block; margin-left: 6px; padding: 1px 7px; font-size: 10px; font-weight: 700; color: var(--secondary); background: #E7F5FB; border-radius: 999px; }
+.tpl-new textarea.input { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; line-height: 1.6; resize: vertical; }
+.tpl-shared { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-muted); margin-top: 4px; }
