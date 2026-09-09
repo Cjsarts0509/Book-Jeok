@@ -26,6 +26,7 @@ const Admin = (() => {
           <nav class="appbar-nav">
             ${item('dashboard', '🏠', '대시보드')}
             ${item('health', '📈', '상태')}
+            ${item('checkups', '🧪', '점검')}
             ${item('users', '👥', '계정')}
             ${item('branches', '🏢', '영업점')}
             ${item('notices', '📢', '공지')}
@@ -57,6 +58,7 @@ const Admin = (() => {
     renderShell();
     if (tab === 'dashboard') loadDashboard();
     else if (tab === 'health') loadHealth();
+    else if (tab === 'checkups') loadCheckups();
     else if (tab === 'users') loadUsers();
     else if (tab === 'branches') loadBranches();
     else if (tab === 'notices') loadNotices();
@@ -69,7 +71,7 @@ const Admin = (() => {
     else if (tab === 'report') loadReport();
     else if (tab === 'backup') loadBackup();
     else if (tab === 'manual') loadManual();
-    const titles = { dashboard: '대시보드', health: '시스템 상태', users: '계정 관리', branches: '영업점 관리', notices: '공지사항', ext: '허용 확장자', shares: '공유 통합 관리', trash: '휴지통', capacity: '용량 리포트', report: '주간 리포트', db: 'DB 상태', backup: '백업 현황', audit: '감사 로그', manual: '사용자 매뉴얼' };
+    const titles = { dashboard: '대시보드', health: '시스템 상태', checkups: '정기 점검', users: '계정 관리', branches: '영업점 관리', notices: '공지사항', ext: '허용 확장자', shares: '공유 통합 관리', trash: '휴지통', capacity: '용량 리포트', report: '주간 리포트', db: 'DB 상태', backup: '백업 현황', audit: '감사 로그', manual: '사용자 매뉴얼' };
     document.getElementById('page-title').textContent = titles[tab];
   }
 
@@ -266,6 +268,165 @@ const Admin = (() => {
         <p class="muted" style="font-size:11px;margin-top:8px">${esc(d.note)} · 검사 시각 ${new Date(d.at).toLocaleString('ko-KR')}</p>`;
     } catch (e) { box.innerHTML = `<p class="muted" style="color:var(--danger)">${UI.escapeHtml(e.message)}</p>`; }
     finally { if (btn) { btn.disabled = false; btn.textContent = '다시 검사'; } }
+  }
+
+  // ── 정기 점검 (S7 S8 S9 S24 S26 S29) ───
+  // 앱 안에서 도는 점검과 서버 스크립트가 남긴 결과를 한 화면에 모은다.
+  const CK_META = {
+    integrity:       { icon: '🧩', title: '파일 실물 ↔ DB 정합성', how: 'app',  every: '매주',  desc: '목록엔 보이는데 실제 파일이 없는 것, 크기가 기록과 다른 것, 주인 없는 파일을 찾습니다.' },
+    cleanup:         { icon: '🧹', title: '좀비 리소스 정리 리포트', how: 'app',  every: '매일',  desc: '지금 지우면 얼마나 회수되는지 — 휴지통·캐시·중단된 업로드·만료 번들.' },
+    'backup-verify': { icon: '🔐', title: '백업 무결성 검증',        how: 'host', every: '매일',  desc: '백업이 끝까지 풀리는지, 덤프가 잘리지 않았는지, 해시가 그대로인지 확인합니다.',
+      cmd: './scripts/bookjeok-verify-backups.sh' },
+    'restore-drill': { icon: '🚑', title: '백업 복원 리허설',        how: 'host', every: '매주',  desc: '최신 백업을 임시 DB에 실제로 복원해 봅니다. 운영 DB는 건드리지 않습니다.',
+      cmd: './scripts/bookjeok-restore-drill.sh' },
+    deps:            { icon: '📦', title: '의존성 취약점 점검',      how: 'host', every: '매주',  desc: '쓰고 있는 패키지에 새로 공개된 취약점이 있는지 확인합니다.',
+      cmd: './scripts/bookjeok-audit-deps.sh' },
+  };
+  const ckAgo = (iso) => {
+    if (!iso) return '아직 실행된 적 없음';
+    const s = Math.floor((Date.now() - new Date(iso)) / 1000);
+    const t = s < 3600 ? `${Math.max(1, Math.floor(s / 60))}분 전` : s < 86400 ? `${Math.floor(s / 3600)}시간 전` : `${Math.floor(s / 86400)}일 전`;
+    return `${t} · ${new Date(iso).toLocaleString('ko-KR')}`;
+  };
+  // 마지막 실행이 예정 주기의 3배를 넘겼으면 '점검이 멈춘 것' — 결과보다 이게 더 큰 문제다
+  const ckStale = (iso, every) => {
+    if (!iso) return true;
+    const limit = (every === '매일' ? 1 : 7) * 3 * 86400000;
+    return Date.now() - new Date(iso) > limit;
+  };
+
+  async function loadCheckups() {
+    const view = document.getElementById('view');
+    view.innerHTML = '<div class="empty"><div class="big">⏳</div>불러오는 중…</div>';
+    let d;
+    try { d = (await API.checkups()).checkups; }
+    catch (err) { view.innerHTML = `<div class="empty">⚠️ ${UI.escapeHtml(err.message)}</div>`; return; }
+    view.innerHTML = Object.keys(CK_META).map((k) => ckCard(k, d[k])).join('')
+      + ckLoadTestCard();
+    view.querySelectorAll('[data-ckrun]').forEach((el) => el.addEventListener('click', () => runCheckup(el.dataset.ckrun, el.dataset.deep === '1')));
+    view.querySelectorAll('[data-copy]').forEach((el) => el.addEventListener('click', () => {
+      navigator.clipboard.writeText(el.dataset.copy).then(() => UI.toast('명령을 복사했습니다', 'success')).catch(() => UI.toast('복사하지 못했습니다', 'error'));
+    }));
+  }
+
+  function ckCard(key, r) {
+    const m = CK_META[key], esc = UI.escapeHtml;
+    const stale = ckStale(r && r.at, m.every);
+    const level = !r ? 'info' : (r.ok === false ? 'danger' : stale ? 'warn' : 'ok');
+    const L = LV[level] || LV.info;
+    const runBtn = m.how === 'app'
+      ? `<button class="btn btn-sm btn-secondary" data-ckrun="${key}">지금 검사</button>` +
+        (key === 'integrity' ? `<button class="btn btn-sm btn-ghost" data-ckrun="${key}" data-deep="1" title="크기까지 대조합니다 — 파일이 많으면 오래 걸립니다">정밀 검사</button>` : '')
+      : `<button class="btn btn-sm btn-ghost" data-copy="${esc(m.cmd)}" title="서버에서 실행할 명령을 복사합니다">명령 복사</button>`;
+    return `<div class="dash-card ck-card" style="border-left:4px solid ${L.c}">
+      <div class="dash-h">${m.icon} ${esc(m.title)}
+        <span class="ck-badge">${m.how === 'app' ? '앱' : '서버 스크립트'} · ${m.every}</span>
+        <span style="flex:1"></span>${runBtn}</div>
+      <p class="muted" style="font-size:12px;margin:0 0 6px">${esc(m.desc)}</p>
+      <div class="ck-when ${stale ? 'stale' : ''}">${L.i} 마지막 실행: ${esc(ckAgo(r && r.at))}${stale && r ? ' — 예정보다 오래 안 돌았습니다' : ''}</div>
+      <div class="ck-body" id="ck-${key}">${r ? ckBody(key, r) : ckNeverHTML(m)}</div>
+    </div>`;
+  }
+  function ckNeverHTML(m) {
+    return m.how === 'app'
+      ? '<p class="muted">서버가 뜬 지 얼마 안 됐거나 아직 예정 시각이 오지 않았습니다. 위 버튼으로 바로 돌려볼 수 있습니다.</p>'
+      : `<p class="muted">서버에서 아래 명령을 한 번 돌리면 여기에 결과가 뜹니다. 크론에 넣어두면 자동으로 갱신됩니다.</p>
+         <pre class="ck-cmd">${UI.escapeHtml(m.cmd)}</pre>`;
+  }
+
+  function ckBody(key, r) {
+    const esc = UI.escapeHtml, B = UI.bytes;
+    if (r.error) return `<p class="muted" style="color:var(--danger)">${esc(r.error)}</p>`;
+
+    if (key === 'integrity') {
+      const rows = [];
+      if (r.missingCount) rows.push(`<tr><td>실물이 없는 파일</td><td class="num" style="color:var(--danger);font-weight:700">${r.missingCount}건</td><td class="num">${B(r.missingBytes)}</td></tr>`);
+      if (r.mismatchCount) rows.push(`<tr><td>크기가 기록과 다른 파일</td><td class="num" style="color:var(--danger);font-weight:700">${r.mismatchCount}건</td><td class="num">—</td></tr>`);
+      if (r.orphanCount) rows.push(`<tr><td>DB에 없는 실물 파일</td><td class="num">${r.orphanCount}건</td><td class="num">${B(r.orphanBytes)}</td></tr>`);
+      const sample = (r.missing || []).slice(0, 10).map((x) => `<li>${esc(x.name)} <span class="muted">${esc(x.folder)} · ${B(x.size)}${x.trashed ? ' · 휴지통' : ''}</span></li>`).join('');
+      return `<div class="ck-sum">${r.checked.toLocaleString()}건 검사 · ${(r.elapsedMs / 1000).toFixed(1)}초 소요${r.deep ? ' · 정밀(크기 대조)' : ''}</div>`
+        + (rows.length
+          ? `<table class="hl-table"><tbody>${rows.join('')}</tbody></table>`
+            + (sample ? `<div class="ck-sub">실물이 없는 파일 (앞 10개)</div><ul class="ck-list">${sample}</ul>` : '')
+            + `<p class="muted" style="font-size:11px">${esc(r.note)}</p>`
+          : '<p class="ck-good">✅ 모든 파일이 기록과 일치합니다.</p>');
+    }
+
+    if (key === 'cleanup') {
+      const max = Math.max(1, ...r.items.map((x) => x.bytes));
+      return `<div class="ck-sum">지금 회수 가능: <b>${B(r.reclaimableBytes)}</b> · 휴지통(보관기간 내) ${B(r.trashLiveBytes)} · 디스크 ${r.disk.usedPct}% 사용</div>`
+        + `<table class="hl-table"><thead><tr><th>항목</th><th class="num">개수</th><th class="num">크기</th><th style="width:34%"></th></tr></thead><tbody>
+            ${r.items.map((x) => `<tr><td>${esc(x.label)}<div class="muted" style="font-size:11px">${esc(x.hint)}</div></td>
+              <td class="num">${x.count.toLocaleString()}</td><td class="num">${x.bytes ? B(x.bytes) : '—'}</td>
+              <td><span class="ck-bar"><span style="width:${(x.bytes / max * 100).toFixed(1)}%"></span></span></td></tr>`).join('')}
+          </tbody></table><p class="muted" style="font-size:11px">${esc(r.note)}</p>`;
+    }
+
+    if (key === 'backup-verify') {
+      const bad = (r.files || []).filter((f) => f.status !== 'ok');
+      const st = { ok: '정상', corrupt: '압축 손상', truncated: '덤프 중단', notdump: '덤프 아님', changed: '해시 변경' };
+      return `<div class="ck-sum">${r.checked}개 검사 · 실패 ${r.failed}개${r.newHashes ? ` · 해시 신규등록 ${r.newHashes}개` : ''}</div>`
+        + (bad.length ? '' : '<p class="ck-good">✅ 검사한 백업이 모두 정상입니다.</p>')
+        + `<table class="hl-table"><thead><tr><th>백업</th><th class="num">크기</th><th>상태</th><th>해시</th></tr></thead><tbody>
+            ${(r.files || []).map((f) => `<tr>
+              <td>${esc(f.name)}${f.detail ? `<div class="muted" style="font-size:11px">${esc(f.detail)}</div>` : ''}</td>
+              <td class="num">${B(f.size)}</td>
+              <td style="${f.status === 'ok' ? '' : 'color:var(--danger);font-weight:700'}">${esc(st[f.status] || f.status)}</td>
+              <td class="muted" style="font-size:11px">${esc(f.hash)}… ${f.hashState === 'changed' ? '<b style="color:var(--danger)">변경됨</b>' : f.hashState === 'new' ? '신규' : '일치'}</td>
+            </tr>`).join('')}</tbody></table>`;
+    }
+
+    if (key === 'restore-drill') {
+      return `<div class="ck-sum">${esc(r.file || '')} · ${r.elapsedSec}초</div>`
+        + `<p class="${r.ok ? 'ck-good' : 'ck-bad'}">${r.ok ? '✅' : '🚨'} ${esc(r.detail || '')}</p>`
+        + ((r.tables || []).length
+          ? `<table class="hl-table"><thead><tr><th>테이블</th><th class="num">복원본</th><th class="num">운영</th></tr></thead><tbody>
+              ${r.tables.map((t) => `<tr><td>${esc(t.table)}</td><td class="num"${t.odd ? ' style="color:var(--danger);font-weight:700"' : ''}>${Number(t.restored).toLocaleString()}</td><td class="num">${Number(t.live).toLocaleString()}</td></tr>`).join('')}
+            </tbody></table><p class="muted" style="font-size:11px">백업 시점 이후의 변경분만큼은 차이가 나는 것이 정상입니다.</p>`
+          : '');
+    }
+
+    if (key === 'deps') {
+      const v = r.vulnerabilities || {};
+      const chip = (k, label, color) => (v[k] ? `<span class="ck-chip" style="background:${color}">${label} ${v[k]}</span>` : '');
+      return `<div class="ck-sum">${chip('critical', '치명', 'var(--danger)')}${chip('high', '높음', '#f0a500')}${chip('moderate', '보통', '#118AB2')}${chip('low', '낮음', '#868E96')}${v.total ? '' : '<span class="ck-good">✅ 알려진 취약점이 없습니다.</span>'}</div>`
+        + ((r.packages || []).length
+          ? `<table class="hl-table"><thead><tr><th>패키지</th><th>심각도</th><th>내용</th><th>수정</th></tr></thead><tbody>
+              ${r.packages.map((p) => `<tr><td>${esc(p.name)}${p.direct ? ' <span class="muted" style="font-size:11px">직접 의존</span>' : ''}</td>
+                <td style="${['critical', 'high'].includes(p.severity) ? 'color:var(--danger);font-weight:700' : ''}">${esc(p.severity)}</td>
+                <td class="muted" style="font-size:11px">${esc((p.via || []).join(' · ')).slice(0, 120)}</td>
+                <td class="muted" style="font-size:11px">${esc(p.fixAvailable)}</td></tr>`).join('')}
+            </tbody></table><p class="muted" style="font-size:11px">${esc(r.note || '')}</p>`
+          : '');
+    }
+    return '';
+  }
+
+  // S29 — 부하 테스트는 화면에서 돌릴 일이 아니다(운영에 부하를 준다). 실행 방법만 안내.
+  function ckLoadTestCard() {
+    const cmd = "node scripts/bookjeok-loadtest.js --url https://bookjeok.cjs0509.xyz --user admin --pass '비밀번호' --totp 123456 --users 20 --duration 30 --yes";
+    return `<div class="dash-card ck-card" style="border-left:4px solid #118AB2">
+      <div class="dash-h">🏋️ 부하 테스트 <span class="ck-badge">서버 스크립트 · 필요할 때</span>
+        <span style="flex:1"></span><button class="btn btn-sm btn-ghost" data-copy="${UI.escapeHtml(cmd)}">명령 복사</button></div>
+      <p class="muted" style="font-size:12px;margin:0 0 6px">동시 사용자를 늘려가며 몇 명까지 버티는지 재봅니다. 읽기 전용이라 데이터는 바뀌지 않지만, 실제 서버에 부하를 주니 한가한 시간에 짧게 시작하세요.</p>
+      <pre class="ck-cmd">${UI.escapeHtml(cmd)}</pre>
+      <p class="muted" style="font-size:11px">--users 를 10 → 20 → 40 으로 올려가며 반복하면, 오류율이 오르거나 p95 가 꺾이는 지점이 이 서버의 한계입니다.
+      이 페이지의 <b>상태</b> 탭을 함께 열어 두면 그 순간 무엇이 병목인지(이벤트루프·DB 커넥션) 같이 보입니다.</p>
+    </div>`;
+  }
+
+  async function runCheckup(name, deep) {
+    const box = document.getElementById('ck-' + name);
+    if (box) box.innerHTML = '<p class="muted">검사 중… (파일이 많으면 몇 분 걸릴 수 있습니다)</p>';
+    try {
+      const r = await API.runCheckup(name, deep);
+      if (box) box.innerHTML = ckBody(name, r);
+      UI.toast('점검을 마쳤습니다', 'success');
+      loadCheckups();   // 마지막 실행 시각·색상까지 새로 반영
+    } catch (e) {
+      if (box) box.innerHTML = `<p class="muted" style="color:var(--danger)">${UI.escapeHtml(e.message)}</p>`;
+      UI.toast(e.message, 'error');
+    }
   }
 
   // ── 계정 관리 ──────────────────────────

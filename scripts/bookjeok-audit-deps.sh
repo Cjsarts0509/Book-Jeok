@@ -22,12 +22,12 @@ echo "$(date '+%F %T') 의존성 취약점 점검 시작 — $BACKEND_DIR"
 
 if ! command -v npm >/dev/null 2>&1; then
   echo "$(date '+%F %T') [건너뜀] npm 이 없습니다" >&2
-  push '{"ok":false,"error":"이 서버에 npm 이 설치되어 있지 않습니다. Node 를 설치하거나 개발 PC에서 실행하세요.","vulnerabilities":{}}'
+  push "{\"at\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"ok\":false,\"error\":\"이 서버에 npm 이 설치되어 있지 않습니다.\",\"vulnerabilities\":{}}"
   exit 1
 fi
 if [ ! -f "$BACKEND_DIR/package-lock.json" ]; then
   echo "$(date '+%F %T') [건너뜀] package-lock.json 이 없습니다" >&2
-  push '{"ok":false,"error":"package-lock.json 을 찾지 못했습니다.","vulnerabilities":{}}'
+  push "{\"at\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"ok\":false,\"error\":\"package-lock.json 을 찾지 못했습니다.\",\"vulnerabilities\":{}}"
   exit 1
 fi
 
@@ -35,14 +35,14 @@ RAW="$(cd "$BACKEND_DIR" && npm audit --omit=dev --json 2>/dev/null)"
 # npm audit 은 취약점이 있으면 종료코드가 0이 아니다 — 출력이 JSON 이면 정상 동작으로 본다
 if [ -z "$RAW" ] || ! printf '%s' "$RAW" | head -c 1 | grep -q '{'; then
   echo "$(date '+%F %T') [실패] npm audit 을 실행하지 못했습니다(네트워크 차단일 수 있음)" >&2
-  push '{"ok":false,"error":"npm audit 실행에 실패했습니다. 레지스트리로 나가는 네트워크가 막혀 있는지 확인하세요.","vulnerabilities":{}}'
+  push "{\"at\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"ok\":false,\"error\":\"npm audit 실행에 실패했습니다. 레지스트리로 나가는 네트워크가 막혀 있는지 확인하세요.\",\"vulnerabilities\":{}}"
   exit 1
 fi
 
 # npm audit --json 을 화면에 필요한 만큼만 추린다(원본은 수백 KB 가 되기도 한다)
 SUMMARY="$(printf '%s' "$RAW" | node -e '
 let s = ""; process.stdin.on("data", (d) => (s += d)).on("end", () => {
-  let a; try { a = JSON.parse(s); } catch { console.log(JSON.stringify({ ok: false, error: "npm audit 출력을 해석하지 못했습니다", vulnerabilities: {} })); return; }
+  let a; try { a = JSON.parse(s); } catch { console.log(JSON.stringify({ at: new Date().toISOString(), ok: false, error: "npm audit 출력을 해석하지 못했습니다", vulnerabilities: {} })); return; }
   const meta = (a.metadata && a.metadata.vulnerabilities) || {};
   const rows = Object.entries(a.vulnerabilities || {}).map(([name, v]) => ({
     name,
@@ -56,6 +56,7 @@ let s = ""; process.stdin.on("data", (d) => (s += d)).on("end", () => {
   rows.sort((x, y) => (rank[x.severity] ?? 9) - (rank[y.severity] ?? 9) || x.name.localeCompare(y.name));
   const total = (meta.critical || 0) + (meta.high || 0) + (meta.moderate || 0) + (meta.low || 0);
   console.log(JSON.stringify({
+    at: new Date().toISOString(),
     ok: (meta.critical || 0) + (meta.high || 0) === 0,
     vulnerabilities: meta, total,
     packages: rows.slice(0, 60),

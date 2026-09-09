@@ -136,6 +136,8 @@ const API = (() => {
     // 시스템 상태(관측)
     health: () => req('GET', '/admin/health'),
     healthIndexes: (force) => req('GET', '/admin/health/indexes' + (force ? '?force=1' : '')),
+    checkups: () => req('GET', '/admin/checkups'),
+    runCheckup: (name, deep) => req('POST', `/admin/checkups/${name}/run` + (deep ? '?deep=1' : '')),
     // trash
     trash: () => req('GET', '/admin/trash'),
     restoreFile: (id) => req('POST', `/admin/trash/file/${id}/restore`),

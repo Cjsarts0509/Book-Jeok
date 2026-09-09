@@ -27,7 +27,7 @@ echo "$(date '+%F %T') 백업 무결성 검증 시작 — $DIR (최신 ${CHECK_M
 mapfile -t FILES < <(ls -1t "$DIR"/bookjeok-db-*.sql.gz 2>/dev/null | head -n "$CHECK_MAX")
 if [ "${#FILES[@]}" -eq 0 ]; then
   echo "$(date '+%F %T') [경고] 검사할 백업이 없습니다: $DIR" >&2
-  RESULT='{"ok":false,"checked":0,"failed":0,"error":"백업 파일이 없습니다","files":[]}'
+  RESULT="{\"at\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"ok\":false,\"checked\":0,\"failed\":0,\"error\":\"백업 파일이 없습니다\",\"files\":[]}"
   printf '%s' "$RESULT" | docker exec -i "$API_CONTAINER" sh -c 'mkdir -p /data/storage/_status/checkups && cat > /data/storage/_status/checkups/backup-verify.json' 2>/dev/null || true
   exit 1
 fi
@@ -80,7 +80,7 @@ for f in "${FILES[@]}"; do
 done
 
 OK=true; [ "$FAILED" -gt 0 ] && OK=false
-RESULT="{\"ok\":$OK,\"checked\":$CHECKED,\"failed\":$FAILED,\"newHashes\":$NEWHASH,\"dir\":\"$(json_escape "$DIR")\",\"files\":[$ITEMS]}"
+RESULT="{\"at\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"ok\":$OK,\"checked\":$CHECKED,\"failed\":$FAILED,\"newHashes\":$NEWHASH,\"dir\":\"$(json_escape "$DIR")\",\"files\":[$ITEMS]}"
 printf '%s' "$RESULT" | docker exec -i "$API_CONTAINER" sh -c 'mkdir -p /data/storage/_status/checkups && cat > /data/storage/_status/checkups/backup-verify.json' 2>/dev/null || true
 
 echo "$(date '+%F %T') 검증 완료 — 검사 ${CHECKED}개, 실패 ${FAILED}개, 해시 신규등록 ${NEWHASH}개"

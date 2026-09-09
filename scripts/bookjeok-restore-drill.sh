@@ -32,7 +32,7 @@ START_TS="$(date +%s)"
 report() {   # report <ok> <detail>
   local ok="$1" detail="$2"
   local elapsed=$(( $(date +%s) - START_TS ))
-  local json="{\"ok\":$ok,\"file\":\"$(json_escape "${NAME:-}")\",\"elapsedSec\":$elapsed,\"detail\":\"$(json_escape "$detail")\",\"tables\":[${TABLE_JSON:-}],\"drillDb\":\"$(json_escape "$DRILL_DB")\"}"
+  local json="{\"at\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"ok\":$ok,\"file\":\"$(json_escape "${NAME:-}")\",\"elapsedSec\":$elapsed,\"detail\":\"$(json_escape "$detail")\",\"tables\":[${TABLE_JSON:-}],\"drillDb\":\"$(json_escape "$DRILL_DB")\"}"
   printf '%s' "$json" | docker exec -i "$API_CONTAINER" sh -c 'mkdir -p /data/storage/_status/checkups && cat > /data/storage/_status/checkups/restore-drill.json' 2>/dev/null || true
 }
 cleanup() {  # 어떤 경로로 끝나든 임시 DB는 반드시 지운다
