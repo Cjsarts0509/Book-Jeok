@@ -150,6 +150,16 @@ const API = (() => {
     runCheckup: (name, deep) => req('POST', `/admin/checkups/${name}/run` + (deep ? '?deep=1' : '')),
     retryMailQueue: () => req('POST', '/admin/mail-queue/retry'),
     verifyAuditChain: (limit) => req('GET', '/admin/audit/verify' + (limit ? `?limit=${limit}` : '')),
+    // S25 로그 중앙 검색
+    searchLogs: (q) => req('GET', '/admin/logs/search?' + new URLSearchParams(Object.entries(q).filter(([, v]) => v !== '' && v != null)).toString()),
+    logFacets: () => req('GET', '/admin/logs/facets'),
+    downloadLogsCsv: (q) => {
+      const p = new URLSearchParams(Object.entries({ ...q, format: 'csv', limit: 500, offset: 0 }).filter(([, v]) => v !== '' && v != null));
+      // 인증 헤더가 필요해 링크로 바로 못 연다 → 받아서 blob 으로 저장
+      return fetch(`${BASE}/api/admin/logs/search?${p}`, { headers: { Authorization: 'Bearer ' + token }, credentials: 'include' })
+        .then((r) => { if (!r.ok) throw new Error('내려받기 실패'); return r.blob(); })
+        .then((b) => { const u = URL.createObjectURL(b); const a = document.createElement('a'); a.href = u; a.download = 'bookjeok-logs.csv'; a.click(); setTimeout(() => URL.revokeObjectURL(u), 1000); });
+    },
     // trash
     trash: () => req('GET', '/admin/trash'),
     restoreFile: (id) => req('POST', `/admin/trash/file/${id}/restore`),

@@ -654,6 +654,104 @@ router.get('/health', wrap(async (req, res) => {
   });
 }));
 
+// ══════════ S25 · 로그 중앙 검색 ══════════
+// 지금까지는 '최근 50건'만 훑을 수 있어, 사고가 났을 때 "언제 누가 무엇을"을 찾으려면
+// DB에 직접 붙어야 했다. 감사로그·로그인기록·알림을 한 곳에서 조건으로 좁혀 찾게 한다.
+//   from/to(기간) · q(자유어) · user(아이디·이름) · owner(대상 계정) · action(동작) · ip
+//   source: all | audit | login   · format: json | csv
+const LOG_PAGE_MAX = 500;
+function logFilters(req) {
+  const p = req.query;
+  const where = [], args = [];
+  const add = (sql, val) => { args.push(val); where.push(sql.replace('$?', '$' + args.length)); };
+  if (p.from) add('a.created_at >= $?', new Date(p.from).toISOString());
+  if (p.to) add('a.created_at <= $?', new Date(p.to).toISOString());
+  if (p.action) add('a.action = $?', String(p.action));
+  if (p.ip) add('a.ip = $?', String(p.ip));
+  if (p.user) add('(u.username ILIKE $? OR u.display_name ILIKE $?'.replace('$?', '$' + (args.length + 1)) + ')', `%${p.user}%`);
+  if (p.owner) add('(o.username ILIKE $? OR o.display_name ILIKE $?'.replace('$?', '$' + (args.length + 1)) + ')', `%${p.owner}%`);
+  if (p.q) add('(a.detail ILIKE $? OR a.action ILIKE $?'.replace('$?', '$' + (args.length + 1)) + ')', `%${p.q}%`);
+  return { where, args };
+}
+async function searchLogs(req) {
+  const source = String(req.query.source || 'all');
+  const limit = Math.min(LOG_PAGE_MAX, Math.max(1, parseInt(req.query.limit || '100', 10)));
+  const offset = Math.max(0, parseInt(req.query.offset || '0', 10));
+  const rows = [];
+  let total = 0;
+
+  if (source === 'all' || source === 'audit') {
+    const { where, args } = logFilters(req);
+    const w = where.length ? 'WHERE ' + where.join(' AND ') : '';
+    const cnt = await query(`SELECT COUNT(*)::int AS c FROM audit_log a
+      LEFT JOIN users u ON u.id=a.user_id LEFT JOIN users o ON o.id=a.owner_id ${w}`, args);
+    total += cnt.rows[0].c;
+    const r = await query(`
+      SELECT a.id, a.action, a.detail, a.ip, a.created_at, a.chain_seq,
+             u.username, u.display_name, o.username AS owner_username, o.display_name AS owner_display_name
+      FROM audit_log a LEFT JOIN users u ON u.id=a.user_id LEFT JOIN users o ON o.id=a.owner_id
+      ${w} ORDER BY a.created_at DESC LIMIT $${args.length + 1} OFFSET $${args.length + 2}`,
+    [...args, limit, offset]);
+    for (const x of r.rows) {
+      rows.push({
+        source: 'audit', id: String(x.id), at: x.created_at, action: x.action, detail: x.detail || '',
+        ip: x.ip || '', by: x.display_name || x.username || '알 수 없음',
+        owner: x.owner_display_name || x.owner_username || '', chainSeq: x.chain_seq ? Number(x.chain_seq) : null,
+      });
+    }
+  }
+  // 로그인 기록은 감사로그와 열이 달라 따로 모아 같은 모양으로 맞춘다
+  if ((source === 'all' || source === 'login') && !req.query.owner && !req.query.action) {
+    const where = ['1=1'], args = [];
+    const add = (sql, val) => { args.push(val); where.push(sql.replace('$?', '$' + args.length)); };
+    if (req.query.from) add('l.created_at >= $?', new Date(req.query.from).toISOString());
+    if (req.query.to) add('l.created_at <= $?', new Date(req.query.to).toISOString());
+    if (req.query.ip) add('l.ip = $?', String(req.query.ip));
+    if (req.query.user) { args.push(`%${req.query.user}%`); where.push(`(u.username ILIKE $${args.length} OR u.display_name ILIKE $${args.length})`); }
+    if (req.query.q) { args.push(`%${req.query.q}%`); where.push(`l.user_agent ILIKE $${args.length}`); }
+    const w = 'WHERE ' + where.join(' AND ');
+    const cnt = await query(`SELECT COUNT(*)::int AS c FROM login_events l LEFT JOIN users u ON u.id=l.user_id ${w}`, args);
+    total += cnt.rows[0].c;
+    const r = await query(`
+      SELECT l.id, l.ip, l.user_agent, l.created_at, u.username, u.display_name
+      FROM login_events l LEFT JOIN users u ON u.id=l.user_id
+      ${w} ORDER BY l.created_at DESC LIMIT $${args.length + 1} OFFSET $${args.length + 2}`,
+    [...args, limit, offset]);
+    for (const x of r.rows) {
+      rows.push({
+        source: 'login', id: 'L' + x.id, at: x.created_at, action: 'login_event',
+        detail: (x.user_agent || '').slice(0, 200), ip: x.ip || '',
+        by: x.display_name || x.username || '알 수 없음', owner: '', chainSeq: null,
+      });
+    }
+  }
+  rows.sort((a, b) => new Date(b.at) - new Date(a.at));
+  return { rows: rows.slice(0, limit), total, limit, offset };
+}
+
+router.get('/logs/search', wrap(async (req, res) => {
+  const r = await searchLogs(req);
+  if (String(req.query.format) === 'csv') {
+    const esc = (v) => `"${String(v == null ? '' : v).replace(/"/g, '""')}"`;
+    const head = ['시각', '구분', '동작', '수행자', '대상계정', '내용', 'IP', '사슬번호'];
+    const body = r.rows.map((x) => [new Date(x.at).toLocaleString('ko-KR'), x.source, x.action, x.by, x.owner, x.detail, x.ip, x.chainSeq ?? ''].map(esc).join(','));
+    await audit(req, 'export_logs', `${r.rows.length}건`);
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="bookjeok-logs-${new Date().toISOString().slice(0, 10)}.csv"`);
+    return res.send('\uFEFF' + [head.map(esc).join(','), ...body].join('\r\n'));   // BOM: 엑셀에서 한글 깨짐 방지
+  }
+  res.json(r);
+}));
+
+// 검색 화면의 드롭다운을 채울 값들(실제로 기록된 동작만 보여준다)
+router.get('/logs/facets', wrap(async (req, res) => {
+  const [actions, ips] = await Promise.all([
+    query('SELECT action, COUNT(*)::int AS c FROM audit_log GROUP BY action ORDER BY c DESC LIMIT 60'),
+    query("SELECT ip, COUNT(*)::int AS c FROM audit_log WHERE ip <> '' GROUP BY ip ORDER BY c DESC LIMIT 30"),
+  ]);
+  res.json({ actions: actions.rows, ips: ips.rows });
+}));
+
 // 감사로그 사슬 검증 (S5) — 전체를 다시 계산하므로 요청 시에만.
 // limit 을 주면 최근 N건만 빠르게 훑는다.
 router.get('/audit/verify', wrap(async (req, res) => {

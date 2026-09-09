@@ -38,6 +38,7 @@ const Admin = (() => {
             ${item('db', '🗄️', 'DB')}
             ${item('backup', '💾', '백업')}
             ${item('audit', '📜', '로그')}
+            ${item('logsearch', '🔎', '로그검색')}
             ${item('manual', '📖', '매뉴얼')}
             <a class="nav-item" href="index.html"><span class="ico">📁</span><span class="t">파일로</span></a>
           </nav>
@@ -67,11 +68,12 @@ const Admin = (() => {
     else if (tab === 'trash') loadTrash();
     else if (tab === 'db') loadDb();
     else if (tab === 'audit') loadAudit();
+    else if (tab === 'logsearch') loadLogs();
     else if (tab === 'capacity') loadCapacity();
     else if (tab === 'report') loadReport();
     else if (tab === 'backup') loadBackup();
     else if (tab === 'manual') loadManual();
-    const titles = { dashboard: '대시보드', health: '시스템 상태', checkups: '정기 점검', users: '계정 관리', branches: '영업점 관리', notices: '공지사항', ext: '허용 확장자', shares: '공유 통합 관리', trash: '휴지통', capacity: '용량 리포트', report: '주간 리포트', db: 'DB 상태', backup: '백업 현황', audit: '감사 로그', manual: '사용자 매뉴얼' };
+    const titles = { dashboard: '대시보드', health: '시스템 상태', checkups: '정기 점검', users: '계정 관리', branches: '영업점 관리', notices: '공지사항', ext: '허용 확장자', shares: '공유 통합 관리', trash: '휴지통', capacity: '용량 리포트', report: '주간 리포트', db: 'DB 상태', backup: '백업 현황', audit: '감사 로그', logsearch: '로그 검색', manual: '사용자 매뉴얼' };
     document.getElementById('page-title').textContent = titles[tab];
   }
 
@@ -486,6 +488,112 @@ const Admin = (() => {
       if (box) box.innerHTML = `<p class="muted" style="color:var(--danger)">${UI.escapeHtml(e.message)}</p>`;
       UI.toast(e.message, 'error');
     }
+  }
+
+  // ── S25 · 로그 중앙 검색 ────────────────
+  // 사고가 났을 때 "언제 누가 무엇을"을 DB에 붙지 않고 찾을 수 있어야 한다.
+  const logQuery = { from: '', to: '', q: '', user: '', owner: '', action: '', ip: '', source: 'all', limit: 100, offset: 0 };
+  // 동작 코드를 사람 말로. 없는 코드는 코드 그대로 보여 준다(새 동작이 생겨도 화면이 비지 않게).
+  const LOG_ACTION_LABEL = {
+    login: '로그인', login_failed: '로그인 실패', login_event: '로그인 기록', logout: '로그아웃',
+    upload: '업로드', download: '다운로드', rename: '이름 변경', update_note: '비고 수정',
+    trash_file: '파일 삭제', restore_file: '파일 복원', self_restore_file: '파일 복원(본인)',
+    create_folder: '폴더 생성', rename_folder: '폴더 이름변경', trash_folder: '폴더 삭제',
+    folder_note: '폴더 비고', folder_style: '폴더 색상/아이콘',
+    bulk_move: '일괄 이동', bulk_copy: '일괄 복사', bulk_trash: '일괄 삭제', bulk_zip: '압축 다운로드',
+    create_share: '공유 생성', delete_share: '공유 삭제',
+    create_folder_share: '폴더 공유', delete_folder_share: '폴더 공유 삭제',
+    create_upload_request: '업로드 요청 생성', delete_upload_request: '업로드 요청 삭제',
+    stock_audit_deliver: '재고조사 전달', stock_audit_save: '재고조사 저장',
+    lock_file: '파일 잠금', unlock_file: '잠금 해제',
+    create_template: '템플릿 저장', delete_template: '템플릿 삭제', apply_template: '템플릿 적용',
+    create_user: '계정 생성', update_user: '계정 수정', delete_user: '계정 삭제', view_password: '비밀번호 열람',
+    run_checkup: '점검 실행', export_logs: '로그 내보내기', send_report: '리포트 발송', mail_retry: '메일 재시도',
+    self_empty_trash: '휴지통 비우기',
+  };
+
+  async function loadLogs() {
+    const view = document.getElementById('view');
+    view.innerHTML = `
+      <div class="dash-card">
+        <div class="dash-h">🔎 로그 검색 <span class="muted" style="font-size:12px;font-weight:400">· 감사 기록 + 로그인 기록</span></div>
+        <div class="log-filters">
+          <label>기간<input type="date" class="input" id="lf-from"></label>
+          <label>~<input type="date" class="input" id="lf-to"></label>
+          <label>구분<select class="input" id="lf-source"><option value="all">전체</option><option value="audit">감사 기록</option><option value="login">로그인</option></select></label>
+          <label>동작<select class="input" id="lf-action"><option value="">전체</option></select></label>
+          <label>수행자<input class="input" id="lf-user" placeholder="아이디·이름"></label>
+          <label>대상 계정<input class="input" id="lf-owner" placeholder="아이디·이름"></label>
+          <label>IP<input class="input" id="lf-ip" placeholder="예: 203.0.113.9"></label>
+          <label class="log-q">내용<input class="input" id="lf-q" placeholder="파일명·문구"></label>
+          <button class="btn btn-primary btn-sm" id="lf-go">검색</button>
+          <button class="btn btn-ghost btn-sm" id="lf-reset">초기화</button>
+          <button class="btn btn-secondary btn-sm" id="lf-csv" title="지금 조건으로 CSV 내려받기">⬇️ CSV</button>
+        </div>
+      </div>
+      <div class="dash-card"><div id="log-result"><p class="muted">조건을 정하고 검색을 누르세요. 기본은 최근 100건입니다.</p></div></div>`;
+
+    // 실제로 기록된 동작만 드롭다운에 채운다 — 쓰지도 않는 값을 고르게 하지 않는다
+    try {
+      const f = await API.logFacets();
+      const sel = document.getElementById('lf-action');
+      for (const a of f.actions) {
+        const o = document.createElement('option');
+        o.value = a.action; o.textContent = `${LOG_ACTION_LABEL[a.action] || a.action} (${a.c})`;
+        sel.appendChild(o);
+      }
+    } catch (_) { /* 드롭다운이 비어도 검색은 된다 */ }
+
+    const read = () => {
+      logQuery.from = document.getElementById('lf-from').value;
+      logQuery.to = document.getElementById('lf-to').value ? document.getElementById('lf-to').value + 'T23:59:59' : '';
+      logQuery.source = document.getElementById('lf-source').value;
+      logQuery.action = document.getElementById('lf-action').value;
+      logQuery.user = document.getElementById('lf-user').value.trim();
+      logQuery.owner = document.getElementById('lf-owner').value.trim();
+      logQuery.ip = document.getElementById('lf-ip').value.trim();
+      logQuery.q = document.getElementById('lf-q').value.trim();
+      logQuery.offset = 0;
+    };
+    document.getElementById('lf-go').addEventListener('click', () => { read(); runLogSearch(); });
+    document.getElementById('lf-csv').addEventListener('click', () => { read(); API.downloadLogsCsv(logQuery); });
+    document.getElementById('lf-reset').addEventListener('click', () => { loadLogs(); });
+    document.getElementById('view').querySelectorAll('.log-filters input').forEach((el) =>
+      el.addEventListener('keydown', (e) => { if (e.key === 'Enter') { read(); runLogSearch(); } }));
+    runLogSearch();
+  }
+
+  async function runLogSearch() {
+    const box = document.getElementById('log-result');
+    if (!box) return;
+    box.innerHTML = '<p class="muted">찾는 중…</p>';
+    try {
+      const d = await API.searchLogs(logQuery);
+      const esc = UI.escapeHtml;
+      if (!d.rows.length) { box.innerHTML = '<p class="muted">조건에 맞는 기록이 없습니다.</p>'; return; }
+      const rows = d.rows.map((r) => `<tr>
+        <td class="num muted" style="white-space:nowrap">${new Date(r.at).toLocaleString('ko-KR')}</td>
+        <td><span class="log-src ${r.source}">${r.source === 'login' ? '로그인' : '감사'}</span></td>
+        <td>${esc(LOG_ACTION_LABEL[r.action] || r.action)}</td>
+        <td>${esc(r.by)}</td>
+        <td class="muted">${esc(r.owner || '')}</td>
+        <td class="muted" style="font-size:11px;word-break:break-all">${esc(r.detail)}</td>
+        <td class="muted" style="font-size:11px;white-space:nowrap">${esc(r.ip)}</td>
+        <td class="num muted" style="font-size:11px">${r.chainSeq ?? ''}</td></tr>`).join('');
+      const shown = d.offset + d.rows.length;
+      box.innerHTML = `
+        <div class="log-sum">조건에 맞는 기록 <b>${d.total.toLocaleString()}</b>건 중 ${d.offset + 1}~${shown}번째</div>
+        <div class="table-wrap"><table class="hl-table"><thead><tr>
+          <th>시각</th><th>구분</th><th>동작</th><th>수행자</th><th>대상 계정</th><th>내용</th><th>IP</th><th class="num" title="감사로그 사슬 번호">사슬</th>
+        </tr></thead><tbody>${rows}</tbody></table></div>
+        <div class="log-pager">
+          <button class="btn btn-sm btn-ghost" id="lg-prev" ${d.offset === 0 ? 'disabled' : ''}>← 이전</button>
+          <button class="btn btn-sm btn-ghost" id="lg-next" ${shown >= d.total ? 'disabled' : ''}>다음 →</button>
+        </div>`;
+      const prev = document.getElementById('lg-prev'), next = document.getElementById('lg-next');
+      if (prev && !prev.disabled) prev.addEventListener('click', () => { logQuery.offset = Math.max(0, logQuery.offset - logQuery.limit); runLogSearch(); });
+      if (next && !next.disabled) next.addEventListener('click', () => { logQuery.offset += logQuery.limit; runLogSearch(); });
+    } catch (e) { box.innerHTML = `<p class="muted" style="color:var(--danger)">${UI.escapeHtml(e.message)}</p>`; }
   }
 
   // ── 계정 관리 ──────────────────────────

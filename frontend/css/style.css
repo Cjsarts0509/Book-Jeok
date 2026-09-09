@@ -1134,3 +1134,16 @@ th { background: var(--bg); font-weight: 700; color: var(--text-muted); font-siz
 /* ── S32 · 장애 시 읽기 폴백 배너 ─────────────────────── */
 .degraded-banner { padding: 11px 14px; margin-bottom: 12px; background: #FFF4E0; border: 1px solid #F5D9A0; border-left: 4px solid #f0a500; border-radius: var(--radius); font-size: 13px; line-height: 1.6; color: #7a4d00; }
 .degraded-banner .muted { font-size: 12px; }
+
+/* ── S25 · 로그 검색 ───────────────────────────────────── */
+.log-filters { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: flex-end; }
+.log-filters label { display: flex; flex-direction: column; gap: 3px; font-size: 11px; color: var(--text-muted); font-weight: 600; }
+.log-filters .input { min-width: 118px; padding: 6px 9px; font-size: 12px; }
+.log-filters .log-q { flex: 1; min-width: 180px; }
+.log-filters .log-q .input { width: 100%; }
+.log-filters .btn { margin-bottom: 1px; }
+.log-sum { font-size: 13px; margin-bottom: 8px; }
+.log-src { display: inline-block; padding: 1px 7px; border-radius: 999px; font-size: 10px; font-weight: 700; }
+.log-src.audit { background: #E7F5FB; color: var(--secondary); }
+.log-src.login { background: #FFF3CF; color: #8a6d00; }
+.log-pager { display: flex; gap: 8px; justify-content: center; margin-top: 10px; }
