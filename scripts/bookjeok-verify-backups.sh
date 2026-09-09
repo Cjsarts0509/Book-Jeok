@@ -46,9 +46,12 @@ for f in "${FILES[@]}"; do
     STATUS="corrupt"; DETAIL="gzip 압축이 손상되었거나 파일이 잘렸습니다"
   else
     # 2) pg_dump 결과처럼 보이는가 — 헤더와 종료 표시를 확인
+    #    head -c 가 파이프를 닫으면 zcat 이 SIGPIPE(141)로 죽는다. 이 스크립트는 pipefail 이라
+    #    grep 이 찾았는데도 파이프라인 전체가 실패로 잡힌다 → 멀쩡한 백업이 전부 '헤더 없음'이 됐다.
+    #    그래서 이 두 검사만 pipefail 을 끈 서브셸에서 돌린다.
     HEAD_OK=0; TAIL_OK=0
-    zcat "$f" 2>/dev/null | head -c 4096 | grep -q 'PostgreSQL database dump' && HEAD_OK=1
-    zcat "$f" 2>/dev/null | tail -c 4096 | grep -q 'PostgreSQL database dump complete' && TAIL_OK=1
+    ( set +o pipefail; zcat "$f" 2>/dev/null | head -c 4096 | grep -q 'PostgreSQL database dump' ) && HEAD_OK=1
+    ( set +o pipefail; zcat "$f" 2>/dev/null | tail -c 4096 | grep -q 'PostgreSQL database dump complete' ) && TAIL_OK=1
     if [ "$HEAD_OK" -ne 1 ]; then
       STATUS="notdump"; DETAIL="pg_dump 헤더를 찾지 못했습니다"
     elif [ "$TAIL_OK" -ne 1 ]; then
