@@ -18,10 +18,11 @@ const Admin = (() => {
   }
 
   function renderShell() {
-    const item = (tab, ico, label) => `<div class="nav-item ${state.tab === tab ? 'active' : ''}" data-tab="${tab}"><span class="ico">${ico}</span><span class="t">${label}</span></div>`;
+    // title: 폭이 좁아 글자를 접었을 때(아이콘만 남을 때) 이름을 알 수 있도록.
+const item = (tab, ico, label) => `<div class="nav-item ${state.tab === tab ? 'active' : ''}" data-tab="${tab}" title="${label}"><span class="ico">${ico}</span><span class="t">${label}</span></div>`;
     root().innerHTML = `
       <div class="layout">
-        <header class="appbar">
+        <header class="appbar appbar-many">
           <a class="brand" href="index.html" title="홈으로"><img src="assets/logo.svg?v=64"><span class="brand-name">북적북적</span></a>
           <nav class="appbar-nav">
             ${item('dashboard', '🏠', '대시보드')}
@@ -40,7 +41,7 @@ const Admin = (() => {
             ${item('audit', '📜', '로그')}
             ${item('logsearch', '🔎', '로그검색')}
             ${item('manual', '📖', '매뉴얼')}
-            <a class="nav-item" href="index.html"><span class="ico">📁</span><span class="t">파일로</span></a>
+            <a class="nav-item" href="index.html" title="파일로"><span class="ico">📁</span><span class="t">파일로</span></a>
           </nav>
           <div class="topbar-spacer"></div>
           <div class="user-chip-sm">${UI.escapeHtml(state.user.displayName)} · 관리자</div>

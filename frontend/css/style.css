@@ -90,6 +90,58 @@ textarea.input { resize: vertical; }
 .appbar-nav .nav-item.active { background: var(--primary); color: var(--text); }
 .appbar-nav .nav-item .ico { font-size: 16px; }
 
+/* 상단바는 한 줄이다. 폭이 모자라면 flex 가 항목을 눌러 글자가 단어 중간에서 끊긴다
+   ("재고조사 오/차체크"). 한글은 아무 데서나 줄바꿈되므로 특히 잘 깨진다.
+   양보 순서를 정해 둔다 — 줄바꿈 금지 → 계정 선택 상자부터 줄이기 →
+   그래도 좁으면(노트북 폭) 글자를 접고 아이콘만 남긴다. 이름은 title 로 남는다. */
+.appbar-nav .nav-item, .brand-name, .user-chip-sm { white-space: nowrap; }
+.brand, .appbar-nav .nav-item { flex: 0 0 auto; }
+/* 마지막 안전장치 — 메뉴가 아무리 많아도 페이지에 가로 스크롤바가 생기지 않게
+   메뉴 영역 안에서만 넘치게 한다(스크롤막대는 숨김). */
+.appbar-nav { flex: 0 1 auto; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+.appbar-nav::-webkit-scrollbar { display: none; }
+.account-switcher { flex: 0 1 auto; min-width: 130px; }   /* 0 까지 줄면 화살표만 남아 못 쓴다 */
+
+/* 폭이 줄면 이 순서로 양보한다 — 간격 좁히기 → 계정·역할 표시 접기 → 아이콘만 → (768 이하) 드로어.
+   기준값은 실제로 필요한 폭을 재서 정했다(파일 화면 10개 항목 1638px, 관리자 17개 항목 1902px).
+   계정 수·이름 길이에 따라 조금씩 달라지므로 여유를 뒀고, 그래도 모자라면
+   위의 안전장치가 페이지 대신 메뉴 안에서만 넘치게 한다.
+   768px 이하는 아래 모바일 분기에서 드로어로 바뀌므로 아이콘만 규칙은 769px 부터 적용한다. */
+
+/* ── 파일 화면(항목 10개) ── */
+@media (max-width: 1719px) {
+  .appbar { gap: 10px; }
+  .appbar-nav { gap: 1px; }
+  .appbar-nav .nav-item { padding: 8px 7px; gap: 5px; font-size: 13px; }
+}
+@media (max-width: 1459px) { .user-chip-sm { display: none; } }
+@media (min-width: 769px) and (max-width: 1359px) {
+  .appbar-nav .nav-item .t { display: none; }
+  .appbar-nav .nav-item { padding: 8px 10px; }
+  .appbar-nav .nav-item .ico { font-size: 18px; }
+}
+
+/* ── 관리자 화면(항목 17개) — 같은 폭에서 훨씬 빨리 좁아진다 ── */
+@media (min-width: 769px) and (max-width: 1929px) {
+  .appbar-many .appbar-nav { gap: 1px; }
+  .appbar-many .appbar-nav .nav-item { padding: 8px 7px; gap: 5px; font-size: 13px; }
+}
+@media (min-width: 769px) and (max-width: 1559px) { .appbar-many .user-chip-sm { display: none; } }
+@media (min-width: 769px) and (max-width: 1439px) {
+  .appbar-many .appbar-nav .nav-item .t { display: none; }
+  .appbar-many .appbar-nav .nav-item { padding: 8px 9px; }
+  .appbar-many .appbar-nav .nav-item .ico { font-size: 17px; }
+}
+
+/* 아이콘만 남겨도 빠듯한 구간 — 로고 글자와 계정 상자까지 줄인다 */
+@media (min-width: 769px) and (max-width: 980px) {
+  .brand-name { display: none; }
+  .account-switcher { min-width: 110px; max-width: 150px; }
+  .appbar { padding: 0 12px; gap: 8px; }
+  .appbar-nav .nav-item { padding: 8px 6px; }
+  .appbar-many .appbar-nav .nav-item { padding: 8px 5px; }
+}
+
 /* 관리자 페이지 컨텐츠 (트리 없이 중앙 정렬) */
 .admin-content { flex: 1; width: 100%; max-width: 1120px; margin: 0 auto; }
 .admin-title { font-size: 22px; font-weight: 800; margin-bottom: 18px; }

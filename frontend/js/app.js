@@ -102,16 +102,16 @@ const App = (() => {
           <button class="icon-btn appbar-navmenu" id="nav-menu-toggle" title="메뉴" aria-label="메뉴">☰<span class="notif-badge hidden" id="notif-badge-menu">0</span></button>
           <nav class="appbar-nav" id="appbar-nav">
             <div class="nav-user">${UI.escapeHtml(state.user.displayName)} · ${roleLabel(state.user.role)}</div>
-            <div class="nav-item" data-nav="files"><span class="ico">📁</span><span class="t">내 파일</span></div>
-            <div class="nav-item" data-nav="shares"><span class="ico">🔗</span><span class="t">공유</span></div>
-            <div class="nav-item" data-nav="trash"><span class="ico">🗑️</span><span class="t">휴지통</span></div>
-            <div class="nav-item nav-bell" data-nav="notif"><span class="ico">🔔</span><span class="t">알림</span><span class="notif-badge hidden" id="notif-badge">0</span></div>
-            ${admin ? '<a class="nav-item" href="admin.html"><span class="ico">🛡️</span><span class="t">관리자</span></a>' : ''}
-            ${isPriv() ? '<div class="nav-item" data-nav="stockaudit"><span class="ico">📊</span><span class="t">재고조사 오차체크</span></div>' : ''}
-            <div class="nav-item" data-nav="serverstatus"><span class="ico">🖥️</span><span class="t">서버 상태</span></div>
-            <div class="nav-item" data-nav="help"><span class="ico">❓</span><span class="t">도움말</span></div>
-            <div class="nav-item" data-nav="settings"><span class="ico">⚙️</span><span class="t">설정</span></div>
-            <div class="nav-item" data-nav="logout"><span class="ico">🚪</span><span class="t">로그아웃</span></div>
+            <div class="nav-item" data-nav="files" title="내 파일"><span class="ico">📁</span><span class="t">내 파일</span></div>
+            <div class="nav-item" data-nav="shares" title="공유"><span class="ico">🔗</span><span class="t">공유</span></div>
+            <div class="nav-item" data-nav="trash" title="휴지통"><span class="ico">🗑️</span><span class="t">휴지통</span></div>
+            <div class="nav-item nav-bell" data-nav="notif" title="알림"><span class="ico">🔔</span><span class="t">알림</span><span class="notif-badge hidden" id="notif-badge">0</span></div>
+            ${admin ? '<a class="nav-item" href="admin.html" title="관리자"><span class="ico">🛡️</span><span class="t">관리자</span></a>' : ''}
+            ${isPriv() ? '<div class="nav-item" data-nav="stockaudit" title="재고조사 오차체크"><span class="ico">📊</span><span class="t">재고조사 오차체크</span></div>' : ''}
+            <div class="nav-item" data-nav="serverstatus" title="서버 상태"><span class="ico">🖥️</span><span class="t">서버 상태</span></div>
+            <div class="nav-item" data-nav="help" title="도움말"><span class="ico">❓</span><span class="t">도움말</span></div>
+            <div class="nav-item" data-nav="settings" title="설정"><span class="ico">⚙️</span><span class="t">설정</span></div>
+            <div class="nav-item" data-nav="logout" title="로그아웃"><span class="ico">🚪</span><span class="t">로그아웃</span></div>
           </nav>
           <div class="user-chip-sm">${UI.escapeHtml(state.user.displayName)} · ${roleLabel(state.user.role)}</div>
         </header>
