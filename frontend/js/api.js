@@ -133,6 +133,9 @@ const API = (() => {
     dbStatus: () => req('GET', '/admin/db-status'),
     backupStatus: () => req('GET', '/admin/backup-status'),
     audit: (limit = 50) => req('GET', `/admin/audit?limit=${limit}`),
+    // 시스템 상태(관측)
+    health: () => req('GET', '/admin/health'),
+    healthIndexes: (force) => req('GET', '/admin/health/indexes' + (force ? '?force=1' : '')),
     // trash
     trash: () => req('GET', '/admin/trash'),
     restoreFile: (id) => req('POST', `/admin/trash/file/${id}/restore`),

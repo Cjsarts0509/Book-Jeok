@@ -25,6 +25,7 @@ const Admin = (() => {
           <a class="brand" href="index.html" title="홈으로"><img src="assets/logo.svg?v=64"><span class="brand-name">북적북적</span></a>
           <nav class="appbar-nav">
             ${item('dashboard', '🏠', '대시보드')}
+            ${item('health', '📈', '상태')}
             ${item('users', '👥', '계정')}
             ${item('branches', '🏢', '영업점')}
             ${item('notices', '📢', '공지')}
@@ -51,9 +52,11 @@ const Admin = (() => {
   }
 
   function switchTab(tab) {
+    stopHealth();          // 다른 탭으로 가면 상태 폴링을 멈춘다
     state.tab = tab;
     renderShell();
     if (tab === 'dashboard') loadDashboard();
+    else if (tab === 'health') loadHealth();
     else if (tab === 'users') loadUsers();
     else if (tab === 'branches') loadBranches();
     else if (tab === 'notices') loadNotices();
@@ -66,7 +69,7 @@ const Admin = (() => {
     else if (tab === 'report') loadReport();
     else if (tab === 'backup') loadBackup();
     else if (tab === 'manual') loadManual();
-    const titles = { dashboard: '대시보드', users: '계정 관리', branches: '영업점 관리', notices: '공지사항', ext: '허용 확장자', shares: '공유 통합 관리', trash: '휴지통', capacity: '용량 리포트', report: '주간 리포트', db: 'DB 상태', backup: '백업 현황', audit: '감사 로그', manual: '사용자 매뉴얼' };
+    const titles = { dashboard: '대시보드', health: '시스템 상태', users: '계정 관리', branches: '영업점 관리', notices: '공지사항', ext: '허용 확장자', shares: '공유 통합 관리', trash: '휴지통', capacity: '용량 리포트', report: '주간 리포트', db: 'DB 상태', backup: '백업 현황', audit: '감사 로그', manual: '사용자 매뉴얼' };
     document.getElementById('page-title').textContent = titles[tab];
   }
 
@@ -113,6 +116,153 @@ const Admin = (() => {
           <div class="dash-card"><div class="dash-h">최근 활동</div><div class="table-wrap" style="border:none"><table><tbody>${recent || '<tr><td class="muted">기록 없음</td></tr>'}</tbody></table></div></div>
         </div>`;
     } catch (err) { view.innerHTML = `<div class="empty">⚠️ ${UI.escapeHtml(err.message)}</div>`; }
+  }
+
+  // ── 시스템 상태 (S1) ───────────────────
+  // 상시 감시 중인 수치를 5초마다 갱신해 보여준다. 다른 탭으로 가면 폴링을 멈춘다.
+  let healthTimer = null;
+  function stopHealth() { if (healthTimer) { clearInterval(healthTimer); healthTimer = null; } }
+
+  const LV = { ok: { c: 'var(--accent)', i: '✅' }, info: { c: '#118AB2', i: 'ℹ️' }, warn: { c: '#f0a500', i: '⚠️' }, danger: { c: 'var(--danger)', i: '🚨' } };
+  const dur = (sec) => { sec = Math.floor(sec); const d = Math.floor(sec / 86400), h = Math.floor((sec % 86400) / 3600), m = Math.floor((sec % 3600) / 60); return d ? `${d}일 ${h}시간` : h ? `${h}시간 ${m}분` : `${m}분`; };
+  const ago = (iso) => { const s = Math.floor((Date.now() - new Date(iso)) / 1000); return s < 60 ? '방금' : s < 3600 ? `${Math.floor(s / 60)}분 전` : s < 86400 ? `${Math.floor(s / 3600)}시간 전` : `${Math.floor(s / 86400)}일 전`; };
+  // 값 배열 → 작은 꺾은선(SVG). 추세를 숫자 대신 눈으로 보게 한다.
+  function spark(values, color = 'var(--secondary)', h = 40) {
+    const v = (values || []).filter((x) => Number.isFinite(x));
+    if (v.length < 2) return '<div class="hl-nospark muted">추세를 그릴 만큼 표본이 모이지 않았습니다</div>';
+    const min = Math.min(...v), max = Math.max(...v), span = (max - min) || 1, w = 100;
+    const pts = v.map((y, i) => `${(i / (v.length - 1) * w).toFixed(2)},${(h - ((y - min) / span) * (h - 4) - 2).toFixed(2)}`).join(' ');
+    return `<svg class="hl-spark" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-hidden="true">
+      <polyline points="${pts}" fill="none" stroke="${color}" stroke-width="1.5" vector-effect="non-scaling-stroke"/></svg>`;
+  }
+  function hcard(title, value, sub, level, extra = '') {
+    const L = LV[level] || LV.ok;
+    return `<div class="hl-card" style="border-left-color:${L.c}">
+      <div class="hl-t">${L.i} ${title}</div>
+      <div class="hl-v num">${value}</div>
+      <div class="hl-s">${sub}</div>${extra}</div>`;
+  }
+
+  async function loadHealth() {
+    document.getElementById('view').innerHTML = '<div class="empty"><div class="big">⏳</div>불러오는 중…</div>';
+    stopHealth();
+    await drawHealth();
+    healthTimer = setInterval(drawHealth, 5000);
+  }
+
+  async function drawHealth() {
+    if (state.tab !== 'health') return stopHealth();
+    const view = document.getElementById('view');
+    if (!view) return stopHealth();
+    let d;
+    try { d = await API.health(); }
+    catch (err) { view.innerHTML = `<div class="empty">⚠️ ${UI.escapeHtml(err.message)}</div>`; return stopHealth(); }
+    const esc = UI.escapeHtml;
+
+    // 지금 떠 있는 경보 — 가장 먼저 눈에 들어와야 한다
+    const act = d.alerts.active;
+    const banner = act.length
+      ? `<div class="hl-alerts">${act.map((a) => { const L = LV[a.level] || LV.warn; return `<div class="hl-alert" style="border-left-color:${L.c}">
+          <span class="hl-ai">${L.i}</span>
+          <div><b>${esc(a.message)}</b><div class="muted">${esc(a.detail || '')}</div>
+          <div class="muted" style="font-size:11px">${ago(a.since)}부터 · ${a.count}회 감지</div></div></div>`; }).join('')}</div>`
+      : '<div class="hl-ok">✅ 지금 떠 있는 경보가 없습니다.</div>';
+
+    const loop = d.loop, mem = d.memory, disk = d.disk, dbp = d.dbPool, err = d.errors, pr = d.process;
+    const loopLevel = loop.p95 >= loop.dangerMs ? 'danger' : loop.p95 >= loop.warnMs ? 'warn' : 'ok';
+    const memLevel = mem.heapPct >= 95 ? 'danger' : mem.heapPct >= 80 ? 'warn' : 'ok';
+    const poolLevel = dbp.waiting > 0 ? 'warn' : dbp.inUse / Math.max(1, dbp.max) >= 0.8 ? 'info' : 'ok';
+    const errLevel = err.errorPct >= 20 ? 'danger' : err.errorPct >= 5 ? 'warn' : 'ok';
+    const mb = (b) => (b / 1048576).toFixed(0) + 'MB';
+    const growth = mem.growthPerHour > 0 ? `▲ 시간당 +${mb(mem.growthPerHour)}` : mem.growthPerHour < 0 ? `▼ 시간당 ${mb(mem.growthPerHour)}` : '변화 없음';
+
+    const cards = [
+      hcard('서비스 가동', dur(pr.uptime), `${pr.boots}회 기동 · ${pr.unexpectedRestart ? '<b style="color:var(--danger)">직전 비정상 종료</b>' : '직전 정상 종료'} · Node ${esc(pr.node)}`, pr.unexpectedRestart ? 'warn' : 'ok'),
+      hcard('이벤트 루프 지연', `${loop.p95}ms`, `p50 ${loop.p50}ms · 최대 ${loop.max}ms · 기준 ${loop.warnMs}/${loop.dangerMs}ms`, loopLevel),
+      hcard('메모리(힙)', `${mem.heapPct}%`, `${mb(mem.heapUsed)} / ${mb(mem.heapTotal)} · RSS ${mb(mem.rss)}<br>${growth} (최근 ${mem.windowMinutes}분)`, memLevel,
+        spark(mem.series.map((x) => x.heapUsed), memLevel === 'ok' ? 'var(--secondary)' : LV[memLevel].c)),
+      hcard('디스크', `${disk.usedPct}%`, `남은 공간 ${UI.bytes(disk.avail || 0)} / ${UI.bytes(disk.total || 0)}<br>경보 단계 75 · 85 · 92 · 96%`, disk.level || 'ok'),
+      hcard('DB 커넥션', `${dbp.inUse} / ${dbp.max}`, `대기 ${dbp.waiting}건 · 30분 최대 사용 ${dbp.peakInUse} · 최대 대기 ${dbp.peakWaiting}`, poolLevel,
+        spark(dbp.series.map((x) => x.inUse), poolLevel === 'ok' ? 'var(--secondary)' : LV[poolLevel].c)),
+      hcard('오류율(최근 5분)', `${err.errorPct}%`, `요청 ${err.total}건 · 서버오류 ${err.e5xx}건 · 클라이언트오류 ${err.e4xx}건`, errLevel),
+    ].join('');
+
+    // 분당 요청/오류 막대 — 언제 튀었는지 눈으로 본다
+    const maxReq = Math.max(1, ...err.perMinute.map((x) => x.total));
+    const minuteBars = err.perMinute.length
+      ? err.perMinute.map((x) => {
+        const t = new Date(x.minute * 60000).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
+        return `<div class="hl-bar" title="${t} · 요청 ${x.total} · 5xx ${x.e5xx} · 4xx ${x.e4xx}">
+          <div class="hl-bcol"><span class="e5" style="height:${x.e5xx / maxReq * 100}%"></span><span class="e4" style="height:${x.e4xx / maxReq * 100}%"></span><span class="ok" style="height:${(x.total - x.e5xx - x.e4xx) / maxReq * 100}%"></span></div>
+          <div class="hl-blabel">${t}</div></div>`;
+      }).join('')
+      : '<p class="muted">아직 요청 기록이 없습니다.</p>';
+
+    const routes = err.topRoutes.length
+      ? `<table class="hl-table"><thead><tr><th>경로</th><th class="num">요청</th><th class="num">5xx</th><th class="num">평균</th></tr></thead><tbody>
+          ${err.topRoutes.map((r) => `<tr><td>${esc(r.route)}</td><td class="num">${r.total}</td><td class="num" style="${r.e5xx ? 'color:var(--danger);font-weight:700' : ''}">${r.e5xx}</td><td class="num">${r.avgMs}ms</td></tr>`).join('')}
+        </tbody></table>`
+      : '<p class="muted">집계된 요청이 없습니다.</p>';
+
+    const hist = d.alerts.history.length
+      ? d.alerts.history.map((h) => { const L = LV[h.level] || LV.info; return `<div class="hl-hrow"><span class="hl-hi">${L.i}</span><div><b>${esc(h.title)}</b><div class="muted">${esc(h.body || '')}</div></div><span class="muted hl-hago">${ago(h.at)}</span></div>`; }).join('')
+      : '<p class="muted">기록된 경보가 없습니다.</p>';
+
+    const dbInfo = d.db.connected
+      ? `DB 정상 · ${esc(d.db.database)} · ${UI.bytes(d.db.sizeBytes)} · 연결 ${d.db.activeConnections}개`
+      : `<b style="color:var(--danger)">DB 연결 끊김</b> ${esc(d.db.error || '')}`;
+
+    // 인덱스 점검(S22)은 무거워 접어둔다 — 이미 열려 있으면 결과를 그대로 살린다(5초 갱신에 지워지지 않게)
+    const idxBody = document.getElementById('hl-idx-body');
+    const idxOpen = idxBody && !idxBody.classList.contains('hidden');
+    const idxHtml = idxOpen ? idxBody.innerHTML : '';
+
+    view.innerHTML = `
+      ${banner}
+      <div class="hl-grid">${cards}</div>
+      <div class="dash-card"><div class="dash-h">분당 요청 <span class="muted" style="font-size:12px;font-weight:400">· <span class="hl-leg ok"></span> 정상 <span class="hl-leg e4"></span> 4xx <span class="hl-leg e5"></span> 5xx</span></div>
+        <div class="hl-chart">${minuteBars}</div>
+        <div class="muted" style="font-size:12px;margin-top:8px">${dbInfo} · 호스트 부하 ${d.host.loadPct}% (${d.host.cores}코어)</div>
+      </div>
+      <div class="dash-2col">
+        <div class="dash-card"><div class="dash-h">경로별 요청·오류 (최근 5분)</div>${routes}</div>
+        <div class="dash-card"><div class="dash-h">경보 이력</div><div class="hl-hist">${hist}</div></div>
+      </div>
+      <div class="dash-card">
+        <div class="dash-h">인덱스 사용률 점검
+          <button class="btn btn-sm btn-secondary" id="hl-idx-run" style="margin-left:auto">${idxOpen ? '다시 검사' : '검사 실행'}</button>
+        </div>
+        <p class="muted" style="font-size:12px;margin:0 0 8px">한 번도 쓰이지 않은 인덱스(쓰기만 느리게 하는 것)와, 순차 스캔이 잦아 인덱스가 필요해 보이는 테이블을 찾습니다.</p>
+        <div id="hl-idx-body" class="${idxOpen ? '' : 'hidden'}">${idxHtml}</div>
+      </div>`;
+    document.getElementById('hl-idx-run').addEventListener('click', runIndexCheck);
+  }
+
+  async function runIndexCheck() {
+    const box = document.getElementById('hl-idx-body'), btn = document.getElementById('hl-idx-run');
+    if (!box) return;
+    box.classList.remove('hidden');
+    box.innerHTML = '<p class="muted">검사 중…</p>';
+    if (btn) btn.disabled = true;
+    try {
+      const d = await API.healthIndexes(true);
+      const esc = UI.escapeHtml;
+      const unused = d.unused.length
+        ? `<table class="hl-table"><thead><tr><th>테이블</th><th>인덱스</th><th class="num">크기</th></tr></thead><tbody>
+            ${d.unused.map((x) => `<tr><td>${esc(x.table)}</td><td>${esc(x.index)}</td><td class="num">${UI.bytes(x.bytes)}</td></tr>`).join('')}</tbody></table>
+           <p class="muted" style="font-size:12px">합계 ${UI.bytes(d.unusedBytes)} — PK·UNIQUE 는 무결성 목적이라 제외했습니다. 지우기 전에 통계가 충분히 쌓였는지 확인하세요.</p>`
+        : '<p class="muted">쓰이지 않는 인덱스가 없습니다. 👍</p>';
+      const need = d.needIndex.length
+        ? `<table class="hl-table"><thead><tr><th>테이블</th><th class="num">행</th><th class="num">순차</th><th class="num">인덱스</th><th class="num">순차비율</th></tr></thead><tbody>
+            ${d.needIndex.map((x) => `<tr><td>${esc(x.table)}</td><td class="num">${x.rows.toLocaleString()}</td><td class="num">${x.seqScan.toLocaleString()}</td><td class="num">${x.idxScan.toLocaleString()}</td><td class="num" style="color:var(--danger);font-weight:700">${x.seqPct}%</td></tr>`).join('')}</tbody></table>`
+        : '<p class="muted">인덱스가 부족해 보이는 테이블이 없습니다. 👍</p>';
+      box.innerHTML = `<div class="dash-2col" style="margin:0">
+          <div><div class="hl-sub">🗑️ 쓰이지 않는 인덱스 (${d.unused.length}개)</div>${unused}</div>
+          <div><div class="hl-sub">🔎 인덱스가 필요해 보이는 테이블 (${d.needIndex.length}개)</div>${need}</div>
+        </div>
+        <p class="muted" style="font-size:11px;margin-top:8px">${esc(d.note)} · 검사 시각 ${new Date(d.at).toLocaleString('ko-KR')}</p>`;
+    } catch (e) { box.innerHTML = `<p class="muted" style="color:var(--danger)">${UI.escapeHtml(e.message)}</p>`; }
+    finally { if (btn) { btn.disabled = false; btn.textContent = '다시 검사'; } }
   }
 
   // ── 계정 관리 ──────────────────────────
