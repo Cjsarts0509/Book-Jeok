@@ -99,9 +99,11 @@ app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 app.use(cookieParser());
 
 // 전역 레이트 리밋 (실제 클라이언트 IP 기준 — 터널 뒤 전역버킷화 방지)
+// 부하 테스트처럼 의도적으로 많이 때려봐야 할 때만 API_RATE_LIMIT_MAX 로 잠시 올린다.
+// 운영 기본값은 분당 300건 — 값을 비워두면 항상 이 값이 쓰인다.
 app.use('/api/', rateLimit({
   windowMs: 60 * 1000,
-  max: 300,
+  max: parseInt(process.env.API_RATE_LIMIT_MAX || '300', 10),
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: rateKey,
