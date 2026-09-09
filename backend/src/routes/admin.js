@@ -654,4 +654,29 @@ router.get('/health/indexes', wrap(async (req, res) => {
   res.json(await require('../metrics').indexReport(req.query.force === '1'));
 }));
 
+// ══════════ 정기 점검 (S7 S8 S9 S24 S26 S29) ══════════
+// 앱 안에서 도는 점검(정합성·정리 리포트)과 호스트 스크립트가 남긴 결과(백업 검증·복원
+// 리허설·의존성 취약점)를 한 번에 돌려준다 — 화면은 출처를 구분하지 않는다.
+router.get('/checkups', wrap(async (req, res) => {
+  res.json({ checkups: await require('../checkup').loadAll() });
+}));
+
+// 앱 안에서 도는 점검만 즉시 실행할 수 있다. 호스트 점검은 서버에서 스크립트로 돌린다.
+const RUNNABLE = {
+  integrity: (opts) => require('../checkup').integrityCheck(opts),
+  cleanup: () => require('../checkup').cleanupReport(),
+};
+let checkupRunning = null;   // 동시에 두 번 돌지 않게(디스크를 크게 읽는 작업)
+router.post('/checkups/:name/run', wrap(async (req, res) => {
+  const fn = RUNNABLE[req.params.name];
+  if (!fn) return res.status(400).json({ error: '이 점검은 서버에서 스크립트로 실행합니다.' });
+  if (checkupRunning) return res.status(409).json({ error: `이미 '${checkupRunning}' 점검이 실행 중입니다. 끝난 뒤 다시 시도해 주세요.` });
+  checkupRunning = req.params.name;
+  try {
+    const result = await fn({ deep: req.query.deep === '1' });
+    await audit(req, 'run_checkup', `${req.params.name}${req.query.deep === '1' ? ' (deep)' : ''}`);
+    res.json(result);
+  } finally { checkupRunning = null; }
+}));
+
 module.exports = router;
