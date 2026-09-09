@@ -16,7 +16,14 @@ const ENABLED = process.env.LIST_CACHE !== '0';
 
 const versions = new Map();   // ownerId -> 정수. 그 계정에 변화가 생기면 올라간다.
 const entries = new Map();    // key -> { at, version, owner, payload }
-const stats = { hit: 0, miss: 0, stale: 0, evict: 0, invalidate: 0 };
+// S32 · 장애 시 읽기 폴백.
+// DB가 죽으면 목록조차 못 보여 주고 사람들은 "다 날아갔나"부터 걱정한다.
+// 마지막으로 성공한 응답을 만료 없이 따로 들고 있다가, DB가 답을 못 줄 때
+// "지금은 서버에 문제가 있어 마지막으로 본 화면"이라고 밝히고 보여 준다.
+// 읽기만 돌려주고 쓰기는 그대로 실패한다 — 없는 데이터를 지어내지는 않는다.
+const fallback = new Map();   // key -> { at, payload }
+const FALLBACK_MAX = parseInt(process.env.LIST_FALLBACK_MAX || '1000', 10);
+const stats = { hit: 0, miss: 0, stale: 0, evict: 0, invalidate: 0, fallbackServed: 0 };
 
 const versionOf = (owner) => versions.get(Number(owner)) || 0;
 
@@ -50,7 +57,18 @@ function set(k, owner, payload) {
     if (oldest !== undefined) { entries.delete(oldest); stats.evict++; }
   }
   entries.set(k, { at: Date.now(), version: versionOf(owner), owner: Number(owner), payload });
+  // 폴백본은 무효화·만료와 무관하게 남긴다 — '지금 맞는 값'이 아니라 '마지막으로 맞았던 값'이 목적
+  if (fallback.size >= FALLBACK_MAX) { const oldest = fallback.keys().next().value; if (oldest !== undefined) fallback.delete(oldest); }
+  fallback.set(k, { at: Date.now(), payload });
   return payload;
+}
+
+// DB가 답을 못 줄 때 쓸 마지막 성공본. 없으면 null.
+function getFallback(k) {
+  const e = fallback.get(k);
+  if (!e) return null;
+  stats.fallbackServed++;
+  return { ...clone(e.payload), stale: true, staleAt: new Date(e.at).toISOString() };
 }
 
 // 캐시된 값을 그대로 돌려주면 호출자가 응답 객체를 고쳤을 때 캐시까지 오염된다.
@@ -70,9 +88,10 @@ function snapshot() {
   const total = stats.hit + stats.miss;
   return {
     enabled: ENABLED, entries: entries.size, maxEntries: MAX_ENTRIES, ttlMs: TTL_MS,
+    fallbackEntries: fallback.size,
     ...stats, hitRate: total ? Math.round((stats.hit / total) * 1000) / 10 : 0,
   };
 }
-function clear() { entries.clear(); versions.clear(); }
+function clear() { entries.clear(); versions.clear(); }   // 폴백본은 남긴다(장애 때 쓸 마지막 보루)
 
-module.exports = { key, get, set, wrap, bump, bumpMany, snapshot, clear, ENABLED };
+module.exports = { key, get, set, wrap, bump, bumpMany, getFallback, snapshot, clear, ENABLED };

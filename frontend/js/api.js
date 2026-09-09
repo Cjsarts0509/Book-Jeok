@@ -64,6 +64,7 @@ const API = (() => {
     deleteFolderTemplate: (id, ownerId) => req('DELETE', `/files/templates/${id}` + (ownerId ? `?ownerId=${ownerId}` : '')),
     applyTemplate: (id, folder, ownerId) => req('POST', `/files/templates/${id}/apply` + (ownerId ? `?ownerId=${ownerId}` : ''), { folder }),
     bookInfo: (isbn) => req('GET', `/meta/book/${encodeURIComponent(isbn)}`),
+    uploadStatus: (uploadId) => req('GET', `/files/upload/${uploadId}/status`),
     activity: (ownerId, limit = 30) => req('GET', `/files/activity?limit=${limit}${ownerId ? '&ownerId=' + ownerId : ''}`),
     accounts: () => req('GET', '/files/accounts'),
     branches: () => req('GET', '/meta/branches'),

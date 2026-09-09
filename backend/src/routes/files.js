@@ -319,6 +319,7 @@ router.get('/tree', authenticate, wrap(resolveOwner), wrap(async (req, res) => {
   const ck = listcache.key('tree', req.targetOwnerId, req.user.id);
   const cached = listcache.get(ck, req.targetOwnerId);
   if (cached) return res.json(cached);
+  try {
   const [ff, fx] = await Promise.all([
     query('SELECT path, icon, color, cover_file_id FROM folders WHERE owner_id=$1 AND deleted_at IS NULL', [req.targetOwnerId]),
     query('SELECT DISTINCT folder AS path FROM files WHERE owner_id=$1 AND folder<>$2 AND deleted_at IS NULL', [req.targetOwnerId, '/']),
@@ -333,6 +334,13 @@ router.get('/tree', authenticate, wrap(resolveOwner), wrap(async (req, res) => {
   const payload = { ownerId: req.targetOwnerId, folders: [...set].sort(), styles };
   listcache.set(ck, req.targetOwnerId, payload);
   res.json(payload);
+  } catch (err) {
+    if (res.headersSent) throw err;
+    const fb = listcache.getFallback(ck);
+    if (!fb) throw err;
+    res.set('X-Bookjeok-Stale', '1');
+    return res.json(fb);
+  }
 }));
 
 // 폴더 생성 (선택: 아이콘/색상)
@@ -427,6 +435,7 @@ router.get('/', authenticate, wrap(resolveOwner), wrap(async (req, res) => {
   const ck = listcache.key('list', req.targetOwnerId, req.user.id, folder);
   const cached = listcache.get(ck, req.targetOwnerId);
   if (cached) return res.json(cached);
+  try {
   const files = await query(
     `SELECT id, folder, original_name, size_bytes, mime_type, note, created_at, updated_at, note_updated_at,
             locked_by, locked_at, lock_note
@@ -483,6 +492,16 @@ router.get('/', authenticate, wrap(resolveOwner), wrap(async (req, res) => {
   const payload = { folder, ownerId: req.targetOwnerId, folders, files: fileList };
   listcache.set(ck, req.targetOwnerId, payload);
   res.json(payload);
+  } catch (err) {
+    // S32 · DB가 답을 못 주면 마지막으로 성공했던 목록이라도 보여 준다.
+    // 아무것도 못 보여 주면 사람들은 "다 날아갔나"부터 걱정한다.
+    if (res.headersSent) throw err;
+    const fb = listcache.getFallback(ck);
+    if (!fb) throw err;
+    console.error('[files] 목록 조회 실패 → 마지막 성공본으로 응답:', err.message);
+    res.set('X-Bookjeok-Stale', '1');
+    return res.json(fb);
+  }
 }));
 
 // ── 업로드 ──────────
@@ -592,6 +611,27 @@ router.post('/upload/chunk', authenticate, wrap(diskGate), chunkUpload.single('c
   await fsp.mkdir(dir, { recursive: true });
   await fsp.rename(req.file.path, path.join(dir, `${index}.part`));
   res.json({ ok: true, index });
+}));
+
+// S4 · 끊긴 업로드 이어올리기
+// 이미 받아 둔 조각이 무엇인지 알려준다. 클라이언트는 없는 조각만 다시 보내면 된다.
+// 조각은 하루 뒤 자동 정리되므로(purgeStaleChunks) 이어올리기 창은 하루다.
+router.get('/upload/:uploadId/status', authenticate, wrap(async (req, res) => {
+  const uploadId = String(req.params.uploadId || '');
+  if (!UPLOAD_ID_RE.test(uploadId)) return res.status(400).json({ error: '잘못된 업로드 식별자입니다.' });
+  const dir = path.join(CHUNK_ROOT, uploadId);
+  let names = [];
+  try { names = await fsp.readdir(dir); } catch { return res.json({ received: [], bytes: 0, exists: false }); }
+  const received = [];
+  let bytes = 0;
+  for (const n of names) {
+    const m = /^(\d+)\.part$/.exec(n);
+    if (!m) continue;
+    received.push(Number(m[1]));
+    try { bytes += (await fsp.stat(path.join(dir, n))).size; } catch { /* 방금 정리됐을 수 있다 */ }
+  }
+  received.sort((a, b) => a - b);
+  res.json({ received, bytes, exists: true });
 }));
 
 // 완료: 조각을 순서대로 합쳐 최종 파일 생성 → 매직바이트·YARA·할당량 검사 후 저장. (단일 업로드와 동일 정책)

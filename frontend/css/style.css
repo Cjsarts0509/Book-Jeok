@@ -1130,3 +1130,7 @@ th { background: var(--bg); font-weight: 700; color: var(--text-muted); font-siz
 .tpl-badge { display: inline-block; margin-left: 6px; padding: 1px 7px; font-size: 10px; font-weight: 700; color: var(--secondary); background: #E7F5FB; border-radius: 999px; }
 .tpl-new textarea.input { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; line-height: 1.6; resize: vertical; }
 .tpl-shared { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-muted); margin-top: 4px; }
+
+/* ── S32 · 장애 시 읽기 폴백 배너 ─────────────────────── */
+.degraded-banner { padding: 11px 14px; margin-bottom: 12px; background: #FFF4E0; border: 1px solid #F5D9A0; border-left: 4px solid #f0a500; border-radius: var(--radius); font-size: 13px; line-height: 1.6; color: #7a4d00; }
+.degraded-banner .muted { font-size: 12px; }

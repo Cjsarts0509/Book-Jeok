@@ -140,7 +140,13 @@ app.use('/api/', (req, res, next) => {
 });
 
 // ── 라우트 ──────────────────────────────────────────
-app.get('/api/health', (req, res) => res.json({ ok: true, service: 'book-jeok', time: new Date().toISOString() }));
+app.get('/api/health', async (req, res) => {
+  // ok 는 '프로세스가 응답한다'는 뜻. db 가 끊겨도 읽기 폴백(S32)으로 일부 기능은 살아 있으므로
+  // ok:false 로 죽이지 않고 degraded 로 알린다 — 배포 건강검진은 ok 를 본다.
+  let db = true;
+  try { await require('./db').query('SELECT 1'); } catch (_) { db = false; }
+  res.json({ ok: true, service: 'book-jeok', db, degraded: !db, time: new Date().toISOString() });
+});
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api/files', require('./routes/files'));
 app.use('/api/admin', require('./routes/admin'));

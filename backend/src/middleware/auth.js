@@ -20,10 +20,27 @@ async function authenticate(req, res, next) {
     // 알고리즘 고정(HS256): 향후 키 방식이 바뀌어도 알고리즘 혼동 공격이 성립하지 않게 못박는다.
     const payload = jwt.verify(token, config.jwtSecret, { algorithms: ['HS256'] });
     // 토큰 발급 후 계정이 비활성/삭제되었을 수 있으므로 DB 재확인
-    const result = await query(
-      'SELECT id, username, display_name, role, is_active, totp_enabled, token_version FROM users WHERE id = $1',
-      [payload.sub]
-    );
+    let result;
+    try {
+      result = await query(
+        'SELECT id, username, display_name, role, is_active, totp_enabled, token_version FROM users WHERE id = $1',
+        [payload.sub]
+      );
+    } catch (dbErr) {
+      // S32 · DB가 답을 못 준다. 여기서 401 을 주면 읽기 폴백이 무의미해진다
+      // (아무 요청도 라우트까지 못 가므로). 그래서 '읽기 요청'에 한해 토큰의 주장만 믿고 통과시킨다.
+      //   · 토큰은 우리가 서명했고 수명이 짧다(기본 8시간) → 신원 자체는 신뢰할 수 있다
+      //   · 다만 계정 정지·세션 폐기(token_version)는 DB 없이는 확인할 수 없다
+      //   → 감수하는 위험: 장애 중 정지된 계정이 최대 토큰 수명만큼 '읽기'를 더 할 수 있다
+      //   → 대신 쓰기는 전부 막는다. 없는 데이터를 지어내거나 바꾸지는 않는다.
+      if (req.method !== 'GET' && req.method !== 'HEAD') {
+        return res.status(503).json({ error: '데이터베이스에 연결하지 못했습니다. 잠시 후 다시 시도해 주세요.', code: 'db_down' });
+      }
+      console.error('[auth] DB 조회 실패 → 읽기 전용 저하 모드로 통과:', dbErr.message);
+      req.user = { id: payload.sub, username: payload.username || '', display_name: '', role: payload.role || 'user', is_active: true, totp_enabled: true, token_version: payload.tv || 0 };
+      req.degraded = true;
+      return next();
+    }
     if (result.rowCount === 0 || !result.rows[0].is_active) {
       return res.status(401).json({ error: '유효하지 않은 계정입니다.' });
     }

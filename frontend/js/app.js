@@ -405,6 +405,10 @@ const App = (() => {
     const view = document.getElementById('view');
     try {
       const [list, usage] = await Promise.all([API.listFiles(state.folder, state.ownerId), API.usage(state.ownerId)]);
+      // S32 · 서버가 '마지막으로 성공했던 목록'을 준 경우 — 그대로 밝힌다
+      // (state.stale 은 '다른 곳에서 목록이 바뀜'이라는 다른 뜻으로 이미 쓰고 있다)
+      state.degraded = !!list.stale;
+      state.degradedAt = list.staleAt || null;
       // 방어적 정규화 (구버전 백엔드가 문자열 배열을 줘도 안전)
       state.folders = (list.folders || [])
         .map((f) => (typeof f === 'string' ? { path: f } : f))
@@ -504,6 +508,7 @@ const App = (() => {
           <div class="usage-line"><span class="num">${UI.bytes(u.usedBytes)}</span><span class="muted">${u.unlimited ? '· 무제한' : (u.quotaBytes > 0 ? '/ ' + UI.bytes(u.quotaBytes) : '· 미할당')}${u.pooled && !u.unlimited ? ' · <span title="여러 계정이 함께 쓰는 공유 용량입니다">공유 용량</span>' : ''} · ${u.fileCount}개 파일</span>${!u.unlimited && u.quotaBytes > 0 ? `<span class="usage-bar"><span style="width:${pct}%"></span></span>` : ''}<button class="btn btn-ghost btn-sm" id="usage-report" title="용량 리포트">📊</button></div>
         </div>
       </div>
+      ${state.degraded ? `<div class="degraded-banner">⚠️ <b>지금 서버에 문제가 있어 마지막으로 확인된 목록</b>을 보여주고 있습니다${state.degradedAt ? ` (${UI.escapeHtml(new Date(state.degradedAt).toLocaleString('ko-KR'))} 기준)` : ''}.<br><span class="muted">이 상태에서는 업로드·삭제 같은 변경이 되지 않습니다. 잠시 뒤 🔄 새로고침으로 다시 시도해 주세요.</span></div>` : ''}
       ${state.search.on ? `<div class="search-banner">🔎 <b>${UI.escapeHtml(state.search.q)}</b> 검색 결과 · ${state.folders.length + state.files.length}건<div style="flex:1"></div><button class="btn btn-sm btn-ghost" id="search-exit">✕ 검색 나가기</button></div>` : ''}
       <div id="acct-shortcuts"></div>
       <div id="selbar" class="selbar empty"></div>
@@ -1560,14 +1565,53 @@ const App = (() => {
   }
 
   // 대용량(>80MB): 50MB 조각으로 순차 전송 후 서버에서 합침. 진행률은 전송 패널 항목 t에 반영. 취소 시 중단.
+  // ── S4 · 끊긴 업로드 이어올리기 ────────────
+  // 큰 파일을 올리다 끊기면 처음부터 다시 올리는 게 가장 억울하다.
+  // 어디까지 올렸는지(uploadId)를 브라우저에 적어 두고, 같은 파일을 다시 올리면
+  // 서버에 "몇 번 조각까지 갖고 있냐"고 물어 나머지만 보낸다.
+  // 파일 식별은 이름+크기+수정시각으로 한다(내용 해시는 대용량에서 너무 느리다).
+  const RESUME_KEY = 'bj_resume';
+  const RESUME_TTL_MS = 20 * 60 * 60 * 1000;   // 서버가 조각을 하루 보관 → 그보다 짧게
+  const fileKey = (f, folder, ownerId) => `${ownerId || 0}|${folder}|${f.name}|${f.size}|${f.lastModified}`;
+  function resumeLoad() { try { return JSON.parse(localStorage.getItem(RESUME_KEY) || '{}'); } catch (_) { return {}; } }
+  function resumeSave(map) {
+    const now = Date.now();
+    for (const k of Object.keys(map)) if (now - (map[k].at || 0) > RESUME_TTL_MS) delete map[k];
+    try { localStorage.setItem(RESUME_KEY, JSON.stringify(map)); } catch (_) { /* 저장 실패는 무시 — 이어올리기만 못 할 뿐 */ }
+  }
+  function resumeRemember(key, uploadId, total) { const m = resumeLoad(); m[key] = { uploadId, total, at: Date.now() }; resumeSave(m); }
+  function resumeForget(key) { const m = resumeLoad(); delete m[key]; resumeSave(m); }
+
   async function chunkedUploadFile(file, folder, ownerId, t) {
-    // 시작 전 서버에 크기·형식·할당량 확인 → uploadId 발급(초과 시 조각 올리기 전에 즉시 실패)
-    const init = await API.uploadInit({ folder, filename: file.name, size: file.size }, ownerId);
-    const uid = init.uploadId;
     const total = Math.ceil(file.size / CHUNK_SIZE);
+    const key = fileKey(file, folder, ownerId);
+    let uid = null, have = new Set();
+
+    // 전에 올리다 만 것이 있으면 이어서
+    const prev = resumeLoad()[key];
+    if (prev && prev.total === total) {
+      try {
+        const st = await API.uploadStatus(prev.uploadId);
+        if (st.exists && st.received.length) {
+          uid = prev.uploadId;
+          have = new Set(st.received);
+          t.update(have.size * CHUNK_SIZE, file.size);
+          UI.toast(`${file.name} — ${have.size}/${total}조각까지 올라가 있어 이어서 올립니다`, 'info');
+        }
+      } catch (_) { /* 조각이 이미 정리됐거나 서버가 모르면 처음부터 */ }
+    }
+    if (!uid) {
+      // 시작 전 서버에 크기·형식·할당량 확인 → uploadId 발급(초과 시 조각 올리기 전에 즉시 실패)
+      const init = await API.uploadInit({ folder, filename: file.name, size: file.size }, ownerId);
+      uid = init.uploadId;
+      resumeForget(key);
+    }
+    resumeRemember(key, uid, total);
+
     for (let i = 0; i < total; i++) {
       if (t.canceled()) { const e = new Error('취소됨'); e.canceled = true; throw e; } // 조각 사이에서 취소 확인
       const start = i * CHUNK_SIZE;
+      if (have.has(i)) { t.update(Math.min(file.size, start + CHUNK_SIZE), file.size); continue; }   // 이미 올라간 조각은 건너뛴다
       const blob = file.slice(start, Math.min(file.size, start + CHUNK_SIZE));
       const fd = new FormData();
       fd.append('uploadId', uid); fd.append('index', String(i)); fd.append('chunk', blob, 'chunk');
@@ -1575,6 +1619,7 @@ const App = (() => {
       t.update(Math.min(file.size, start + blob.size), file.size);
     }
     await API.uploadComplete({ uploadId: uid, filename: file.name, folder, totalChunks: total, mime: file.type || '' }, ownerId);
+    resumeForget(key);     // 끝났으니 이어올리기 표시는 지운다
   }
 
   // ── 모바일 하단 FAB(⬆️) → 파일/촬영/스캔 선택 시트 ──────────
