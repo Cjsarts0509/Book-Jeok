@@ -114,6 +114,31 @@ app.use('/api/', rateLimit({
 const metrics = require('./metrics');
 app.use('/api/', metrics.requestMetrics);
 
+// ── 요청 타임아웃 (S33) ─────────────────────────────
+// 응답이 영영 안 오는 요청은 브라우저를 무한 로딩에 빠뜨리고 DB 커넥션을 붙잡는다.
+// 업로드·다운로드처럼 본래 오래 걸리는 경로는 middleware/timeout.js 에서 예외 처리한다.
+app.use('/api/', require('./middleware/timeout').requestTimeout);
+
+// ── 목록 캐시 무효화 (S21) ──────────────────────────
+// 쓰기가 성공하면 그 계정의 목록 캐시를 버린다. 개별 라우트마다 무효화를 심으면
+// 새 라우트가 생길 때마다 빠뜨리기 쉬우므로, 응답이 끝나는 지점에서 한 번에 처리한다.
+const listcache = require('./listcache');
+const MUTABLE = /^\/api\/(files|admin|upload-link|share|folder-share)\b/;
+app.use('/api/', (req, res, next) => {
+  if (req.method === 'GET' || req.method === 'HEAD') return next();
+  res.on('finish', () => {
+    if (res.statusCode >= 400) return;
+    if (!MUTABLE.test(req.originalUrl || '')) return;
+    const owners = [];
+    if (Array.isArray(req._bumpOwners)) owners.push(...req._bumpOwners);   // 여러 계정이 걸린 일괄 작업
+    if (req.targetOwnerId != null) owners.push(req.targetOwnerId);
+    if (req.user && req.user.id != null) owners.push(req.user.id);
+    if (owners.length) listcache.bumpMany(owners);
+    else listcache.clear();     // 대상을 특정 못 하면 안전하게 전부 버린다(드문 경로)
+  });
+  next();
+});
+
 // ── 라우트 ──────────────────────────────────────────
 app.get('/api/health', (req, res) => res.json({ ok: true, service: 'book-jeok', time: new Date().toISOString() }));
 app.use('/api/auth', require('./routes/auth'));

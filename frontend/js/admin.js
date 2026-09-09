@@ -190,7 +190,7 @@ const Admin = (() => {
       hcard('DB 커넥션', `${dbp.inUse} / ${dbp.max}`, `대기 ${dbp.waiting}건 · 30분 최대 사용 ${dbp.peakInUse} · 최대 대기 ${dbp.peakWaiting}`, poolLevel,
         spark(dbp.series.map((x) => x.inUse), poolLevel === 'ok' ? 'var(--secondary)' : LV[poolLevel].c)),
       hcard('오류율(최근 5분)', `${err.errorPct}%`, `요청 ${err.total}건 · 서버오류 ${err.e5xx}건 · 클라이언트오류 ${err.e4xx}건`, errLevel),
-    ].join('');
+    ].join('') + hardeningCards(d);
 
     // 분당 요청/오류 막대 — 언제 튀었는지 눈으로 본다
     const maxReq = Math.max(1, ...err.perMinute.map((x) => x.total));
@@ -241,6 +241,30 @@ const Admin = (() => {
         <div id="hl-idx-body" class="${idxOpen ? '' : 'hidden'}">${idxHtml}</div>
       </div>`;
     document.getElementById('hl-idx-run').addEventListener('click', runIndexCheck);
+  }
+
+  // 묶음4(요청 처리 하드닝)의 현재 상태 — 캐시가 듣고 있는지, 변환이 밀렸는지, 한 계정이 몰아치는지
+  function hardeningCards(d) {
+    const c = d.listCache, cv = d.converter, al = d.accountLimit;
+    if (!c && !cv && !al) return '';   // 구버전 백엔드와 섞여도 화면이 깨지지 않게
+    const out = [];
+    if (c) {
+      out.push(hcard('목록 캐시 적중률', c.enabled ? `${c.hitRate}%` : '꺼짐',
+        `적중 ${c.hit} · 빗나감 ${c.miss} · 보관 ${c.entries}/${c.maxEntries}건<br>쓰기로 버린 횟수 ${c.invalidate} · 만료 ${c.stale}`,
+        !c.enabled ? 'info' : c.hitRate >= 50 ? 'ok' : 'info'));
+    }
+    if (cv) {
+      out.push(hcard('문서 변환 대기', `${cv.queued} / ${cv.queueMax}`,
+        `변환 ${cv.done}건 완료 · 실패 ${cv.failed} · 붐벼서 거절 ${cv.rejected} · 대기중 취소 ${cv.timedOut}<br>최근 변환 ${(cv.lastMs / 1000).toFixed(1)}초 · 최대 대기열 ${cv.peakQueue}`,
+        cv.queued >= cv.queueMax ? 'danger' : cv.queued > 0 ? 'warn' : 'ok'));
+    }
+    if (al) {
+      const top = (al.top || [])[0];
+      out.push(hcard('계정별 요청량', `${top ? top.count : 0}`,
+        `이번 1분에 가장 많이 부른 계정 기준 · 한도 ${al.max}(관리자 ${al.adminMax})<br>활동 중 ${al.active}개 계정${top && top.blocked ? ` · <b style="color:var(--danger)">차단 ${top.blocked}건</b>` : ''}`,
+        top && top.blocked > 0 ? 'warn' : 'ok'));
+    }
+    return out.join('');
   }
 
   async function runIndexCheck() {

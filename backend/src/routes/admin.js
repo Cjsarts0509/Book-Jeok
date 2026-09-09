@@ -646,6 +646,10 @@ router.get('/health', wrap(async (req, res) => {
     ...metrics.snapshot(),
     host: { cores, load1: l1, loadPct: Math.min(100, Math.round((l1 / cores) * 100)), uptime: os.uptime() },
     db,
+    // 묶음4 · 요청 처리 하드닝의 현재 상태
+    listCache: require('../listcache').snapshot(),          // S21 목록 캐시 적중률
+    converter: require('../officePdf').stats(),             // S23 문서 변환 대기열
+    accountLimit: require('../accountLimit').snapshot(),     // S16 계정별 요청량
   });
 }));
 

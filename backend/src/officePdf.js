@@ -125,4 +125,7 @@ async function dropCache(cacheKey) {
   try { await fsp.unlink(path.join(CACHE_DIR, `${cacheKey}.pdf`)); } catch (_) { /* noop */ }
 }
 
-module.exports = { canConvert, sofficeAvailable, convert, dropCache, stats, CACHE_DIR };
+module.exports = {
+  canConvert, sofficeAvailable, convert, dropCache, stats, CACHE_DIR,
+  enqueue,   // 백프레셔 동작을 직접 검증하기 위해 노출(변환 외 용도로 쓰지 말 것)
+};

@@ -14,6 +14,7 @@ const { generateToken, hashPassword } = require('../crypto');
 const filetype = require('../filetype');
 const yara = require('../yara');
 const officePdf = require('../officePdf');
+const listcache = require('../listcache');
 const { diskGate } = require('../disk');
 const { poolRootId, poolUsage } = require('../pool');
 const notify = require('../notify');
@@ -302,6 +303,9 @@ router.get('/activity', authenticate, wrap(resolveOwner), wrap(async (req, res) 
 
 // ── 폴더 트리 ──────────
 router.get('/tree', authenticate, wrap(resolveOwner), wrap(async (req, res) => {
+  const ck = listcache.key('tree', req.targetOwnerId, req.user.id);
+  const cached = listcache.get(ck, req.targetOwnerId);
+  if (cached) return res.json(cached);
   const [ff, fx] = await Promise.all([
     query('SELECT path, icon, color, cover_file_id FROM folders WHERE owner_id=$1 AND deleted_at IS NULL', [req.targetOwnerId]),
     query('SELECT DISTINCT folder AS path FROM files WHERE owner_id=$1 AND folder<>$2 AND deleted_at IS NULL', [req.targetOwnerId, '/']),
@@ -313,7 +317,9 @@ router.get('/tree', authenticate, wrap(resolveOwner), wrap(async (req, res) => {
     for (const p of parts) { acc += '/' + p; set.add(acc); }
   }
   for (const row of ff.rows) { if (row.icon || row.color || row.cover_file_id) styles[row.path] = { icon: row.icon || '', color: row.color || '', cover: row.cover_file_id || null }; }
-  res.json({ ownerId: req.targetOwnerId, folders: [...set].sort(), styles });
+  const payload = { ownerId: req.targetOwnerId, folders: [...set].sort(), styles };
+  listcache.set(ck, req.targetOwnerId, payload);
+  res.json(payload);
 }));
 
 // 폴더 생성 (선택: 아이콘/색상)
@@ -405,6 +411,9 @@ router.delete('/folders', authenticate, wrap(resolveOwner), wrap(async (req, res
 // ── 파일 목록 (+직속 폴더 객체) ──────────
 router.get('/', authenticate, wrap(resolveOwner), wrap(async (req, res) => {
   const folder = normalizeFolder(req.query.folder);
+  const ck = listcache.key('list', req.targetOwnerId, req.user.id, folder);
+  const cached = listcache.get(ck, req.targetOwnerId);
+  if (cached) return res.json(cached);
   const files = await query(
     `SELECT id, folder, original_name, size_bytes, mime_type, note, created_at, updated_at, note_updated_at
      FROM files WHERE owner_id=$1 AND folder=$2 AND deleted_at IS NULL ORDER BY original_name`,
@@ -457,7 +466,9 @@ router.get('/', authenticate, wrap(resolveOwner), wrap(async (req, res) => {
   }
   const fileList = files.rows.map(fileRow);
   await attachMeta(req.user.id, req.targetOwnerId, fileList, folders);
-  res.json({ folder, ownerId: req.targetOwnerId, folders, files: fileList });
+  const payload = { folder, ownerId: req.targetOwnerId, folders, files: fileList };
+  listcache.set(ck, req.targetOwnerId, payload);
+  res.json(payload);
 }));
 
 // ── 업로드 ──────────
@@ -746,18 +757,20 @@ function soleOwner(files) {
   const owners = [...new Set((files || []).map((f) => Number(f.owner_id)))];
   return owners.length === 1 ? owners[0] : undefined;
 }
-async function loadAccessibleFiles(user, ids) {
+async function loadAccessibleFiles(user, ids, req) {
   const list = (Array.isArray(ids) ? ids : []).map(Number).filter(Boolean);
   if (list.length === 0) return [];
   const r = await query('SELECT * FROM files WHERE id = ANY($1::bigint[]) AND deleted_at IS NULL', [list]);
   const out = [];
   for (const f of r.rows) if (await canAccessOwner(user, f.owner_id)) out.push(f);
+  // 일괄 이동·복사는 여러 계정에 걸칠 수 있다 → 무효화 대상으로 기록(S21)
+  if (req) { req._bumpOwners = [...new Set([...(req._bumpOwners || []), ...out.map((f) => f.owner_id)])]; }
   return out;
 }
 
 // ── 일괄 삭제 (소프트) ──────────
 router.post('/bulk/delete', authenticate, wrap(async (req, res) => {
-  const files = await loadAccessibleFiles(req.user, req.body.ids);
+  const files = await loadAccessibleFiles(req.user, req.body.ids, req);
   if (files.length === 0) return res.status(400).json({ error: '삭제할 항목이 없습니다.' });
   await query('UPDATE files SET deleted_at=now(), deleted_with_folder=NULL WHERE id = ANY($1::bigint[])', [files.map((f) => f.id)]);
   await audit(req, 'bulk_trash', `count=${files.length} ids=${files.slice(0, 200).map((f) => f.id).join(',')}`, soleOwner(files));
@@ -767,7 +780,7 @@ router.post('/bulk/delete', authenticate, wrap(async (req, res) => {
 // ── 일괄 이동 ──────────
 router.post('/bulk/move', authenticate, wrap(async (req, res) => {
   const folder = normalizeFolder(req.body.folder);
-  const files = await loadAccessibleFiles(req.user, req.body.ids);
+  const files = await loadAccessibleFiles(req.user, req.body.ids, req);
   if (files.length === 0) return res.status(400).json({ error: '이동할 항목이 없습니다.' });
   const owners = [...new Set(files.map((f) => f.owner_id))];
   await Promise.all(owners.map((o) => ensureFolder(o, folder)));
@@ -782,7 +795,7 @@ router.post('/bulk/move', authenticate, wrap(async (req, res) => {
 // ── 일괄 복사 (실물 파일 복제 + 새 레코드) ──────────
 router.post('/bulk/copy', authenticate, wrap(async (req, res) => {
   const folder = normalizeFolder(req.body.folder);
-  const files = await loadAccessibleFiles(req.user, req.body.ids);
+  const files = await loadAccessibleFiles(req.user, req.body.ids, req);
   if (files.length === 0) return res.status(400).json({ error: '복사할 항목이 없습니다.' });
   const owners = [...new Set(files.map((f) => f.owner_id))];
   // 공유 풀(담당자 공유) 기준 용량 검사 — 관리자는 무제한. 소유자별 유입량을 풀 루트로 합산해 검사.
