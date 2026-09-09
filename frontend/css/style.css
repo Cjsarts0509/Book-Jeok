@@ -1147,3 +1147,11 @@ th { background: var(--bg); font-weight: 700; color: var(--text-muted); font-siz
 .log-src.audit { background: #E7F5FB; color: var(--secondary); }
 .log-src.login { background: #FFF3CF; color: #8a6d00; }
 .log-pager { display: flex; gap: 8px; justify-content: center; margin-top: 10px; }
+
+/* ── U29 · 오프라인 업로드 대기열 ───────────────────────── */
+.offq-badge { padding: 4px 11px; border: 1px solid #F5D9A0; background: #FFF4E0; color: #8a5a00; border-radius: 999px; font-size: 12px; font-weight: 700; cursor: pointer; white-space: nowrap; }
+.offq-badge:hover { background: #FFE9C2; }
+.oq-list { max-height: 320px; overflow: auto; }
+.oq-row { display: flex; align-items: center; gap: 10px; padding: 9px 4px; border-bottom: 1px solid var(--border); }
+.oq-main { flex: 1; min-width: 0; }
+.oq-main b { font-size: 13px; }

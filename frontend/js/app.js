@@ -96,6 +96,7 @@ const App = (() => {
           <button class="icon-btn appbar-menu" id="menu-toggle" title="폴더">☰</button>
           <div class="brand" id="brand-home" title="홈으로"><img src="assets/logo.svg?v=64"><span class="brand-name">북적북적</span></div>
           ${isPriv() ? `<select class="input account-switcher" id="account-switcher"><option value="">내 파일</option></select>` : ''}
+          <button class="offq-badge hidden" id="offq-badge" title="업로드 대기열 — 연결이 돌아오면 자동으로 올라갑니다"></button>
           <div class="topbar-spacer"></div>
           <button class="icon-btn appbar-navmenu" id="nav-menu-toggle" title="메뉴" aria-label="메뉴">☰<span class="notif-badge hidden" id="notif-badge-menu">0</span></button>
           <nav class="appbar-nav" id="appbar-nav">
@@ -167,6 +168,15 @@ const App = (() => {
     document.addEventListener('click', (e) => { if (!e.target.closest('#appbar-nav, #nav-menu-toggle')) closeNavMenu(); });
     document.getElementById('menu-toggle').addEventListener('click', toggleTree);
     refreshNotifBadge(); startNotifPolling(); setupBackTrap();
+    // U29 · 대기열: 배지 표시 + 연결이 돌아오면 자동 재시도 + 시작할 때 한 번
+    document.getElementById('offq-badge')?.addEventListener('click', offlineQueueModal);
+    renderOfflineBadge();
+    if (!offlineHooked) {
+      offlineHooked = true;
+      window.addEventListener('online', () => { UI.toast('인터넷이 돌아왔습니다 — 대기 중이던 업로드를 이어서 올립니다', 'info'); offlineFlush(); });
+      window.addEventListener('offline', () => UI.toast('인터넷이 끊겼습니다. 지금 올리는 파일은 대기열에 보관됩니다', 'info'));
+    }
+    setTimeout(() => offlineFlush(true), 2500);   // 로그인 직후 조용히 한 번
     document.getElementById('tree-backdrop').addEventListener('click', toggleTree);
     // 우측 미리보기 패널: 닫기·다운로드·배경탭·ESC
     document.getElementById('pp-close')?.addEventListener('click', closePreview);
@@ -1546,7 +1556,7 @@ const App = (() => {
     let files = [...fileList];
     if (!files.length) return;
     files = await prepareForUpload(files);   // U22 · 사진 자동 회전·압축
-    let ok = 0, fail = 0;
+    let ok = 0, fail = 0, queued = 0;
     for (const f of files) {
       const t = Xfer.add(f.name, 'up');
       try {
@@ -1557,14 +1567,135 @@ const App = (() => {
           if (r && r.rejected && r.rejected.length) { t.fail(r.rejected.map((x) => x.reason || '보안 정책').join(' · ')); fail++; }
           else { t.done(); ok++; }
         }
-      } catch (err) { t.fail(err.message); if (!t.canceled() && !err.canceled) fail++; }
+      } catch (err) {
+        t.fail(err.message);
+        if (!t.canceled() && !err.canceled) {
+          fail++;
+          // U29 · 네트워크 때문에 실패했으면 버리지 말고 대기열에 넣는다 —
+          // 연결이 돌아오면 사람이 기억하지 않아도 알아서 올라간다.
+          if (isNetworkFailure(err) && await offlineEnqueue(f, state.folder, state.ownerId, err.message)) queued++;
+        }
+      }
     }
     loadAll();
+    if (queued) UI.toast(`${queued}개는 연결이 끊겨 대기열에 넣었습니다 📥 · 인터넷이 돌아오면 자동으로 올라갑니다`, 'info');
     if (ok && !fail) UI.toast('업로드 완료 ✅', 'success');
-    else if (fail) UI.toast(`${fail}개 실패 · ${ok}개 완료 (전송 현황 참고)`, 'error');
+    else if (fail > queued) UI.toast(`${fail - queued}개 실패 · ${ok}개 완료 (전송 현황 참고)`, 'error');
   }
 
   // 대용량(>80MB): 50MB 조각으로 순차 전송 후 서버에서 합침. 진행률은 전송 패널 항목 t에 반영. 취소 시 중단.
+  let offlineHooked = false;
+  // ── U29 · 오프라인 업로드 대기열 ───────────
+  // 지점에서 사진을 올리다 인터넷이 끊기면 지금까지는 그냥 실패하고 끝이었다.
+  // 파일을 브라우저에 넣어 두었다가(IndexedDB — 파일이 커서 localStorage 로는 안 된다)
+  // 연결이 돌아오면 알아서 다시 올린다. 사람이 기억하고 다시 고를 필요가 없게.
+  const OQ_DB = 'bookjeok-offline', OQ_STORE = 'queue';
+  let oqDbPromise = null;
+  function oqOpen() {
+    if (oqDbPromise) return oqDbPromise;
+    oqDbPromise = new Promise((resolve, reject) => {
+      if (!window.indexedDB) return reject(new Error('이 브라우저는 오프라인 대기열을 지원하지 않습니다.'));
+      const r = indexedDB.open(OQ_DB, 1);
+      r.onupgradeneeded = () => { if (!r.result.objectStoreNames.contains(OQ_STORE)) r.result.createObjectStore(OQ_STORE, { keyPath: 'id', autoIncrement: true }); };
+      r.onsuccess = () => resolve(r.result);
+      r.onerror = () => reject(r.error || new Error('대기열을 열지 못했습니다.'));
+    });
+    return oqDbPromise;
+  }
+  function oqTx(mode, fn) {
+    return oqOpen().then((db) => new Promise((resolve, reject) => {
+      const tx = db.transaction(OQ_STORE, mode);
+      const store = tx.objectStore(OQ_STORE);
+      let out;
+      try { out = fn(store); } catch (e) { reject(e); return; }
+      tx.oncomplete = () => resolve(out && out.result !== undefined ? out.result : out);
+      tx.onerror = () => reject(tx.error);
+    }));
+  }
+  const oqAll = () => oqTx('readonly', (s) => s.getAll());
+  const oqPut = (rec) => oqTx('readwrite', (s) => s.add(rec));
+  const oqDel = (id) => oqTx('readwrite', (s) => s.delete(id));
+  const oqUpdate = (rec) => oqTx('readwrite', (s) => s.put(rec));
+
+  // 실패한 업로드를 대기열에 넣는다. 넣을 수 없으면(용량 등) 조용히 포기 — 실패는 이미 알렸다.
+  async function offlineEnqueue(file, folder, ownerId, reason) {
+    try {
+      await oqPut({ name: file.name, type: file.type || '', size: file.size, blob: file, folder, ownerId: ownerId || null, at: Date.now(), tries: 0, lastError: reason || '' });
+      renderOfflineBadge();
+      return true;
+    } catch (_) { return false; }
+  }
+  // 네트워크 때문에 실패했는가? (권한·용량초과·확장자 거부는 다시 시도해도 소용없다)
+  const isNetworkFailure = (err) => !err.status || err.status === 0 || err.status === 502 || err.status === 503 || err.status === 504
+    || /네트워크|Failed to fetch|NetworkError|취소됨/i.test(err.message || '');
+
+  let oqFlushing = false;
+  async function offlineFlush(quiet) {
+    if (oqFlushing || !navigator.onLine || !state.user) return;
+    let items = [];
+    try { items = await oqAll(); } catch (_) { return; }
+    if (!items.length) return;
+    oqFlushing = true;
+    let ok = 0, fail = 0;
+    if (!quiet) UI.toast(`대기 중이던 ${items.length}건을 올립니다…`, 'info');
+    for (const it of items) {
+      const t = Xfer.add(it.name + ' (대기분)', 'up');
+      try {
+        const fd = new FormData();
+        fd.append('folder', it.folder);
+        fd.append('file', it.blob, it.name);
+        await xhrPost(`/files/upload${it.ownerId ? '?ownerId=' + it.ownerId : ''}`, fd, (l, tot) => t.update(l, tot), t);
+        t.done(); await oqDel(it.id); ok++;
+      } catch (err) {
+        t.fail(err.message);
+        fail++;
+        // 네트워크 문제가 아니면(형식 거부 등) 계속 두어도 소용없으니 대기열에서 뺀다
+        if (!isNetworkFailure(err)) { await oqDel(it.id).catch(() => {}); }
+        else { it.tries = (it.tries || 0) + 1; it.lastError = err.message; await oqUpdate(it).catch(() => {}); }
+        if (!navigator.onLine) break;      // 또 끊겼으면 나머지는 다음 기회에
+      }
+    }
+    oqFlushing = false;
+    renderOfflineBadge();
+    if (ok) { UI.toast(`대기분 ${ok}건 업로드 완료${fail ? ` · ${fail}건 실패` : ''}`, fail ? 'info' : 'success'); loadAll(); }
+  }
+
+  // 대기 중인 게 있으면 상단바에 조용히 알린다. 눌러서 목록을 보고 지금 올리거나 버릴 수 있다.
+  async function renderOfflineBadge() {
+    const el = document.getElementById('offq-badge');
+    if (!el) return;
+    let n = 0;
+    try { n = (await oqAll()).length; } catch (_) { n = 0; }
+    el.textContent = n ? `📥 대기 ${n}` : '';
+    el.classList.toggle('hidden', n === 0);
+  }
+  async function offlineQueueModal() {
+    const items = await oqAll().catch(() => []);
+    const esc = UI.escapeHtml;
+    const m = UI.modal(`<h3>📥 업로드 대기열</h3>
+      <p class="muted" style="font-size:12px;margin:-6px 0 12px">인터넷이 끊겨 올리지 못한 파일입니다. 연결이 돌아오면 자동으로 올라갑니다.</p>
+      <div class="oq-list">${items.length ? items.map((it) => `
+        <div class="oq-row"><div class="oq-main"><b>${esc(it.name)}</b>
+          <div class="muted" style="font-size:11px">${UI.bytes(it.size)} · ${esc(prettyPath(it.folder))} · ${new Date(it.at).toLocaleString('ko-KR')}${it.tries ? ` · 시도 ${it.tries}회` : ''}</div>
+          ${it.lastError ? `<div class="muted" style="font-size:11px;color:var(--danger)">${esc(it.lastError)}</div>` : ''}</div>
+          <button class="btn btn-sm btn-ghost" data-oqdel="${it.id}" title="대기열에서 빼기">🗑️</button></div>`).join('')
+        : '<p class="muted">대기 중인 파일이 없습니다.</p>'}</div>
+      <div class="modal-actions">
+        ${items.length ? '<button class="btn btn-ghost" id="oq-clear">전부 비우기</button>' : ''}
+        ${items.length ? '<button class="btn btn-secondary" id="oq-now">지금 올리기</button>' : ''}
+        <button class="btn btn-primary" id="oq-close">닫기</button></div>`);
+    m.q('#oq-close').addEventListener('click', m.close);
+    m.el.querySelectorAll('[data-oqdel]').forEach((el) => el.addEventListener('click', async () => {
+      await oqDel(Number(el.dataset.oqdel)); m.close(); renderOfflineBadge(); offlineQueueModal();
+    }));
+    m.q('#oq-now')?.addEventListener('click', () => { m.close(); offlineFlush(); });
+    m.q('#oq-clear')?.addEventListener('click', async () => {
+      if (!(await UI.confirm({ title: '대기열 비우기', danger: true, message: '대기 중인 파일을 모두 버립니다. 올라가지 않은 파일은 사라집니다.' }))) return;
+      for (const it of items) await oqDel(it.id).catch(() => {});
+      m.close(); renderOfflineBadge(); UI.toast('대기열을 비웠습니다', 'info');
+    });
+  }
+
   // ── S4 · 끊긴 업로드 이어올리기 ────────────
   // 큰 파일을 올리다 끊기면 처음부터 다시 올리는 게 가장 억울하다.
   // 어디까지 올렸는지(uploadId)를 브라우저에 적어 두고, 같은 파일을 다시 올리면
