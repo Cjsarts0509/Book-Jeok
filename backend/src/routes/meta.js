@@ -8,7 +8,7 @@ const { query } = require('../db');
 const { diskUsage } = require('../disk');
 const procstat = require('../procstat');
 const { authenticate } = require('../middleware/auth');
-const { wrap } = require('../util');
+const { wrap, rateKey } = require('../util');
 
 const router = express.Router();
 router.use(authenticate);
@@ -46,6 +46,19 @@ router.get('/server-status', wrap(async (req, res) => {
     db: { connected: dbOk },
     procs, // { topCpu:[{name,cpu}], topMem:[{name,rss}], scope:'host'|'container' } 또는 null
   });
+}));
+
+// U12 · ISBN 도서정보 조회 — 서버가 대신 불러 준다(CORS 회피 + API 키 은닉 + 캐시).
+// 남용을 막기 위해 자체 레이트리밋을 둔다(외부 API 사용 한도가 있다).
+const rateLimit = require('express-rate-limit');
+const bookLimiter = rateLimit({
+  windowMs: 60 * 1000, max: 60, standardHeaders: true, legacyHeaders: false,
+  keyGenerator: (req) => String(req.user?.id || rateKey(req)),
+  message: { error: '도서정보 조회가 너무 잦습니다. 잠시 후 다시 시도해 주세요.' },
+});
+router.get('/book/:isbn', bookLimiter, wrap(async (req, res) => {
+  const r = await require('../bookInfo').lookup(req.params.isbn);
+  res.status(r.ok ? 200 : (r.notConfigured ? 501 : 404)).json(r);
 }));
 
 // 영업점 목록 (새 폴더 생성용)

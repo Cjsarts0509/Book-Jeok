@@ -338,6 +338,8 @@ const App = (() => {
     create_folder_share: '폴더 공유', delete_folder_share: '폴더 공유 삭제',
     create_upload_request: '업로드 요청 생성', delete_upload_request: '업로드 요청 삭제',
     stock_audit_deliver: '재고조사 전달', stock_audit_save: '재고조사 저장',
+    lock_file: '파일 잠금', unlock_file: '잠금 해제',
+    create_template: '템플릿 저장', delete_template: '템플릿 삭제', apply_template: '템플릿 적용',
   };
   const actAgo = (iso) => {
     const s = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);

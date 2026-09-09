@@ -329,6 +329,24 @@ const MIGRATIONS = [
     );
     INSERT INTO audit_chain (id) VALUES (1) ON CONFLICT (id) DO NOTHING;
   ` },
+  // 파일 잠금(U10) · 폴더 템플릿(U9)
+  { id: '0010_locks_templates', sql: `
+    -- 잠근 파일은 지우기·이름변경·이동·덮어쓰기가 막힌다. 잠근 사람과 관리자만 풀 수 있다.
+    ALTER TABLE files ADD COLUMN IF NOT EXISTS locked_by INTEGER REFERENCES users(id) ON DELETE SET NULL;
+    ALTER TABLE files ADD COLUMN IF NOT EXISTS locked_at TIMESTAMPTZ;
+    ALTER TABLE files ADD COLUMN IF NOT EXISTS lock_note TEXT NOT NULL DEFAULT '';
+
+    -- 자주 쓰는 폴더 구조를 저장해 두고 한 번에 만든다. owner_id 가 NULL 이면 모두가 쓰는 공용 템플릿.
+    CREATE TABLE IF NOT EXISTS folder_templates (
+      id         BIGSERIAL PRIMARY KEY,
+      owner_id   INTEGER REFERENCES users(id) ON DELETE CASCADE,
+      name       VARCHAR(128) NOT NULL,
+      paths      TEXT[] NOT NULL DEFAULT '{}',
+      created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS idx_folder_templates_owner ON folder_templates(owner_id);
+  ` },
 ];
 
 // ── S18 · 마이그레이션 드라이런 ────────────────────────

@@ -118,8 +118,20 @@ async function resolveOwner(req, res, next) {
 const fileRow = (r) => ({
   id: r.id, name: r.original_name, folder: r.folder, size: Number(r.size_bytes),
   mime: r.mime_type, note: r.note || '', createdAt: r.created_at, updatedAt: r.updated_at, noteUpdatedAt: r.note_updated_at,
+  // U10 · 잠금. lockedBy 가 있으면 지우기·이름변경·이동·덮어쓰기가 막힌다.
+  lockedBy: r.locked_by || null, lockedAt: r.locked_at || null, lockNote: r.lock_note || '',
   fav: false, tags: [],
 });
+
+// U10 · 잠긴 파일은 '누구든' 바꿀 수 없다 — 잠근 사람도, 관리자도.
+// 잠금의 목적은 권한 다툼이 아니라 실수 방지다. 가장 흔한 사고가
+// 본인이 일괄 삭제로 쓸어버리는 것이라, 잠근 사람만 예외로 두면 보호가 되지 않는다.
+// 바꾸려면 '잠금 해제'라는 의식적인 한 걸음을 거쳐야 한다(해제는 잠근 사람·관리자만).
+// 반환값이 있으면 그것이 거절 사유다.
+function lockBlock(file) {
+  if (!file || !file.locked_by) return null;
+  return `잠긴 파일입니다${file.lock_note ? ` — ${file.lock_note}` : ''}. 먼저 잠금을 풀어 주세요.`;
+}
 
 // 파일/폴더 목록에 즐겨찾기(fav)와 태그(tags) 정보를 채워 넣는다(뷰어 기준).
 async function attachMeta(userId, ownerId, files, folders) {
@@ -231,6 +243,7 @@ const ACTIVITY_ACTIONS = [
   'bulk_move', 'bulk_copy', 'bulk_trash', 'bulk_zip',
   'create_share', 'delete_share', 'create_folder_share', 'delete_folder_share',
   'create_upload_request', 'delete_upload_request', 'stock_audit_deliver', 'stock_audit_save',
+  'lock_file', 'unlock_file', 'create_template', 'delete_template', 'apply_template',
 ];
 const UNDOABLE = new Set(['trash_file', 'bulk_trash', 'trash_folder']);
 // 감사기록 detail 에 박아둔 대상 id 들을 뽑는다 ('file=12', 'ids=12,13,14')
@@ -415,7 +428,8 @@ router.get('/', authenticate, wrap(resolveOwner), wrap(async (req, res) => {
   const cached = listcache.get(ck, req.targetOwnerId);
   if (cached) return res.json(cached);
   const files = await query(
-    `SELECT id, folder, original_name, size_bytes, mime_type, note, created_at, updated_at, note_updated_at
+    `SELECT id, folder, original_name, size_bytes, mime_type, note, created_at, updated_at, note_updated_at,
+            locked_by, locked_at, lock_note
      FROM files WHERE owner_id=$1 AND folder=$2 AND deleted_at IS NULL ORDER BY original_name`,
     [req.targetOwnerId, folder]
   );
@@ -731,14 +745,128 @@ router.patch('/:id(\\d+)/note', authenticate, wrap(async (req, res) => {
 router.patch('/:id(\\d+)/rename', authenticate, wrap(async (req, res) => {
   const newName = String(req.body.name || '').trim().replace(/[/\\]/g, '');
   if (!newName) return res.status(400).json({ error: '이름을 입력하세요.' });
-  const r = await query('SELECT owner_id, folder FROM files WHERE id=$1 AND deleted_at IS NULL', [req.params.id]);
+  const r = await query('SELECT owner_id, folder, locked_by, lock_note FROM files WHERE id=$1 AND deleted_at IS NULL', [req.params.id]);
   if (r.rowCount === 0) return res.status(404).json({ error: '파일을 찾을 수 없습니다.' });
   if (!(await canAccessOwner(req.user, r.rows[0].owner_id))) return res.status(403).json({ error: '권한이 없습니다.' });
+  const lockedRename = lockBlock(r.rows[0]);
+  if (lockedRename) return res.status(423).json({ error: lockedRename, code: 'locked' });
   if (!isAllowed(extOf(newName))) return res.status(415).json({ error: `허용되지 않는 확장자입니다. 가능: ${allowedLabel()}` });
   const unique = await uniqueFileName(r.rows[0].owner_id, r.rows[0].folder, newName);
   await query('UPDATE files SET original_name=$1, updated_at=now() WHERE id=$2', [unique, req.params.id]);
   await audit(req, 'rename', `file=${req.params.id} -> ${unique}`, r.rows[0].owner_id);
   res.json({ ok: true, name: unique });
+}));
+
+// ── U10 · 파일 잠금 ──────────
+// 중요한 파일이 실수로 지워지거나 덮어써지는 것을 막는다. 잠근 사람과 관리자만 풀 수 있다.
+router.post('/:id(\\d+)/lock', authenticate, wrap(async (req, res) => {
+  const r = await query('SELECT owner_id, original_name, locked_by FROM files WHERE id=$1 AND deleted_at IS NULL', [req.params.id]);
+  if (r.rowCount === 0) return res.status(404).json({ error: '파일을 찾을 수 없습니다.' });
+  const f = r.rows[0];
+  if (!(await canAccessOwner(req.user, f.owner_id))) return res.status(403).json({ error: '권한이 없습니다.' });
+  if (f.locked_by && Number(f.locked_by) !== Number(req.user.id) && req.user.role !== 'admin') {
+    return res.status(423).json({ error: '이미 다른 사람이 잠근 파일입니다.', code: 'locked' });
+  }
+  const note = String(req.body.note || '').slice(0, 200);
+  await query('UPDATE files SET locked_by=$1, locked_at=now(), lock_note=$2 WHERE id=$3', [req.user.id, note, req.params.id]);
+  await audit(req, 'lock_file', `${f.original_name}${note ? ` · ${note}` : ''}`, f.owner_id);
+  res.json({ ok: true, lockedBy: req.user.id, lockNote: note });
+}));
+router.post('/:id(\\d+)/unlock', authenticate, wrap(async (req, res) => {
+  const r = await query('SELECT owner_id, original_name, locked_by FROM files WHERE id=$1 AND deleted_at IS NULL', [req.params.id]);
+  if (r.rowCount === 0) return res.status(404).json({ error: '파일을 찾을 수 없습니다.' });
+  const f = r.rows[0];
+  if (!(await canAccessOwner(req.user, f.owner_id))) return res.status(403).json({ error: '권한이 없습니다.' });
+  if (f.locked_by && Number(f.locked_by) !== Number(req.user.id) && req.user.role !== 'admin') {
+    return res.status(423).json({ error: '잠근 사람이나 관리자만 풀 수 있습니다.', code: 'locked' });
+  }
+  await query("UPDATE files SET locked_by=NULL, locked_at=NULL, lock_note='' WHERE id=$1", [req.params.id]);
+  await audit(req, 'unlock_file', f.original_name, f.owner_id);
+  res.json({ ok: true });
+}));
+
+// ── U6 · 다운로드 이력 ──────────
+// "이 파일 누가 받아 갔지?" — 감사로그에 이미 남아 있는 것을 파일 기준으로 보여준다.
+router.get('/:id(\\d+)/history', authenticate, wrap(async (req, res) => {
+  const r = await query('SELECT owner_id, original_name, folder FROM files WHERE id=$1', [req.params.id]);
+  if (r.rowCount === 0) return res.status(404).json({ error: '파일을 찾을 수 없습니다.' });
+  const f = r.rows[0];
+  if (!(await canAccessOwner(req.user, f.owner_id))) return res.status(403).json({ error: '권한이 없습니다.' });
+  const limit = Math.min(200, Math.max(1, parseInt(req.query.limit || '50', 10)));
+  // 다운로드 기록은 detail 에 '<폴더> · <파일명>' 으로 남는다(파일 id 가 아니라).
+  // 이름이 바뀌었을 수 있으므로 파일 id 형태와 이름 형태를 모두 찾는다.
+  const rows = await query(`
+    SELECT a.id, a.action, a.detail, a.created_at, a.ip, u.username, u.display_name
+    FROM audit_log a LEFT JOIN users u ON u.id = a.user_id
+    WHERE a.owner_id = $1
+      AND a.action IN ('download','bulk_zip','create_share','lock_file','unlock_file','rename','upload')
+      AND (a.detail LIKE $2 OR a.detail LIKE $3)
+    ORDER BY a.created_at DESC LIMIT $4`,
+  [f.owner_id, `%${f.original_name}%`, `%file=${req.params.id}%`, limit]);
+  // 공개 공유로 나간 횟수도 함께(누가 받았는지는 알 수 없지만 몇 번 나갔는지는 중요하다)
+  const shares = await query(
+    'SELECT COUNT(*)::int AS c, COALESCE(SUM(download_count),0)::int AS downloads FROM share_links WHERE file_id=$1', [req.params.id]);
+  res.json({
+    file: { id: Number(req.params.id), name: f.original_name, folder: f.folder },
+    items: rows.rows.map((x) => ({
+      id: x.id, action: x.action, detail: x.detail, at: x.created_at, ip: x.ip,
+      by: x.display_name || x.username || '알 수 없음',
+    })),
+    shares: { links: shares.rows[0].c, downloads: shares.rows[0].downloads },
+    note: '공유 링크로 받아 간 것은 누구인지 알 수 없어 횟수만 표시합니다.',
+  });
+}));
+
+// ── U9 · 폴더 템플릿 ──────────
+// 매번 같은 폴더 구조를 손으로 만드는 대신, 한 번 저장해 두고 클릭 한 번으로 만든다.
+router.get('/templates', authenticate, wrap(resolveOwner), wrap(async (req, res) => {
+  const r = await query(
+    `SELECT t.id, t.name, t.paths, t.owner_id, t.created_at, u.display_name AS created_by_name
+     FROM folder_templates t LEFT JOIN users u ON u.id = t.created_by
+     WHERE t.owner_id IS NULL OR t.owner_id = $1
+     ORDER BY t.owner_id NULLS FIRST, t.name`, [req.targetOwnerId]);
+  res.json({ templates: r.rows.map((x) => ({ id: x.id, name: x.name, paths: x.paths, shared: x.owner_id == null, createdBy: x.created_by_name || '' })) });
+}));
+router.post('/templates', authenticate, wrap(resolveOwner), wrap(async (req, res) => {
+  const name = String(req.body.name || '').trim().slice(0, 128);
+  if (!name) return res.status(400).json({ error: '템플릿 이름을 입력하세요.' });
+  // 상대 경로만 받는다(선행 / 제거, .. 차단) — 템플릿이 남의 폴더를 만들지 못하게
+  const paths = [...new Set((Array.isArray(req.body.paths) ? req.body.paths : [])
+    .map((p) => String(p).trim().replace(/^\/+/, '').replace(/\/+$/, ''))
+    .filter((p) => p && !p.split('/').some((seg) => seg === '..' || seg === '')))].slice(0, 200);
+  if (!paths.length) return res.status(400).json({ error: '폴더가 하나도 없습니다.' });
+  // 모두가 쓰는 공용 템플릿은 관리자만 만들 수 있다
+  const shared = req.body.shared === true && req.user.role === 'admin';
+  const r = await query(
+    'INSERT INTO folder_templates (owner_id, name, paths, created_by) VALUES ($1,$2,$3,$4) RETURNING id',
+    [shared ? null : req.targetOwnerId, name, paths, req.user.id]);
+  await audit(req, 'create_template', `${name} (${paths.length}개 폴더)`);
+  res.status(201).json({ id: r.rows[0].id, name, paths, shared });
+}));
+router.delete('/templates/:id(\\d+)', authenticate, wrap(resolveOwner), wrap(async (req, res) => {
+  const r = await query('SELECT owner_id, name FROM folder_templates WHERE id=$1', [req.params.id]);
+  if (r.rowCount === 0) return res.status(404).json({ error: '템플릿을 찾을 수 없습니다.' });
+  if (r.rows[0].owner_id == null && req.user.role !== 'admin') return res.status(403).json({ error: '공용 템플릿은 관리자만 지울 수 있습니다.' });
+  if (r.rows[0].owner_id != null && Number(r.rows[0].owner_id) !== Number(req.targetOwnerId)) return res.status(403).json({ error: '권한이 없습니다.' });
+  await query('DELETE FROM folder_templates WHERE id=$1', [req.params.id]);
+  await audit(req, 'delete_template', r.rows[0].name);
+  res.json({ ok: true });
+}));
+// 템플릿을 지금 폴더 아래에 펼친다
+router.post('/templates/:id(\\d+)/apply', authenticate, wrap(resolveOwner), wrap(async (req, res) => {
+  const t = await query('SELECT owner_id, name, paths FROM folder_templates WHERE id=$1', [req.params.id]);
+  if (t.rowCount === 0) return res.status(404).json({ error: '템플릿을 찾을 수 없습니다.' });
+  if (t.rows[0].owner_id != null && Number(t.rows[0].owner_id) !== Number(req.targetOwnerId)) return res.status(403).json({ error: '권한이 없습니다.' });
+  const base = normalizeFolder(req.body.folder || '/');
+  const prefix = base === '/' ? '' : base;
+  const created = [];
+  for (const rel of t.rows[0].paths) {
+    const full = normalizeFolder(prefix + '/' + rel);
+    await ensureFolder(req.targetOwnerId, full);
+    created.push(full);
+  }
+  await audit(req, 'apply_template', `${t.rows[0].name} → ${base} (${created.length}개)`);
+  res.json({ ok: true, created });
 }));
 
 // ── 단일 삭제 (소프트) ──────────
@@ -747,6 +875,8 @@ router.delete('/:id(\\d+)', authenticate, wrap(async (req, res) => {
   const file = r.rows[0];
   if (!file) return res.status(404).json({ error: '파일을 찾을 수 없습니다.' });
   if (!(await canAccessOwner(req.user, file.owner_id))) return res.status(403).json({ error: '삭제 권한이 없습니다.' });
+  const lockedDel = lockBlock(file);
+  if (lockedDel) return res.status(423).json({ error: lockedDel, code: 'locked' });
   await query('UPDATE files SET deleted_at=now(), deleted_with_folder=NULL WHERE id=$1', [file.id]);
   await audit(req, 'trash_file', `file=${file.id}`, file.owner_id);
   res.json({ ok: true });
@@ -770,17 +900,23 @@ async function loadAccessibleFiles(user, ids, req) {
 
 // ── 일괄 삭제 (소프트) ──────────
 router.post('/bulk/delete', authenticate, wrap(async (req, res) => {
-  const files = await loadAccessibleFiles(req.user, req.body.ids, req);
-  if (files.length === 0) return res.status(400).json({ error: '삭제할 항목이 없습니다.' });
+  const all = await loadAccessibleFiles(req.user, req.body.ids, req);
+  const locked = all.filter((f) => lockBlock(f));      // U10 · 잠긴 것은 손대지 않는다
+  const files = all.filter((f) => !lockBlock(f));
+  if (all.length === 0) return res.status(400).json({ error: '삭제할 항목이 없습니다.' });
+  if (files.length === 0) return res.status(423).json({ error: `선택한 ${locked.length}개가 모두 잠겨 있어 삭제하지 못했습니다.`, code: 'locked', locked: locked.length });
   await query('UPDATE files SET deleted_at=now(), deleted_with_folder=NULL WHERE id = ANY($1::bigint[])', [files.map((f) => f.id)]);
   await audit(req, 'bulk_trash', `count=${files.length} ids=${files.slice(0, 200).map((f) => f.id).join(',')}`, soleOwner(files));
-  res.json({ ok: true, deleted: files.length });
+  res.json({ ok: true, deleted: files.length, locked: locked.length });
 }));
 
 // ── 일괄 이동 ──────────
 router.post('/bulk/move', authenticate, wrap(async (req, res) => {
   const folder = normalizeFolder(req.body.folder);
-  const files = await loadAccessibleFiles(req.user, req.body.ids, req);
+  const allMove = await loadAccessibleFiles(req.user, req.body.ids, req);
+  const lockedMove = allMove.filter((f) => lockBlock(f));
+  const files = allMove.filter((f) => !lockBlock(f));
+  if (allMove.length && !files.length) return res.status(423).json({ error: `선택한 ${lockedMove.length}개가 모두 잠겨 있어 옮기지 못했습니다.`, code: 'locked', locked: lockedMove.length });
   if (files.length === 0) return res.status(400).json({ error: '이동할 항목이 없습니다.' });
   const owners = [...new Set(files.map((f) => f.owner_id))];
   await Promise.all(owners.map((o) => ensureFolder(o, folder)));
@@ -789,7 +925,7 @@ router.post('/bulk/move', authenticate, wrap(async (req, res) => {
     await query('UPDATE files SET folder=$1, original_name=$2, updated_at=now() WHERE id=$3', [folder, name, f.id]);
   }
   await audit(req, 'bulk_move', `count=${files.length} -> ${folder}`, soleOwner(files));
-  res.json({ ok: true, moved: files.length });
+  res.json({ ok: true, moved: files.length, locked: lockedMove.length });
 }));
 
 // ── 일괄 복사 (실물 파일 복제 + 새 레코드) ──────────
