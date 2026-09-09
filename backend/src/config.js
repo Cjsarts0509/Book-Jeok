@@ -48,6 +48,10 @@ const config = {
     .map((s) => s.trim())
     .filter(Boolean),
 
+  // 업로드 한 요청에 담을 수 있는 파일 수. multer 한도이자 프런트가 나눠 보내는 단위 —
+  // 두 값이 어긋나면 '초과분 전부 실패'가 되므로 여기 한 곳에서만 정한다.
+  uploadMaxFiles: parseInt(process.env.UPLOAD_MAX_FILES || '30', 10),
+
   // 관리자 권한을 항상 가지는 아이디 목록 (콤마 구분). 초기 부트스트랩용.
   superAdmins: (process.env.SUPER_ADMINS || 'admin')
     .split(',')

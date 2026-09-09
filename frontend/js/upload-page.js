@@ -62,12 +62,20 @@
     const pwEl = document.getElementById('pw');
     go.disabled = true; msg.style.color = ''; msg.textContent = '업로드 중…';
     try {
-      const fd = new FormData(); files.forEach((f) => fd.append('file', f));
-      const r = await fetch(`${BASE}/api/upload-link/${encodeURIComponent(token)}`, { method: 'POST', headers: pwEl && pwEl.value ? { 'x-upload-password': pwEl.value } : {}, body: fd });
-      const d = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(d.error || '업로드 실패');
-      const rej = (d.rejected && d.rejected.length) ? ` · ${d.rejected.length}개 차단됨` : '';
-      msg.style.color = 'var(--accent)'; msg.textContent = `✅ ${d.uploaded}개 업로드 완료! 감사합니다.${rej}`;
+      // 서버가 한 요청에 받는 개수에는 한도가 있다. 넘겨 보내면 한 개도 올라가지 않으므로 나눠 보낸다.
+      const size = Math.max(1, Number(info.maxFiles) || 30);
+      let uploaded = 0, rejected = 0;
+      for (let i = 0; i < files.length; i += size) {
+        if (files.length > size) msg.textContent = `업로드 중… ${i}/${files.length}`;
+        const fd = new FormData(); files.slice(i, i + size).forEach((f) => fd.append('file', f));
+        const r = await fetch(`${BASE}/api/upload-link/${encodeURIComponent(token)}`, { method: 'POST', headers: pwEl && pwEl.value ? { 'x-upload-password': pwEl.value } : {}, body: fd });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(d.error || '업로드 실패');
+        uploaded += Number(d.uploaded) || 0;
+        rejected += (d.rejected && d.rejected.length) || 0;
+      }
+      const rej = rejected ? ` · ${rejected}개 차단됨` : '';
+      msg.style.color = 'var(--accent)'; msg.textContent = `✅ ${uploaded}개 업로드 완료! 감사합니다.${rej}`;
       load();
     } catch (e) { msg.style.color = 'var(--danger)'; msg.textContent = e.message; go.disabled = false; }
   }

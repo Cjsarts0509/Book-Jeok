@@ -60,6 +60,7 @@ router.get('/:token', wrap(async (req, res) => {
     status: statusOf(u),
     needsPassword: !!u.password_hash,
     allowedExtensions: getAllowedExtensions(),
+    maxFiles: config.uploadMaxFiles,   // 페이지가 이 단위로 나눠 보낸다
     remainingFiles: u.max_files != null ? Math.max(0, u.max_files - u.uploaded_count) : null,
     remainingBytes: u.max_bytes != null ? Math.max(0, Number(u.max_bytes) - Number(u.uploaded_bytes)) : null,
   });
@@ -118,8 +119,8 @@ const fileFilter = (req, file, cb) => {
 function upload(req, res, next) {
   // 잔여 0 이면 fileSize:0 → 어떤 파일도 받지 않는다(|| 로 쓰면 0이 기본값으로 뒤집히므로 주의)
   const lim = Number.isFinite(req._maxBytes) ? Math.min(req._maxBytes, MAX_UPLOAD_BYTES) : MAX_UPLOAD_BYTES;
-  multer({ storage, fileFilter, limits: { fileSize: lim, files: 30 } })
-    .array('file', 30)(req, res, next);
+  multer({ storage, fileFilter, limits: { fileSize: lim, files: config.uploadMaxFiles } })
+    .array('file', config.uploadMaxFiles)(req, res, next);
 }
 
 router.post('/:token', uploadLimiter, attemptLimiter, wrap(gate), wrap(diskGate), upload, wrap(async (req, res) => {

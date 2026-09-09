@@ -83,7 +83,7 @@ const upload = multer({
     destination: (req, file, cb) => { const d = userDir(req.targetOwnerId); fs.mkdirSync(d, { recursive: true }); cb(null, d); },
     filename: (req, file, cb) => cb(null, crypto.randomUUID()),
   }),
-  limits: { fileSize: parseInt(process.env.MAX_UPLOAD_BYTES || String(2 * 1024 * 1024 * 1024), 10) },
+  limits: { fileSize: parseInt(process.env.MAX_UPLOAD_BYTES || String(2 * 1024 * 1024 * 1024), 10), files: config.uploadMaxFiles },
   fileFilter: (req, file, cb) => {
     const name = Buffer.from(file.originalname, 'latin1').toString('utf8');
     if (!isAllowed(extOf(name))) return cb(Object.assign(new Error(`허용되지 않는 파일 형식입니다. 가능: ${allowedLabel()}`), { status: 415 }));
@@ -505,7 +505,7 @@ router.get('/', authenticate, wrap(resolveOwner), wrap(async (req, res) => {
 }));
 
 // ── 업로드 ──────────
-router.post('/upload', authenticate, wrap(resolveOwner), wrap(diskGate), upload.array('file', 30), wrap(async (req, res) => {
+router.post('/upload', authenticate, wrap(resolveOwner), wrap(diskGate), upload.array('file', config.uploadMaxFiles), wrap(async (req, res) => {
   const folder = normalizeFolder(req.body.folder);
   if (!req.files || req.files.length === 0) return res.status(400).json({ error: '업로드할 파일이 없습니다.' });
   const owner = await query('SELECT role, upload_conflict FROM users WHERE id=$1', [req.targetOwnerId]);
@@ -714,7 +714,8 @@ router.post('/upload/complete', authenticate, wrap(resolveOwner), wrap(diskGate)
 
 // 허용 확장자 조회 (로그인 사용자)
 router.get('/allowed-extensions', authenticate, wrap(async (req, res) => {
-  res.json({ extensions: getAllowedExtensions() });
+  // maxFiles: 프런트가 이 값 단위로 나눠 보낸다(서버 한도와 어긋나지 않도록 서버가 알려 준다).
+  res.json({ extensions: getAllowedExtensions(), maxFiles: config.uploadMaxFiles });
 }));
 
 // 계정의 최신 변경 시각(리비전) — 다른 세션의 변경 감지용(가벼운 폴링). 값이 커지면 목록이 오래된 것.

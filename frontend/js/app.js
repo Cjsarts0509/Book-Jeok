@@ -7,6 +7,7 @@ const App = (() => {
     view: localStorage.getItem('bj_view') || 'list',
     branches: [],
     allowedExt: ['csv', 'xls', 'xlsx', 'jpg', 'png', 'gif', 'ppt', 'pptx', 'doc', 'docx', 'txt'],
+    maxFiles: 30,        // 한 요청에 담을 파일 수. 서버가 알려 주면 그 값으로 덮어쓴다.
     selected: new Map(), // key -> {type:'file'|'folder', id, path, name}
     treeStyles: {},      // path -> {icon, color}
     expanded: new Set(['/']), // 펼쳐진 폴더 경로 (기본: 루트만 = 최상위만 보임)
@@ -207,8 +208,31 @@ const App = (() => {
     showNotices();
   }
 
+  // 한 요청에 담을 수 있는 파일 수는 서버가 정한다(기본 30). 그보다 많이 고르면
+  // 예전에는 요청 전체가 거절돼 한 개도 올라가지 않았다 — 조용히 나눠 보낸다.
+  // items: [{ file, title, note }] · title/note 는 촬영 업로드에서만 쓴다.
+  async function uploadInBatches(items, folder, ownerId, onProgress) {
+    const size = Math.max(1, state.maxFiles || 30);
+    let sent = 0, rejected = 0;
+    for (let i = 0; i < items.length; i += size) {
+      const slice = items.slice(i, i + size);
+      const fd = new FormData();
+      fd.append('folder', folder);
+      for (const it of slice) {
+        fd.append('file', it.file);
+        if (it.title !== undefined) fd.append('titles', it.title);
+        if (it.note !== undefined) fd.append('notes', it.note);
+      }
+      const r = await API.upload(fd, ownerId);      // 한 묶음이 실패하면 그대로 위로 던진다
+      rejected += (r && r.rejected && r.rejected.length) || 0;
+      sent += slice.length;
+      if (onProgress && items.length > size) onProgress(sent, items.length);
+    }
+    return { sent, rejected };
+  }
+
   async function loadBranches() { try { state.branches = (await API.branches()).branches; } catch {} }
-  async function loadAllowedExt() { try { const r = await API.allowedExtensions(); if (r.extensions?.length) { state.allowedExt = r.extensions; refreshDropzoneHint(); } } catch {} }
+  async function loadAllowedExt() { try { const r = await API.allowedExtensions(); if (r.extensions?.length) { state.allowedExt = r.extensions; refreshDropzoneHint(); } if (r.maxFiles > 0) state.maxFiles = r.maxFiles; } catch {} }
   function refreshDropzoneHint() {
     const input = document.getElementById('file-input'); const btn = document.getElementById('upload-btn');
     if (input) input.setAttribute('accept', state.allowedExt.map((e) => '.' + e).join(','));
@@ -856,10 +880,12 @@ const App = (() => {
     m.q('#c').addEventListener('click', m.close);
     m.q('#ok').addEventListener('click', async () => {
       m.close();
-      const fd = new FormData(); fd.append('folder', dest);
-      for (const f of files) fd.append('file', f);
       UI.toast(`${files.length}개 업로드 중… (백그라운드)`, 'info');
-      try { const r = await API.upload(fd, state.ownerId); const rj = (r && r.rejected && r.rejected.length) || 0; UI.toast(`업로드 완료 ✅ ${files.length - rj}개${rj ? ` · ${rj}개 차단` : ''}`, rj ? 'error' : 'success'); }
+      try {
+        const { sent, rejected } = await uploadInBatches([...files].map((f) => ({ file: f })), dest, state.ownerId,
+          (done, total) => UI.toast(`업로드 중… ${done}/${total}`, 'info'));
+        UI.toast(`업로드 완료 ✅ ${sent - rejected}개${rejected ? ` · ${rejected}개 차단` : ''}`, rejected ? 'error' : 'success');
+      }
       catch (err) { UI.toast('업로드 실패: ' + err.message, 'error'); }
       loadAll();
     });
@@ -2077,18 +2103,20 @@ const App = (() => {
     m.q('#cam-go').addEventListener('click', () => {
       const count = kept.size;
       const targetOwner = state.ownerId;
-      const fd = new FormData(); fd.append('folder', state.folder);
-      [...kept].forEach((i) => {
+      const targetFolder = state.folder;
+      const items = [...kept].map((i) => {
         const item = itemEl(i);
-        fd.append('file', files[i]);
-        fd.append('titles', item.querySelector('.cam-title').value.trim());
-        fd.append('notes', item.querySelector('.cam-note').value.trim());
+        return {
+          file: files[i],
+          title: item.querySelector('.cam-title').value.trim(),
+          note: item.querySelector('.cam-note').value.trim(),
+        };
       });
       cleanup(); m.close();
       UI.toast(`${count}장 업로드 중… (백그라운드)`, 'info');
-      API.upload(fd, targetOwner)
-        .then((r) => {
-          if (r && r.rejected && r.rejected.length) UI.toast(`⚠️ ${r.rejected.length}장 차단됨`, 'error');
+      uploadInBatches(items, targetFolder, targetOwner, (done, total) => UI.toast(`업로드 중… ${done}/${total}`, 'info'))
+        .then(({ rejected }) => {
+          if (rejected) UI.toast(`⚠️ ${rejected}장 차단됨`, 'error');
           UI.toast('촬영 업로드 완료 ✅', 'success');
           loadAll();
         })

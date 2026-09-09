@@ -166,10 +166,21 @@ if (process.env.SERVE_FRONTEND === '1') {
 }
 
 // ── 에러 핸들러 ─────────────────────────────────────
+// multer 가 요청을 거절하는 경우는 대부분 '서버 잘못'이 아니라 '보낸 쪽 잘못'이다.
+// 500 + "서버 오류" 로 뭉뚱그리면 사용자는 무엇을 고쳐야 할지 알 수 없다.
+const MULTER_MESSAGES = {
+  LIMIT_FILE_SIZE: [413, '파일 용량이 허용 한도를 초과했습니다.'],
+  LIMIT_FILE_COUNT: [400, `한 번에 보낼 수 있는 파일은 ${config.uploadMaxFiles}개까지입니다. 나눠서 올려 주세요.`],
+  LIMIT_UNEXPECTED_FILE: [400, '업로드 형식이 올바르지 않습니다. 페이지를 새로고침한 뒤 다시 시도해 주세요.'],
+  LIMIT_PART_COUNT: [400, '한 번에 보낸 항목이 너무 많습니다. 나눠서 올려 주세요.'],
+  LIMIT_FIELD_COUNT: [400, '한 번에 보낸 항목이 너무 많습니다. 나눠서 올려 주세요.'],
+  LIMIT_FIELD_KEY: [400, '업로드 형식이 올바르지 않습니다.'],
+  LIMIT_FIELD_VALUE: [400, '입력값이 너무 깁니다.'],
+};
+
 app.use((err, req, res, next) => {
-  if (err.code === 'LIMIT_FILE_SIZE') {
-    return res.status(413).json({ error: '파일 용량이 허용 한도를 초과했습니다.' });
-  }
+  const known = MULTER_MESSAGES[err.code];
+  if (known) return res.status(known[0]).json({ error: known[1] });
   const status = err.status || 500;
   if (status >= 500) {
     // 내부 오류 상세는 서버 로그에만, 클라이언트엔 일반 메시지 (정보 노출 차단)
