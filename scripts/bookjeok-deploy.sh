@@ -7,9 +7,10 @@
 #
 # 순서
 #   1) 지금 이미지 ID·커밋을 기록 (되돌아갈 지점)
-#   2) 마이그레이션 드라이런 — DB 를 건드리기 전에 SQL 이 통과하는지 먼저 본다
-#   3) 배포 직전 DB 백업
-#   4) 빌드 → 기동 → 마이그레이션
+#   2) 새 이미지를 '빌드만' 한다 (아직 바꾸지 않는다)
+#   3) 새 이미지로 마이그레이션 드라이런 — DB 를 건드리기 전에 SQL 이 통과하는지 본다
+#      (돌고 있는 옛 컨테이너에서 돌리면 옛 코드가 새 마이그레이션을 알지 못해 의미가 없다)
+#   4) 배포 직전 DB 백업 → 기동 → 마이그레이션
 #   5) 건강검진(/api/health + 로그인 화면) 을 최대 90초 기다린다
 #   6) 실패하면 이전 이미지로 되돌리고 다시 기동, 결과를 남긴다
 #
@@ -59,28 +60,55 @@ if [ "$DO_PULL" = true ]; then
 fi
 NEW_SHA="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
 
-# ── 2) 마이그레이션 드라이런 (DB 를 건드리기 전에) ──────
+# ── 2) 새 이미지 빌드 (아직 바꾸지 않는다) ─────────────
+STAGE="빌드"
+say "새 이미지 빌드 …"
+if ! docker compose build "$API_SERVICE"; then
+  say "[실패] 빌드 실패 — 서비스는 그대로 돌아가고 있습니다."
+  report false "docker compose build 가 실패했습니다. 서비스는 이전 버전 그대로입니다."
+  exit 1
+fi
+# ── 3) 마이그레이션 드라이런 — '새 이미지'로 돌려야 의미가 있다 ──
+# 돌고 있는 옛 컨테이너에서 돌리면 옛 코드가 새 마이그레이션을 아예 모른다.
+# (--dry-run 플래그를 모르는 옛 버전은 플래그를 무시하고 진짜로 적용해 버린다)
 STAGE="마이그레이션 드라이런"
-say "마이그레이션 시험 적용 …"
-if ! docker exec -i "$API_CONTAINER" node src/initDb.js --dry-run; then
+say "새 이미지로 마이그레이션 시험 적용 …"
+# compose 로 띄우면 네트워크·환경변수·방금 빌드한 이미지를 알아서 맞춰 준다.
+# --no-deps: 이미 떠 있는 db 를 건드리지 않는다. 컨테이너는 끝나면 사라진다(--rm).
+DRY_OUT="$(mktemp)"
+DRY_RC=0
+docker compose run --rm --no-deps "$API_SERVICE" node src/initDb.js --dry-run > "$DRY_OUT" 2>&1 || DRY_RC=$?
+sed 's/^/    /' "$DRY_OUT"
+
+if [ "$DRY_RC" -ne 0 ]; then
+  rm -f "$DRY_OUT"
   say "[중단] 마이그레이션 드라이런 실패 — 배포하지 않습니다. DB 는 그대로입니다."
   report false "마이그레이션 드라이런에서 실패했습니다. 로그를 확인하고 SQL 을 고친 뒤 다시 배포하세요."
   exit 1
 fi
+# --dry-run 을 모르는 옛 코드는 플래그를 무시하고 '진짜로' 적용해 버린다.
+# 드라이런이 실제로 돌았다면 반드시 이 표시가 찍히므로, 없으면 검증이 안 된 것으로 보고 멈춘다.
+if ! grep -q '\[dry-run\]' "$DRY_OUT"; then
+  rm -f "$DRY_OUT"
+  say "[중단] 드라이런이 실행되지 않았습니다(이미지에 --dry-run 지원이 없음). 배포를 멈춥니다."
+  report false "새 이미지가 마이그레이션 드라이런을 지원하지 않습니다. 코드가 최신인지 확인하세요."
+  exit 1
+fi
+rm -f "$DRY_OUT"
 
-# ── 3) 배포 직전 백업 ─────────────────────────────────
+# ── 4) 배포 직전 백업 ─────────────────────────────────
 if [ "$DO_BACKUP" = true ] && [ -x "$REPO_DIR/scripts/bookjeok-backup.sh" ]; then
   STAGE="배포 전 백업"
   say "배포 전 DB 백업 …"
   "$REPO_DIR/scripts/bookjeok-backup.sh" >/dev/null 2>&1 || say "[주의] 배포 전 백업에 실패했습니다(배포는 계속합니다)"
 fi
 
-# ── 4) 빌드 → 기동 → 마이그레이션 ─────────────────────
-STAGE="빌드·기동"
-say "이미지 빌드 및 재기동 …"
-if ! docker compose up -d --build "$API_SERVICE"; then
-  say "[실패] 빌드/기동 실패 — 이전 컨테이너가 그대로 떠 있을 수 있습니다."
-  report false "docker compose up --build 이 실패했습니다."
+# ── 5) 기동 → 마이그레이션 ────────────────────────────
+STAGE="기동"
+say "새 이미지로 재기동 …"
+if ! docker compose up -d "$API_SERVICE"; then
+  say "[실패] 기동 실패 — 이전 컨테이너가 그대로 떠 있을 수 있습니다."
+  report false "docker compose up 이 실패했습니다."
   exit 1
 fi
 
@@ -88,7 +116,7 @@ STAGE="마이그레이션"
 say "마이그레이션 적용 …"
 docker exec -i "$API_CONTAINER" node src/initDb.js || say "[주의] 마이그레이션 명령이 0 이 아닌 코드로 끝났습니다 — 아래 건강검진으로 판단합니다"
 
-# ── 5) 건강검진 ───────────────────────────────────────
+# ── 6) 건강검진 ───────────────────────────────────────
 STAGE="건강검진"
 say "건강검진 — 최대 ${HEALTH_TIMEOUT}초 대기 ($HEALTH_URL)"
 HEALTHY=false
@@ -111,7 +139,7 @@ if [ "$HEALTHY" = true ]; then
   exit 0
 fi
 
-# ── 6) 자동 롤백 ──────────────────────────────────────
+# ── 7) 자동 롤백 ──────────────────────────────────────
 say "[실패] 건강검진 통과 실패 — 되돌립니다."
 docker logs --tail 40 "$API_CONTAINER" 2>&1 | sed 's/^/    /' || true
 
