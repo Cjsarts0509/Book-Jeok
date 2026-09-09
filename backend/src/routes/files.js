@@ -572,7 +572,7 @@ router.post('/upload', authenticate, wrap(resolveOwner), wrap(diskGate), upload.
     if (err.status === 413) return res.status(413).json({ error: err.message });
     throw err;
   }
-  await audit(req, 'upload', `${folder} · ${saved.length}개`);
+  await audit(req, 'upload', `${folder} · ${saved.length}개 · ${fileRefs(saved)}`);
   // 다른 사람(담당자·관리자)이 내 계정에 올리면 소유자에게 인앱 알림
   if (saved.length && Number(req.user.id) !== Number(req.targetOwnerId)) {
     notify.push({ userId: req.targetOwnerId, type: 'upload', title: `파일 ${saved.length}개가 업로드되었습니다`, body: `${req.user.display_name || req.user.username}님이 '${folder}' 폴더에 파일 ${saved.length}개를 올렸습니다.` }).catch(() => {});
@@ -705,7 +705,7 @@ router.post('/upload/complete', authenticate, wrap(resolveOwner), wrap(diskGate)
      VALUES ($1,$2,$3,$4,$5,$6,$7,${note ? 'now()' : 'NULL'}) RETURNING id`,
     [owner, folder, name, storedName, size, mime, note]
   );
-  await audit(req, 'upload', `${folder} · ${originalName}`);
+  await audit(req, 'upload', `${folder} · ${originalName} · file=${row.rows[0].id}`);
   if (Number(req.user.id) !== Number(owner)) {
     notify.push({ userId: owner, type: 'upload', title: '파일 1개가 업로드되었습니다', body: `${req.user.display_name || req.user.username}님이 '${folder}' 폴더에 파일을 올렸습니다.` }).catch(() => {});
   }
@@ -737,7 +737,7 @@ router.get('/:id(\\d+)/download', authenticate, wrap(async (req, res) => {
   if (!(await canAccessOwner(req.user, file.owner_id))) return res.status(403).json({ error: '접근 권한이 없습니다.' });
   const disk = path.join(userDir(file.owner_id), file.stored_name);
   if (!fs.existsSync(disk)) return res.status(410).json({ error: '파일 실체가 존재하지 않습니다.' });
-  await audit(req, 'download', `${file.folder} · ${file.original_name}`, file.owner_id);
+  await audit(req, 'download', `${file.folder} · ${file.original_name} · file=${file.id}`, file.owner_id);
   res.download(disk, file.original_name);
 }));
 
@@ -810,7 +810,7 @@ router.post('/:id(\\d+)/lock', authenticate, wrap(async (req, res) => {
   }
   const note = String(req.body.note || '').slice(0, 200);
   await query('UPDATE files SET locked_by=$1, locked_at=now(), lock_note=$2 WHERE id=$3', [req.user.id, note, req.params.id]);
-  await audit(req, 'lock_file', `${f.original_name}${note ? ` · ${note}` : ''}`, f.owner_id);
+  await audit(req, 'lock_file', `${f.original_name}${note ? ` · ${note}` : ''} · file=${req.params.id}`, f.owner_id);
   res.json({ ok: true, lockedBy: req.user.id, lockNote: note });
 }));
 router.post('/:id(\\d+)/unlock', authenticate, wrap(async (req, res) => {
@@ -822,7 +822,7 @@ router.post('/:id(\\d+)/unlock', authenticate, wrap(async (req, res) => {
     return res.status(423).json({ error: '잠근 사람이나 관리자만 풀 수 있습니다.', code: 'locked' });
   }
   await query("UPDATE files SET locked_by=NULL, locked_at=NULL, lock_note='' WHERE id=$1", [req.params.id]);
-  await audit(req, 'unlock_file', f.original_name, f.owner_id);
+  await audit(req, 'unlock_file', `${f.original_name} · file=${req.params.id}`, f.owner_id);
   res.json({ ok: true });
 }));
 
@@ -834,16 +834,22 @@ router.get('/:id(\\d+)/history', authenticate, wrap(async (req, res) => {
   const f = r.rows[0];
   if (!(await canAccessOwner(req.user, f.owner_id))) return res.status(403).json({ error: '권한이 없습니다.' });
   const limit = Math.min(200, Math.max(1, parseInt(req.query.limit || '50', 10)));
-  // 다운로드 기록은 detail 에 '<폴더> · <파일명>' 으로 남는다(파일 id 가 아니라).
-  // 이름이 바뀌었을 수 있으므로 파일 id 형태와 이름 형태를 모두 찾는다.
+  // 기록은 'file=<id>' 형태로 남는다. 사슬 도입 전이나 예전 코드가 남긴 기록은
+  // 이름만 들어 있으므로 이름으로도 찾는다(이름이 바뀌었다면 그 부분은 못 찾는다).
+  //
+  // id 는 반드시 경계를 맞춰 찾아야 한다 — LIKE '%file=1%' 는 file=177 에도 걸려서
+  // 남의 파일 기록이 이 파일 이력에 섞여 나온다. 앞뒤가 숫자가 아닌 경우만 인정한다.
+  // 이름 쪽은 파일명에 % 나 _ 가 있으면 LIKE 와일드카드로 동작하므로 이스케이프한다.
+  const nameLike = `%${f.original_name.replace(/([\\%_])/g, '\\$1')}%`;
+  const idRe = `(^|[^0-9])file=${req.params.id}([^0-9]|$)`;
   const rows = await query(`
     SELECT a.id, a.action, a.detail, a.created_at, a.ip, u.username, u.display_name
     FROM audit_log a LEFT JOIN users u ON u.id = a.user_id
     WHERE a.owner_id = $1
       AND a.action IN ('download','bulk_zip','create_share','lock_file','unlock_file','rename','upload')
-      AND (a.detail LIKE $2 OR a.detail LIKE $3)
+      AND (a.detail LIKE $2 ESCAPE '\\' OR a.detail ~ $3)
     ORDER BY a.created_at DESC LIMIT $4`,
-  [f.owner_id, `%${f.original_name}%`, `%file=${req.params.id}%`, limit]);
+  [f.owner_id, nameLike, idRe, limit]);
   // 공개 공유로 나간 횟수도 함께(누가 받았는지는 알 수 없지만 몇 번 나갔는지는 중요하다)
   const shares = await query(
     'SELECT COUNT(*)::int AS c, COALESCE(SUM(download_count),0)::int AS downloads FROM share_links WHERE file_id=$1', [req.params.id]);
@@ -1014,6 +1020,15 @@ router.post('/bulk/copy', authenticate, wrap(async (req, res) => {
 // ── 압축(ZIP) 번들 ──────────
 const BUNDLE_DIR = path.join(config.storageRoot, '_bundles');
 
+// 감사기록의 detail 에 파일 id 를 남긴다. 파일 이력(U6)이 id 로 찾기 때문에,
+// 이게 없으면 이름을 바꾼 순간 그 파일의 지난 기록이 전부 안 보이게 된다.
+// 묶음이 아주 클 때 로그 한 줄이 수천 자가 되지 않도록 개수를 제한한다.
+const AUDIT_REF_CAP = 100;
+function fileRefs(list) {
+  const ids = list.slice(0, AUDIT_REF_CAP).map((x) => `file=${x.id}`).join(' ');
+  return list.length > AUDIT_REF_CAP ? `${ids} 외 ${list.length - AUDIT_REF_CAP}개` : ids;
+}
+
 async function collectBundleFiles(owner, ids, folders) {
   const rows = new Map(); // id -> row
   if (ids.length) {
@@ -1104,7 +1119,7 @@ router.post('/bulk/zip', authenticate, wrap(resolveOwner), wrap(diskGate), wrap(
     'INSERT INTO zip_bundles (owner_id, stored_name, display_name, size_bytes, created_by) VALUES ($1,$2,$3,$4,$5) RETURNING id',
     [owner, storedName, zipName, size, req.user.id]
   );
-  await audit(req, 'bulk_zip', `${zipName} · ${files.length}개`, owner);
+  await audit(req, 'bulk_zip', `${zipName} · ${files.length}개 · ${fileRefs(files)}`, owner);
   cleanupBundles(); // 비동기 정리(대기 안 함)
   res.status(201).json({ bundleId: ins.rows[0].id, name: zipName, size });
 }));
