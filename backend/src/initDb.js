@@ -382,17 +382,25 @@ async function dryRunMigrations() {
   const pending = MIGRATIONS.filter((m) => !done.has(m.id));
   const result = { pending: pending.map((m) => m.id), applied: [...done], ok: true, steps: [], diff: null };
 
-  if (!pending.length) {
-    console.log('[dry-run] 적용할 마이그레이션이 없습니다. (이미 최신)');
-    return result;
-  }
-  console.log(`[dry-run] 미적용 ${pending.length}건: ${pending.map((m) => m.id).join(', ')}`);
+  if (!pending.length) console.log('[dry-run] 적용할 마이그레이션이 없습니다. (이미 최신)');
+  else console.log(`[dry-run] 미적용 ${pending.length}건: ${pending.map((m) => m.id).join(', ')}`);
 
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
     const before = await snapshotSchema(client);
-    for (const m of pending) {
+    // 실제 적용과 같은 순서로 — 기본 스키마 먼저, 그다음 마이그레이션.
+    // 이게 빠지면 아직 테이블이 없는 새 DB에서 0001 이 '테이블 없음'으로 헛되이 실패한다.
+    // 이미 스키마가 있는 DB에서는 CREATE IF NOT EXISTS 라 아무것도 바꾸지 않는다.
+    try {
+      await client.query(SCHEMA);
+      result.steps.push({ id: '(기본 스키마)', ok: true });
+    } catch (e) {
+      result.ok = false;
+      result.steps.push({ id: '(기본 스키마)', ok: false, error: e.message });
+      console.error(`  ❌ 기본 스키마 — ${e.message}`);
+    }
+    for (const m of (result.ok ? pending : [])) {
       const t0 = Date.now();
       try {
         await client.query(m.sql);
