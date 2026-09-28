@@ -956,6 +956,12 @@ th { background: var(--bg); font-weight: 700; color: var(--text-muted); font-siz
 .sa-file input { display: none; }
 .sa-lbl { font-weight: 700; font-size: 14px; flex: none; }
 .sa-name { color: var(--text-muted); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sa-src { display: flex; align-items: center; gap: 12px; padding: 10px 14px; border: 1.5px solid var(--border); border-radius: var(--radius-sm); }
+.sa-src .sa-lbl { min-width: 130px; }
+.sa-src select { flex: 1; min-width: 0; }
+.sa-src-foot { display: flex; align-items: center; gap: 10px; font-size: 12px; }
+.sa-src-foot span { flex: 1; }
+@media (max-width: 640px) { .sa-src { flex-direction: column; align-items: stretch; gap: 6px; } .sa-src .sa-lbl { min-width: 0; } }
 .modal.sa-modal #sa-result { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .sa-resulthead { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
 .sa-summary { flex: 1; min-width: 200px; font-size: 14px; padding: 10px 14px; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-sm); }

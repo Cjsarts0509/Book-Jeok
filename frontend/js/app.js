@@ -3321,11 +3321,12 @@ const App = (() => {
     // 전달받은 파일(.bjsa)로 열린 '작업 모드' — 엑셀 업로드/분석/영업점 전달은 필요 없음(이미 만들어 준 목록).
     const isOpened = !!(preload && Array.isArray(preload.disc));
     const m = UI.modal(`<h3>📊 재고조사 오차체크</h3>
-      <p class="muted" style="font-size:12px;margin:-6px 0 12px">${isOpened ? '전달받은 재고조사 오차 목록입니다. 상품을 보고 사진 촬영·체크를 진행하세요.' : '두 엑셀을 올리면 오차 항목(예외 제외·차이≠0)을 뽑아 서가별 실사수량과 함께 표로 보여줍니다.'}</p>
+      <p class="muted" style="font-size:12px;margin:-6px 0 12px">${isOpened ? '전달받은 재고조사 오차 목록입니다. 상품을 보고 사진 촬영·체크를 진행하세요.' : '웹하드에 올려 둔 두 엑셀을 고르면 오차 항목(예외 제외·차이≠0)을 뽑아 서가별 실사수량과 함께 표로 보여줍니다.'}</p>
       <div id="sa-resume"></div>
       ${isOpened ? '' : `<div class="sa-inputs">
-        <label class="sa-file"><span class="sa-lbl">① 결과확인리스트</span><input type="file" id="sa-f1" accept=".xlsx,.xls"><span class="sa-name" id="sa-n1">파일 선택…</span></label>
-        <label class="sa-file"><span class="sa-lbl">② 서가별스캔데이터</span><input type="file" id="sa-f2" accept=".xlsx,.xls"><span class="sa-name" id="sa-n2">파일 선택…</span></label>
+        <div class="sa-src"><span class="sa-lbl">① 결과확인리스트</span><select class="input" id="sa-f1" disabled><option>웹하드 파일 불러오는 중…</option></select></div>
+        <div class="sa-src"><span class="sa-lbl">② 서가별스캔데이터</span><select class="input" id="sa-f2" disabled><option>웹하드 파일 불러오는 중…</option></select></div>
+        <div class="sa-src-foot muted"><span id="sa-srcinfo"></span><button type="button" class="btn btn-ghost btn-sm" id="sa-reload">🔄 목록 새로고침</button></div>
       </div>`}
       <div class="modal-actions"><span class="muted" id="sa-status" style="flex:1;font-size:12px"></span><button class="btn btn-ghost" id="sa-close">닫기</button>${isOpened ? '' : '<button class="btn btn-primary" id="sa-run">분석</button>'}</div>
       <div id="sa-result" style="margin-top:12px"></div>`,
@@ -3334,12 +3335,53 @@ const App = (() => {
     m.q('#sa-close').addEventListener('click', m.close);
     const status = (t) => { const s = m.q('#sa-status'); if (s) s.textContent = t || ''; };
     let lastAoa = null; // 다운로드용(헤더+데이터)
-    m.q('#sa-f1')?.addEventListener('change', (e) => { m.q('#sa-n1').textContent = e.target.files[0]?.name || '파일 선택…'; });
-    m.q('#sa-f2')?.addEventListener('change', (e) => { m.q('#sa-n2').textContent = e.target.files[0]?.name || '파일 선택…'; });
+
+    // ── 두 엑셀은 PC 에 내려받은 것이 아니라 '지금 보고 있는 계정의 웹하드'에서 바로 읽는다 ──
+    // 이름에 '결과확인' / '서가' 가 든 가장 최근 파일을 자동으로 골라 두고, 다른 걸 원하면 바꿀 수 있게 한다.
+    const SA_PICK = {
+      '#sa-f1': (n) => n.includes('결과확인'),
+      '#sa-f2': (n) => n.includes('서가') || n.includes('스캔'),
+    };
+    let saXlsFiles = [];   // 이 계정 웹하드의 엑셀 파일(최신순)
+    const dayStr = (v) => { const d = new Date(v); const p2 = (x) => String(x).padStart(2, '0'); return isNaN(d) ? '' : `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())} ${p2(d.getHours())}:${p2(d.getMinutes())}`; };
+    async function loadWebhardXls() {
+      const s1 = m.q('#sa-f1'), s2 = m.q('#sa-f2'); if (!s1) return;
+      const keep = { '#sa-f1': s1.value, '#sa-f2': s2.value };   // 새로고침해도 고른 것 유지
+      [s1, s2].forEach((sel) => { sel.disabled = true; sel.innerHTML = '<option>웹하드 파일 불러오는 중…</option>'; });
+      try {
+        const r = await API.searchAdvanced({ exts: 'xlsx,xls', sort: 'createdAt' }, state.ownerId);
+        saXlsFiles = r.files || [];
+      } catch (e) { saXlsFiles = []; UI.toast('웹하드 파일 목록을 불러오지 못했습니다: ' + (e.message || ''), 'error'); }
+      const info = m.q('#sa-srcinfo');
+      if (!saXlsFiles.length) {
+        [s1, s2].forEach((sel) => { sel.innerHTML = '<option value="">웹하드에 엑셀 파일이 없습니다</option>'; });
+        if (info) info.textContent = '이 계정 웹하드에 두 엑셀을 먼저 올린 뒤 🔄 을 눌러 주세요.';
+        return;
+      }
+      const noSpace = (x) => String(x || '').replace(/\s+/g, '');
+      for (const [id, sel] of [['#sa-f1', s1], ['#sa-f2', s2]]) {
+        const auto = saXlsFiles.find((f) => SA_PICK[id](noSpace(f.name)));
+        const chosen = keep[id] && saXlsFiles.some((f) => String(f.id) === keep[id]) ? keep[id] : (auto ? String(auto.id) : '');
+        sel.innerHTML = '<option value="">— 웹하드에서 선택 —</option>' + saXlsFiles.map((f) =>
+          `<option value="${f.id}"${String(f.id) === chosen ? ' selected' : ''}>${esc(f.name)} · ${esc(f.folder === '/' ? '홈' : f.folder)} · ${dayStr(f.createdAt)}</option>`).join('');
+        sel.disabled = false;
+      }
+      if (info) info.textContent = `이 계정 웹하드의 엑셀 ${saXlsFiles.length.toLocaleString()}개 (최신순) — 이름으로 자동 선택했어요. 다르면 바꿔 주세요.`;
+    }
+    // 웹하드 파일 → 바이트. 로그인 토큰으로 직접 받는다(브라우저 다운로드 폴더를 거치지 않음).
+    async function fetchWebhardFile(id) {
+      const res = await fetch(API.downloadUrl(id), { headers: { Authorization: 'Bearer ' + API.getToken() }, credentials: 'include' });
+      if (!res.ok) {
+        let msg = ''; try { msg = (await res.json()).error || ''; } catch (_) {}
+        throw new Error(msg || `웹하드 파일을 읽지 못했습니다 (${res.status})`);
+      }
+      return res.arrayBuffer();
+    }
+    if (!isOpened) { m.q('#sa-reload')?.addEventListener('click', loadWebhardXls); loadWebhardXls(); }
 
     const num = (v) => { const n = Number(String(v == null ? '' : v).replace(/[^\d.-]/g, '')); return isNaN(n) ? 0 : n; };
-    async function readSheet(XLSX, file) {
-      const wb = XLSX.read(await file.arrayBuffer(), { type: 'array' });
+    function readSheet(XLSX, buf) {
+      const wb = XLSX.read(buf, { type: 'array' });
       const ws = wb.Sheets[wb.SheetNames[0]];
       return XLSX.utils.sheet_to_json(ws, { header: 1, blankrows: false, defval: '' });
     }
@@ -3357,12 +3399,12 @@ const App = (() => {
     let saSort = { col: null, dir: 1 };  // 항목 정렬 열(null=원래 순서)·방향. 서가는 '항목 안에서' 중분류로 정렬.
     let saFilterFields = new Set();  // 분야 필터(비어있으면 전체, 아니면 선택된 분야만)
     let saFilterPhoto = '';         // 사진 필터('' 전체 · 'has' 있음 · 'no' 없음)
-    // 정렬용 열 정의(14열). shelf=true 는 서가 분해값(대/중/소분류·스캔수량)으로 disc 항목이 아닌 '행'에서 취함.
-    const SA_HEADERS = ['분야', 'ISBN', '도서명', '출판사', '전산재고', '실재고', '누락재고', '예외여부', '스캔재고', '차이', '대분류', '중분류', '소분류', '스캔수량'];
+    // 정렬용 열 정의(15열). shelf=true 는 서가 분해값(수불처코드·대/중/소분류·스캔수량)으로 disc 항목이 아닌 '행'에서 취함.
+    const SA_HEADERS = ['분야', 'ISBN', '도서명', '출판사', '전산재고', '실재고', '누락재고', '예외여부', '스캔재고', '차이', '수불처코드', '대분류', '중분류', '소분류', '스캔수량'];
     const SA_COLS = [
       { k: 'field', num: false }, { k: 'isbn', num: false }, { k: 'name', num: false }, { k: 'pub', num: false },
       { k: 'sys', num: true }, { k: 'real', num: true }, { k: 'miss', num: true }, { k: 'exc', num: false }, { k: 'scan', num: true }, { k: 'diff', num: true },
-      { k: 'maj', num: false, shelf: true }, { k: 'mid', num: false, shelf: true }, { k: 'min', num: false, shelf: true }, { k: 'qty', num: true, shelf: true },
+      { k: 'code', num: false, shelf: true }, { k: 'maj', num: false, shelf: true }, { k: 'mid', num: false, shelf: true }, { k: 'min', num: false, shelf: true }, { k: 'qty', num: true, shelf: true },
     ];
 
     // ── 목록 저장/불러오기(서버 보관 · 계정별) — 같은 계정이면 어느 기기서든 이어서 작업 ──
@@ -3398,12 +3440,13 @@ const App = (() => {
       });
       const c = m.q('#sa-photocount'); if (c) c.textContent = n ? ` · 📷 사진있음 ${n.toLocaleString()}건` : '';
     }
-    // 한 항목(ISBN)의 서가들을 [대/중/소분류·수량]으로 분해하고 '항목 안에서' 중분류 오름차순 정렬.
+    // 한 항목(ISBN)의 서가들을 [수불처코드·대/중/소분류·수량]으로 분해하고 '항목 안에서' 서가 위치 순으로 정렬.
+    // 대분류(2)+중분류(4)는 예전 6자리 중분류를 나눈 것이라, 둘을 이어 붙인 값으로 정렬해야 예전과 순서가 같다.
     function itemShelves(d) {
       const arr = (d.shelves && d.shelves.length)
-        ? d.shelves.map((s) => { const [maj, mid, min] = splitShelf(s[0]); return { maj, mid, min, qty: s[1] }; })
+        ? d.shelves.map((s) => { const [code, maj, mid, min] = splitShelf(s[0]); return { code, maj, mid, min, qty: s[1] }; })
         : [];
-      arr.sort((a, b) => String(a.mid).localeCompare(String(b.mid), 'ko', { numeric: true }));
+      arr.sort((a, b) => String(a.maj + a.mid).localeCompare(String(b.maj + b.mid), 'ko', { numeric: true }));
       return arr;
     }
     // 표시할 항목(disc) 순서: 필터 적용 + (열 클릭 시) 항목 정렬. 서가 열로 정렬하면 그 항목의 '첫(=중분류 최소)' 서가값 기준.
@@ -3426,7 +3469,7 @@ const App = (() => {
       }
       return idx;
     }
-    // 표를 다시 그림. 항목당 1행, 서가가 여러 개면 대/중/소분류·스캔수량 칸에 '중분류 순서대로 위→아래' 여러 줄로.
+    // 표를 다시 그림. 항목당 1행, 서가가 여러 개면 수불처코드·대/중/소분류·스캔수량 칸에 '서가 위치 순서대로 위→아래' 여러 줄로.
     function renderTable() {
       const wrap = m.q('#sa-tablewrap'); if (!wrap) return;
       const order = buildOrder();
@@ -3438,7 +3481,7 @@ const App = (() => {
         const stack = (arr) => (arr.length ? arr.map((v) => esc(String(v == null ? '' : v))).join('<br>') : '');
         const b10 = [d.field, d.isbn, d.name, d.pub, d.sys, d.real, d.miss, d.exc, d.scan, d.diff]
           .map((c, idx) => `<td class="${idx === 1 ? 'sa-isbn' : ''}">${esc(String(c == null ? '' : c))}</td>`).join('');
-        const shc = [stack(sh.map((x) => x.maj)), stack(sh.map((x) => x.mid)), stack(sh.map((x) => x.min)), stack(sh.map((x) => x.qty))]
+        const shc = [stack(sh.map((x) => x.code)), stack(sh.map((x) => x.maj)), stack(sh.map((x) => x.mid)), stack(sh.map((x) => x.min)), stack(sh.map((x) => x.qty))]
           .map((h) => `<td class="sa-shelf">${h}</td>`).join('');
         return `<tr data-ri="${ri}">${b10}${shc}</tr>`;
       }).join('');
@@ -3718,26 +3761,27 @@ const App = (() => {
       });
     }
 
-    // 서가번호(11자리) → [대분류(3·수불처), 중분류(6), 소분류(2)]. 형식이 다르면 통째로 대분류에.
+    // 서가번호(11자리) → [수불처코드(3), 대분류(2), 중분류(4), 소분류(2)]. 형식이 다르면 통째로 수불처코드 칸에.
+    //   예) 001 12 3456 78  →  수불처 001 · 대분류 12 · 중분류 3456 · 소분류 78
     function splitShelf(num) {
       const s = String(num == null ? '' : num).trim();
-      if (s.length >= 11) return [s.slice(0, 3), s.slice(3, 9), s.slice(9)];
-      return [s, '', ''];
+      if (s.length >= 11) return [s.slice(0, 3), s.slice(3, 5), s.slice(5, 9), s.slice(9)];
+      return [s, '', '', ''];
     }
     // 오차 목록 → 워크북. 항목(ISBN)은 붙어있게(그룹) 두고, 항목 안 서가는 중분류 순으로 행 분리.
     function buildDiscWorkbook(XLSX) {
-      const headers = ['분야', 'ISBN', '도서명', '출판사', '전산재고', '실재고', '누락재고', '예외여부', '스캔재고', '차이', '대분류', '중분류', '소분류', '스캔수량'];
+      const headers = ['분야', 'ISBN', '도서명', '출판사', '전산재고', '실재고', '누락재고', '예외여부', '스캔재고', '차이', '수불처코드', '대분류', '중분류', '소분류', '스캔수량'];
       const rows = [];
       for (const d of disc) {
-        const sh = itemShelves(d);                        // 항목 내 중분류 정렬
-        const shelves = sh.length ? sh : [{ maj: '', mid: '', min: '', qty: '' }];
-        for (const s of shelves) rows.push([d.field, d.isbn, d.name, d.pub, d.sys, d.real, d.miss, d.exc, d.scan, d.diff, s.maj, s.mid, s.min, s.qty]);
+        const sh = itemShelves(d);                        // 항목 내 서가 위치 순 정렬
+        const shelves = sh.length ? sh : [{ code: '', maj: '', mid: '', min: '', qty: '' }];
+        for (const s of shelves) rows.push([d.field, d.isbn, d.name, d.pub, d.sys, d.real, d.miss, d.exc, d.scan, d.diff, s.code, s.maj, s.mid, s.min, s.qty]);
       }
       const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
       // 앞자리 0이 있는 코드 열(ISBN·대/중/소분류)은 '텍스트' 셀로 못박는다.
       //  xlsx 는 셀 타입이 파일에 들어가므로 CSV 와 달리 엑셀 버전/자동변환 설정과 무관하게 0이 보존되지만,
       //  서식까지 텍스트(@)로 지정해 두면 사용자가 셀을 편집·재저장해도 숫자로 바뀌지 않는다.
-      const TEXT_COLS = [1, 10, 11, 12];   // ISBN, 대분류, 중분류, 소분류
+      const TEXT_COLS = [1, 10, 11, 12, 13];   // ISBN, 수불처코드, 대분류, 중분류, 소분류
       for (let r = 1; r <= rows.length; r++) {
         for (const c of TEXT_COLS) {
           const cell = ws[XLSX.utils.encode_cell({ r, c })];
@@ -3826,15 +3870,18 @@ const App = (() => {
     }
 
     m.q('#sa-run')?.addEventListener('click', async () => {
-      const f1 = m.q('#sa-f1').files[0], f2 = m.q('#sa-f2').files[0];
-      if (!f1 || !f2) return UI.toast('두 파일을 모두 선택하세요', 'error');
+      const id1 = m.q('#sa-f1').value, id2 = m.q('#sa-f2').value;
+      if (!id1 || !id2) return UI.toast('웹하드에서 두 파일을 모두 선택하세요', 'error');
+      if (id1 === id2) return UI.toast('① 과 ② 에 같은 파일을 골랐습니다', 'error');
       const btn = m.q('#sa-run'); btn.disabled = true;
       try {
         status('엑셀 라이브러리 로드 중…'); const XLSX = await ensureXLSX();
+        status('웹하드에서 두 파일 가져오는 중…');
+        const [b1, b2] = await Promise.all([fetchWebhardFile(id1), fetchWebhardFile(id2)]);
         status('① 결과확인리스트 읽는 중… (수십 초 걸릴 수 있어요)'); await new Promise((r) => setTimeout(r));
-        const r1 = await readSheet(XLSX, f1);
+        const r1 = readSheet(XLSX, b1);
         status('② 서가별스캔데이터 읽는 중…'); await new Promise((r) => setTimeout(r));
-        const r2 = await readSheet(XLSX, f2);
+        const r2 = readSheet(XLSX, b2);
         status('오차 계산 중…'); await new Promise((r) => setTimeout(r));
 
         // ① 오차 추출: 예외여부 Y는 제외 + (차이≠0 '또는' 실재고-스캔재고≠0)이면 포함
