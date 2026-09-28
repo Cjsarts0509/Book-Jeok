@@ -3324,6 +3324,7 @@ const App = (() => {
       <p class="muted" style="font-size:12px;margin:-6px 0 12px">${isOpened ? '전달받은 재고조사 오차 목록입니다. 상품을 보고 사진 촬영·체크를 진행하세요.' : '웹하드에 올려 둔 두 엑셀을 고르면 오차 항목(예외 제외·차이≠0)을 뽑아 서가별 실사수량과 함께 표로 보여줍니다.'}</p>
       <div id="sa-resume"></div>
       ${isOpened ? '' : `<div class="sa-inputs">
+        <div class="sa-src"><span class="sa-lbl">📅 년도</span><select class="input" id="sa-year" disabled><option>불러오는 중…</option></select></div>
         <div class="sa-src"><span class="sa-lbl">① 결과확인리스트</span><select class="input" id="sa-f1" disabled><option>웹하드 파일 불러오는 중…</option></select></div>
         <div class="sa-src"><span class="sa-lbl">② 서가별스캔데이터</span><select class="input" id="sa-f2" disabled><option>웹하드 파일 불러오는 중…</option></select></div>
         <div class="sa-src-foot muted"><span id="sa-srcinfo"></span><button type="button" class="btn btn-ghost btn-sm" id="sa-reload">🔄 목록 새로고침</button></div>
@@ -3343,30 +3344,58 @@ const App = (() => {
       '#sa-f2': (n) => n.includes('서가') || n.includes('스캔'),
     };
     let saXlsFiles = [];   // 이 계정 웹하드의 엑셀 파일(최신순)
+    let saAnalyzedYear = null;   // 분석에 쓴 년도 — 영업점 전달 폴더(재고조사오차_<년도>)에도 쓴다
     const dayStr = (v) => { const d = new Date(v); const p2 = (x) => String(x).padStart(2, '0'); return isNaN(d) ? '' : `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())} ${p2(d.getHours())}:${p2(d.getMinutes())}`; };
+    const noSpace = (x) => String(x || '').replace(/\s+/g, '');
+    // 파일의 년도: 폴더·파일 이름에 적힌 20xx(또는 20xxMMDD)가 우선, 없으면 올린 날짜의 년도.
+    //   '/2025 재고조사/결과확인리스트.xlsx' · '결과확인리스트_20250928.xlsx' → 2025
+    //   ISBN 같은 긴 숫자 안의 20xx 는 년도로 보지 않는다(앞뒤가 숫자가 아니어야 인정).
+    function fileYear(f) {
+      const m1 = `${f.folder || ''}/${f.name || ''}`.match(/(?:^|[^0-9])(20\d{2})(?:[01]\d[0-3]\d)?(?![0-9])/);
+      if (m1) return m1[1];
+      const d = new Date(f.createdAt);
+      return isNaN(d) ? '' : String(d.getFullYear());
+    }
     async function loadWebhardXls() {
-      const s1 = m.q('#sa-f1'), s2 = m.q('#sa-f2'); if (!s1) return;
-      const keep = { '#sa-f1': s1.value, '#sa-f2': s2.value };   // 새로고침해도 고른 것 유지
-      [s1, s2].forEach((sel) => { sel.disabled = true; sel.innerHTML = '<option>웹하드 파일 불러오는 중…</option>'; });
+      const sy = m.q('#sa-year'), s1 = m.q('#sa-f1'), s2 = m.q('#sa-f2'); if (!s1) return;
+      const keepYear = sy.value;
+      [sy, s1, s2].forEach((sel) => { sel.disabled = true; sel.innerHTML = '<option>웹하드 파일 불러오는 중…</option>'; });
       try {
         const r = await API.searchAdvanced({ exts: 'xlsx,xls', sort: 'createdAt' }, state.ownerId);
-        saXlsFiles = r.files || [];
+        saXlsFiles = (r.files || []).map((f) => ({ ...f, year: fileYear(f) }));
       } catch (e) { saXlsFiles = []; UI.toast('웹하드 파일 목록을 불러오지 못했습니다: ' + (e.message || ''), 'error'); }
       const info = m.q('#sa-srcinfo');
       if (!saXlsFiles.length) {
-        [s1, s2].forEach((sel) => { sel.innerHTML = '<option value="">웹하드에 엑셀 파일이 없습니다</option>'; });
+        [sy, s1, s2].forEach((sel) => { sel.innerHTML = '<option value="">웹하드에 엑셀 파일이 없습니다</option>'; });
         if (info) info.textContent = '이 계정 웹하드에 두 엑셀을 먼저 올린 뒤 🔄 을 눌러 주세요.';
         return;
       }
-      const noSpace = (x) => String(x || '').replace(/\s+/g, '');
+      // 년도 목록(최신 년도가 위). 기본값: 두 파일이 모두 있는 가장 최근 년도 → 없으면 가장 최근 년도.
+      const years = [...new Set(saXlsFiles.map((f) => f.year).filter(Boolean))].sort((a, b) => b.localeCompare(a));
+      const hasBoth = (y) => ['#sa-f1', '#sa-f2'].every((id) => saXlsFiles.some((f) => f.year === y && SA_PICK[id](noSpace(f.name))));
+      const def = years.includes(keepYear) ? keepYear : (years.find(hasBoth) || years[0]);
+      sy.innerHTML = years.map((y) => {
+        const n = saXlsFiles.filter((f) => f.year === y).length;
+        return `<option value="${y}"${y === def ? ' selected' : ''}>${y}년 (엑셀 ${n}개)${hasBoth(y) ? '' : ' · 두 파일 중 일부 없음'}</option>`;
+      }).join('');
+      sy.disabled = false;
+      fillFilesForYear(true);
+    }
+    // 고른 년도의 파일만 ①② 목록에 넣는다. keepPick=true 면 (새로고침 때) 이미 고른 파일을 유지.
+    function fillFilesForYear(keepPick) {
+      const y = m.q('#sa-year').value;
+      const s1 = m.q('#sa-f1'), s2 = m.q('#sa-f2');
+      const list = saXlsFiles.filter((f) => f.year === y);
       for (const [id, sel] of [['#sa-f1', s1], ['#sa-f2', s2]]) {
-        const auto = saXlsFiles.find((f) => SA_PICK[id](noSpace(f.name)));
-        const chosen = keep[id] && saXlsFiles.some((f) => String(f.id) === keep[id]) ? keep[id] : (auto ? String(auto.id) : '');
-        sel.innerHTML = '<option value="">— 웹하드에서 선택 —</option>' + saXlsFiles.map((f) =>
+        const prev = keepPick ? sel.value : '';
+        const auto = list.find((f) => SA_PICK[id](noSpace(f.name)));
+        const chosen = prev && list.some((f) => String(f.id) === prev) ? prev : (auto ? String(auto.id) : '');
+        sel.innerHTML = '<option value="">— 웹하드에서 선택 —</option>' + list.map((f) =>
           `<option value="${f.id}"${String(f.id) === chosen ? ' selected' : ''}>${esc(f.name)} · ${esc(f.folder === '/' ? '홈' : f.folder)} · ${dayStr(f.createdAt)}</option>`).join('');
         sel.disabled = false;
       }
-      if (info) info.textContent = `이 계정 웹하드의 엑셀 ${saXlsFiles.length.toLocaleString()}개 (최신순) — 이름으로 자동 선택했어요. 다르면 바꿔 주세요.`;
+      const info = m.q('#sa-srcinfo');
+      if (info) info.textContent = `${y}년 엑셀 ${list.length.toLocaleString()}개 (최신순) — 이름으로 자동 선택했어요. 다르면 바꿔 주세요. 년도는 폴더·파일 이름의 20xx, 없으면 올린 날짜로 정합니다.`;
     }
     // 웹하드 파일 → 바이트. 로그인 토큰으로 직접 받는다(브라우저 다운로드 폴더를 거치지 않음).
     async function fetchWebhardFile(id) {
@@ -3377,7 +3406,11 @@ const App = (() => {
       }
       return res.arrayBuffer();
     }
-    if (!isOpened) { m.q('#sa-reload')?.addEventListener('click', loadWebhardXls); loadWebhardXls(); }
+    if (!isOpened) {
+      m.q('#sa-reload')?.addEventListener('click', loadWebhardXls);
+      m.q('#sa-year')?.addEventListener('change', () => fillFilesForYear(false));
+      loadWebhardXls();
+    }
 
     const num = (v) => { const n = Number(String(v == null ? '' : v).replace(/[^\d.-]/g, '')); return isNaN(n) ? 0 : n; };
     function readSheet(XLSX, buf) {
@@ -3806,7 +3839,8 @@ const App = (() => {
       sel.innerHTML = '<option value="">영업점 선택…</option>' + saBranches.map((a) => `<option value="${a.id}">${esc(a.displayName)}</option>`).join('');
       if (cur) sel.value = cur;
     }
-    // 결과 오차목록을 '선택한 영업점' 계정의 재고조사오차_<생성년도> 폴더에 '가상 파일(.bjsa)'로 전달.
+    // 결과 오차목록을 '선택한 영업점' 계정의 재고조사오차_<년도> 폴더에 '가상 파일(.bjsa)'로 전달.
+    // 년도는 분석할 때 고른 년도(작년 자료를 지금 분석해도 작년 폴더로 간다). 저장 목록을 이어 본 경우엔 올해.
     // 영업점이 그 파일을 더블클릭하면 재고조사 화면(사진·체크)이 이 목록으로 열린다. 용량은 관리자 풀(무제한).
     async function deliverToBranch() {
       if (!disc.length) return UI.toast('먼저 분석을 실행하세요.', 'error');
@@ -3814,7 +3848,7 @@ const App = (() => {
       if (!bid) return UI.toast('전달할 영업점을 선택하세요.', 'error');
       const acct = saBranches.find((a) => String(a.id) === String(bid));
       const branchName = acct ? acct.displayName : '영업점';
-      const year = new Date().getFullYear();
+      const year = saAnalyzedYear || new Date().getFullYear();
       const ok = await UI.confirm({ title: '영업점에 전달', confirmText: '전달', message: `'${branchName}' 계정의 재고조사오차_${year} 폴더에\n재고조사 파일을 전달합니다 (오차 ${disc.length.toLocaleString()}건).\n영업점이 이 파일을 열어 사진 촬영·체크를 진행합니다.` });
       if (!ok) return;
       const btn = m.q('#sa-deliver'); if (btn) { btn.disabled = true; btn.textContent = '전달 중…'; }
@@ -3859,6 +3893,7 @@ const App = (() => {
       const box = m.q('#sa-resume'); if (!box) return;
       box.innerHTML = `<div class="sa-resume">💾 저장된 목록 <b>${st.data.length.toLocaleString()}건</b>${when ? ` <span class="muted">(${when})</span>` : ''}<span style="flex:1"></span><button class="btn btn-sm btn-primary" id="sa-resume-go">이어서 보기</button><button class="btn btn-sm btn-ghost" id="sa-resume-del">삭제</button></div>`;
       m.q('#sa-resume-go').addEventListener('click', () => {
+        saAnalyzedYear = null;   // 저장 목록은 년도를 모른다 → 전달은 올해 폴더로
         disc = st.data.map((d) => ({ ...d, shelves: d.shelves || [] }));
         isbnSet = new Set(disc.map((d) => d.isbn));
         box.innerHTML = ''; status(''); renderResult();
@@ -3870,8 +3905,10 @@ const App = (() => {
     }
 
     m.q('#sa-run')?.addEventListener('click', async () => {
+      const yr = m.q('#sa-year').value;
       const id1 = m.q('#sa-f1').value, id2 = m.q('#sa-f2').value;
-      if (!id1 || !id2) return UI.toast('웹하드에서 두 파일을 모두 선택하세요', 'error');
+      if (!yr) return UI.toast('먼저 년도를 선택하세요', 'error');
+      if (!id1 || !id2) return UI.toast(`${yr}년 파일 중에서 두 파일을 모두 선택하세요`, 'error');
       if (id1 === id2) return UI.toast('① 과 ② 에 같은 파일을 골랐습니다', 'error');
       const btn = m.q('#sa-run'); btn.disabled = true;
       try {
@@ -3912,6 +3949,7 @@ const App = (() => {
           d.shelves = mm ? [...mm.entries()].sort((a, b) => Number(a[0]) - Number(b[0])).slice(0, SA_MAX_SHELF) : [];
           if (d.shelves.length) matched++;
         }
+        saAnalyzedYear = Number(yr) || null;
         status('');
         renderResult();
       } catch (err) {
