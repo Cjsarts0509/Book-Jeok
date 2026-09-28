@@ -3325,6 +3325,7 @@ const App = (() => {
       <div id="sa-resume"></div>
       ${isOpened ? '' : `<div class="sa-inputs">
         <div class="sa-src"><span class="sa-lbl">📅 년도</span><select class="input" id="sa-year" disabled><option>불러오는 중…</option></select></div>
+        <div class="sa-src"><span class="sa-lbl">🏬 영업점</span><select class="input" id="sa-sbranch" disabled><option>불러오는 중…</option></select></div>
         <div class="sa-src"><span class="sa-lbl">① 결과확인리스트</span><select class="input" id="sa-f1" disabled><option>웹하드 파일 불러오는 중…</option></select></div>
         <div class="sa-src"><span class="sa-lbl">② 서가별스캔데이터</span><select class="input" id="sa-f2" disabled><option>웹하드 파일 불러오는 중…</option></select></div>
         <div class="sa-src-foot muted"><span id="sa-srcinfo"></span><button type="button" class="btn btn-ghost btn-sm" id="sa-reload">🔄 목록 새로고침</button></div>
@@ -3345,28 +3346,46 @@ const App = (() => {
     };
     let saXlsFiles = [];   // 이 계정 웹하드의 엑셀 파일(최신순)
     let saAnalyzedYear = null;   // 분석에 쓴 년도 — 영업점 전달 폴더(재고조사오차_<년도>)에도 쓴다
+    let saAnalyzedBranch = '';   // 분석에 쓴 영업점 — '영업점에 전달' 대상 계정을 미리 골라 둔다
+    // 파일의 영업점: 파일이 들어 있는 '폴더 이름'에 등록된 영업점명이 있으면 그 영업점.
+    //   '/광화문점/…' · '/2025 광화문 재고조사/…' → 광화문점. 공백과 끝의 '점'은 무시하고 비교한다.
+    //   안쪽 폴더부터 보고, 한 폴더에 여러 이름이 걸리면 가장 긴 이름(더 구체적인 것)을 고른다.
+    const brCore = (x) => String(x || '').replace(/\s+/g, '').replace(/점$/, '');
+    function branchOf(f) {
+      const names = (state.branches || []).map((b) => ({ name: b.name, c: brCore(b.name) })).filter((b) => b.c.length >= 2);
+      const segs = String(f.folder || '').split('/').filter(Boolean).reverse();
+      for (const seg of segs) {
+        const sc = String(seg).replace(/\s+/g, '');
+        const hit = names.filter((b) => sc.includes(b.c)).sort((a, b) => b.c.length - a.c.length)[0];
+        if (hit) return hit.name;
+      }
+      return '';
+    }
     const dayStr = (v) => { const d = new Date(v); const p2 = (x) => String(x).padStart(2, '0'); return isNaN(d) ? '' : `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())} ${p2(d.getHours())}:${p2(d.getMinutes())}`; };
     const noSpace = (x) => String(x || '').replace(/\s+/g, '');
-    // 파일의 년도: 폴더·파일 이름에 적힌 20xx(또는 20xxMMDD)가 우선, 없으면 올린 날짜의 년도.
-    //   '/2025 재고조사/결과확인리스트.xlsx' · '결과확인리스트_20250928.xlsx' → 2025
+    // 파일의 년도: '파일 이름'에 적힌 20xx(또는 20xxMMDD). 폴더 이름은 보지 않는다.
+    //   '결과확인리스트_2025.xlsx' · '결과확인리스트_20250928.xlsx' → 2025
+    //   이름에 년도가 없으면 올린 날짜의 년도.
     //   ISBN 같은 긴 숫자 안의 20xx 는 년도로 보지 않는다(앞뒤가 숫자가 아니어야 인정).
     function fileYear(f) {
-      const m1 = `${f.folder || ''}/${f.name || ''}`.match(/(?:^|[^0-9])(20\d{2})(?:[01]\d[0-3]\d)?(?![0-9])/);
+      const m1 = String(f.name || '').match(/(?:^|[^0-9])(20\d{2})(?:[01]\d[0-3]\d)?(?![0-9])/);
       if (m1) return m1[1];
       const d = new Date(f.createdAt);
       return isNaN(d) ? '' : String(d.getFullYear());
     }
     async function loadWebhardXls() {
       const sy = m.q('#sa-year'), s1 = m.q('#sa-f1'), s2 = m.q('#sa-f2'); if (!s1) return;
+      const sb = m.q('#sa-sbranch');
       const keepYear = sy.value;
-      [sy, s1, s2].forEach((sel) => { sel.disabled = true; sel.innerHTML = '<option>웹하드 파일 불러오는 중…</option>'; });
+      [sy, sb, s1, s2].forEach((sel) => { sel.disabled = true; sel.innerHTML = '<option>웹하드 파일 불러오는 중…</option>'; });
       try {
+        if (!(state.branches || []).length) await loadBranches();   // 영업점명 목록(폴더 이름 대조용)
         const r = await API.searchAdvanced({ exts: 'xlsx,xls', sort: 'createdAt' }, state.ownerId);
-        saXlsFiles = (r.files || []).map((f) => ({ ...f, year: fileYear(f) }));
+        saXlsFiles = (r.files || []).map((f) => ({ ...f, year: fileYear(f), branch: branchOf(f) }));
       } catch (e) { saXlsFiles = []; UI.toast('웹하드 파일 목록을 불러오지 못했습니다: ' + (e.message || ''), 'error'); }
       const info = m.q('#sa-srcinfo');
       if (!saXlsFiles.length) {
-        [sy, s1, s2].forEach((sel) => { sel.innerHTML = '<option value="">웹하드에 엑셀 파일이 없습니다</option>'; });
+        [sy, sb, s1, s2].forEach((sel) => { sel.innerHTML = '<option value="">웹하드에 엑셀 파일이 없습니다</option>'; });
         if (info) info.textContent = '이 계정 웹하드에 두 엑셀을 먼저 올린 뒤 🔄 을 눌러 주세요.';
         return;
       }
@@ -3379,13 +3398,30 @@ const App = (() => {
         return `<option value="${y}"${y === def ? ' selected' : ''}>${y}년 (엑셀 ${n}개)${hasBoth(y) ? '' : ' · 두 파일 중 일부 없음'}</option>`;
       }).join('');
       sy.disabled = false;
-      fillFilesForYear(true);
+      fillBranchesForYear(true);
+    }
+    // 고른 년도 안에서 영업점 목록을 만든다(폴더 이름 기준). 등록 순서대로, 폴더에 영업점명이 없는 파일은 맨 끝.
+    function fillBranchesForYear(keepPick) {
+      const y = m.q('#sa-year').value, sb = m.q('#sa-sbranch');
+      const inYear = saXlsFiles.filter((f) => f.year === y);
+      const order = (state.branches || []).map((b) => b.name);
+      const present = [...new Set(inYear.map((f) => f.branch))]
+        .sort((a, b) => (a === '' ? 1 : b === '' ? -1 : order.indexOf(a) - order.indexOf(b)));
+      const hasBoth = (br) => ['#sa-f1', '#sa-f2'].every((id) => inYear.some((f) => f.branch === br && SA_PICK[id](noSpace(f.name))));
+      const prev = keepPick ? sb.dataset.v : undefined;
+      const def = present.includes(prev) ? prev : (present.find(hasBoth) ?? present[0] ?? '');
+      sb.innerHTML = present.map((br) => {
+        const n = inYear.filter((f) => f.branch === br).length;
+        return `<option value="${esc(br)}"${br === def ? ' selected' : ''}>${br ? esc(br) : '영업점 구분 없음 (폴더 이름에 영업점명 없음)'} · 엑셀 ${n}개${hasBoth(br) ? '' : ' · 두 파일 중 일부 없음'}</option>`;
+      }).join('');
+      sb.dataset.v = def; sb.disabled = !present.length;
+      fillFilesForYear(keepPick);
     }
     // 고른 년도의 파일만 ①② 목록에 넣는다. keepPick=true 면 (새로고침 때) 이미 고른 파일을 유지.
     function fillFilesForYear(keepPick) {
-      const y = m.q('#sa-year').value;
+      const y = m.q('#sa-year').value, br = m.q('#sa-sbranch').value;
       const s1 = m.q('#sa-f1'), s2 = m.q('#sa-f2');
-      const list = saXlsFiles.filter((f) => f.year === y);
+      const list = saXlsFiles.filter((f) => f.year === y && f.branch === br);
       for (const [id, sel] of [['#sa-f1', s1], ['#sa-f2', s2]]) {
         const prev = keepPick ? sel.value : '';
         const auto = list.find((f) => SA_PICK[id](noSpace(f.name)));
@@ -3395,7 +3431,7 @@ const App = (() => {
         sel.disabled = false;
       }
       const info = m.q('#sa-srcinfo');
-      if (info) info.textContent = `${y}년 엑셀 ${list.length.toLocaleString()}개 (최신순) — 이름으로 자동 선택했어요. 다르면 바꿔 주세요. 년도는 폴더·파일 이름의 20xx, 없으면 올린 날짜로 정합니다.`;
+      if (info) info.textContent = `${y}년${br ? ' · ' + br : ''} 엑셀 ${list.length.toLocaleString()}개 (최신순) — 이름으로 자동 선택했어요. 다르면 바꿔 주세요. 년도는 파일 이름의 20xx(없으면 올린 날짜), 영업점은 폴더 이름으로 정합니다.`;
     }
     // 웹하드 파일 → 바이트. 로그인 토큰으로 직접 받는다(브라우저 다운로드 폴더를 거치지 않음).
     async function fetchWebhardFile(id) {
@@ -3408,7 +3444,8 @@ const App = (() => {
     }
     if (!isOpened) {
       m.q('#sa-reload')?.addEventListener('click', loadWebhardXls);
-      m.q('#sa-year')?.addEventListener('change', () => fillFilesForYear(false));
+      m.q('#sa-year')?.addEventListener('change', () => fillBranchesForYear(false));
+      m.q('#sa-sbranch')?.addEventListener('change', (e) => { e.target.dataset.v = e.target.value; fillFilesForYear(false); });
       loadWebhardXls();
     }
 
@@ -3837,7 +3874,14 @@ const App = (() => {
     function fillBranchSelect(sel) {
       const cur = sel.value;
       sel.innerHTML = '<option value="">영업점 선택…</option>' + saBranches.map((a) => `<option value="${a.id}">${esc(a.displayName)}</option>`).join('');
-      if (cur) sel.value = cur;
+      if (cur) sel.value = cur; else preselectDeliver();
+    }
+    // 분석한 영업점과 이름이 맞는 영업점 계정을 '영업점에 전달' 대상으로 미리 골라 둔다(바꿀 수 있음).
+    function preselectDeliver() {
+      const sel = m.q('#sa-branch'); if (!sel || sel.value || !saAnalyzedBranch) return;
+      const c = brCore(saAnalyzedBranch);
+      const acct = saBranches.find((a) => brCore(a.displayName) === c) || saBranches.find((a) => brCore(a.displayName).includes(c));
+      if (acct) sel.value = String(acct.id);
     }
     // 결과 오차목록을 '선택한 영업점' 계정의 재고조사오차_<년도> 폴더에 '가상 파일(.bjsa)'로 전달.
     // 년도는 분석할 때 고른 년도(작년 자료를 지금 분석해도 작년 폴더로 간다). 저장 목록을 이어 본 경우엔 올해.
@@ -3893,7 +3937,7 @@ const App = (() => {
       const box = m.q('#sa-resume'); if (!box) return;
       box.innerHTML = `<div class="sa-resume">💾 저장된 목록 <b>${st.data.length.toLocaleString()}건</b>${when ? ` <span class="muted">(${when})</span>` : ''}<span style="flex:1"></span><button class="btn btn-sm btn-primary" id="sa-resume-go">이어서 보기</button><button class="btn btn-sm btn-ghost" id="sa-resume-del">삭제</button></div>`;
       m.q('#sa-resume-go').addEventListener('click', () => {
-        saAnalyzedYear = null;   // 저장 목록은 년도를 모른다 → 전달은 올해 폴더로
+        saAnalyzedYear = null; saAnalyzedBranch = '';   // 저장 목록은 년도·영업점을 모른다 → 전달은 올해 폴더로
         disc = st.data.map((d) => ({ ...d, shelves: d.shelves || [] }));
         isbnSet = new Set(disc.map((d) => d.isbn));
         box.innerHTML = ''; status(''); renderResult();
@@ -3950,8 +3994,10 @@ const App = (() => {
           if (d.shelves.length) matched++;
         }
         saAnalyzedYear = Number(yr) || null;
+        saAnalyzedBranch = m.q('#sa-sbranch').value || '';
         status('');
         renderResult();
+        preselectDeliver();
       } catch (err) {
         status(''); m.q('#sa-result').innerHTML = `<p class="muted" style="color:var(--danger)">${esc(err.message)}</p>`;
       } finally { btn.disabled = false; }
