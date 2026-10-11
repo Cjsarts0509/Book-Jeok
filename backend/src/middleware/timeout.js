@@ -22,12 +22,21 @@ const RULES = [
   { re: /\/checkups\/[^/]+\/run/, ms: HEAVY_MS },  // 정합성 검사(파일이 많으면 오래)
   { re: /\/health\/indexes/, ms: 60000 },          // 통계 조회
 ];
-function limitFor(path) {
+// 주소 뒤의 '?…'(쿼리스트링)는 떼고 경로만 본다.
+// 예전에는 붙은 채로 검사해서 '/upload?ownerId=3' 이 '/upload(끝)' 규칙에 걸리지 않았다 —
+// 담당자·관리자가 다른 계정 공간에 올리는 업로드가 전부 20초에 끊긴 원인.
+function limitFor(url) {
+  const path = String(url || '').split('?')[0];
   for (const r of RULES) if (r.re.test(path)) return r.ms;
   return DEFAULT_MS;
 }
+// 파일을 실어 보내는 요청(multipart)은 경로와 상관없이 시간으로 끊지 않는다.
+// 업로드 경로는 여러 곳(일반·청크·공개 업로드 링크…)이라 경로 목록만으로는 언젠가 또 빠진다.
+// 또, 받는 도중에 끊으면 반쯤 쓰인 파일이 DB 에도 없이 디스크에 남는다.
+const isFileTransfer = (req) => /^multipart\/form-data/i.test(String(req.headers['content-type'] || ''));
 
 function requestTimeout(req, res, next) {
+  if (isFileTransfer(req)) return next();
   const ms = limitFor(req.originalUrl || req.url || '');
   if (!ms) return next();
 
@@ -48,4 +57,4 @@ function requestTimeout(req, res, next) {
   next();
 }
 
-module.exports = { requestTimeout, limitFor, DEFAULT_MS, HEAVY_MS };
+module.exports = { requestTimeout, limitFor, isFileTransfer, DEFAULT_MS, HEAVY_MS };
