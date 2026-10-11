@@ -17,12 +17,12 @@ async function poolRootId(ownerId, q = query) {
 // 풀 할당량/사용량/무제한여부/구성원수. owner 를 넘기면 내부에서 루트로 환산(alreadyRoot=true 면 그대로 루트로 사용).
 async function poolUsage(ownerOrRoot, q = query, alreadyRoot = false) {
   const rootId = alreadyRoot ? Number(ownerOrRoot) : await poolRootId(ownerOrRoot, q);
-  const [qr, ur, mr] = await Promise.all([
-    q('SELECT quota_bytes, role FROM users WHERE id=$1', [rootId]),
-    q(`SELECT COALESCE(SUM(size_bytes),0) AS s FROM files
-       WHERE deleted_at IS NULL AND owner_id IN (SELECT id FROM users WHERE id=$1 OR manager_id=$1)`, [rootId]),
-    q('SELECT COUNT(*)::int AS c FROM users WHERE id=$1 OR manager_id=$1', [rootId]),
-  ]);
+  // 차례로 실행한다 — 트랜잭션 안에서는 q 가 '한 커넥션'이라 동시에 보내면 pg 가 경고하고(pg@9 에서 오류),
+  // 어차피 한 커넥션에서는 순서대로 처리되므로 느려지지도 않는다.
+  const qr = await q('SELECT quota_bytes, role FROM users WHERE id=$1', [rootId]);
+  const ur = await q(`SELECT COALESCE(SUM(size_bytes),0) AS s FROM files
+       WHERE deleted_at IS NULL AND owner_id IN (SELECT id FROM users WHERE id=$1 OR manager_id=$1)`, [rootId]);
+  const mr = await q('SELECT COUNT(*)::int AS c FROM users WHERE id=$1 OR manager_id=$1', [rootId]);
   const quota = qr.rowCount ? Number(qr.rows[0].quota_bytes) : 0;
   const role = qr.rowCount ? qr.rows[0].role : 'user';
   return { rootId, quota, used: Number(ur.rows[0].s), unlimited: role === 'admin', memberCount: mr.rows[0].c };

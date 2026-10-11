@@ -516,40 +516,51 @@ router.post('/upload', authenticate, wrap(resolveOwner), wrap(diskGate), upload.
   const titles = req.body.titles !== undefined ? [].concat(req.body.titles) : [];
   const notes = req.body.notes !== undefined ? [].concat(req.body.notes) : [];
   const saved = []; const rejected = [];
+
+  // ① 보안 검사(형식 확인·YARA)는 DB 잠금 '밖'에서 먼저 끝낸다.
+  // 예전에는 잠금을 쥔 채 검사해서, 큰 파일 검사(최대 20초 × 파일 수) 동안 같은 계정의
+  // 다른 업로드가 잠금을 기다리다 DB 의 30초 명령 제한(statement_timeout)에 걸려
+  // "서버 오류가 발생했습니다"(500)로 실패했다. 외부업체가 본인 공간에 연달아 올릴 때도 생겼다.
+  const accepted = [];
+  for (let i = 0; i < req.files.length; i++) {
+    const f = req.files[i];
+    // 경로 구분자·제어문자 제거 (zip-slip/헤더 주입 방어)
+    let originalName = Buffer.from(f.originalname, 'latin1').toString('utf8')
+      .replace(/[/\\]/g, '_').replace(/[\x00-\x1f]/g, '').trim() || 'file';
+    // 사용자가 제목을 직접 입력했으면 확장자는 유지한 채 파일명 교체
+    const title = String(titles[i] || '').replace(/[/\\]/g, '_').replace(/[\x00-\x1f]/g, '').trim();
+    if (title) {
+      const ext = originalName.includes('.') ? originalName.slice(originalName.lastIndexOf('.')) : '';
+      originalName = title.toLowerCase().endsWith(ext.toLowerCase()) ? title : title + ext;
+    }
+    const note = String(notes[i] || '').slice(0, 2000).trim();
+    // 매직바이트 검증: 실행파일 위장·확장자-내용 불일치 차단 (데몬 불필요)
+    const ft = await filetype.verify(f.path, originalName);
+    if (!ft.ok) { await fsp.unlink(f.path).catch(() => {}); rejected.push({ name: originalName, reason: ft.reason }); await audit(req, 'file_blocked', `${originalName} (${ft.reason})`); continue; }
+    // YARA 악성 패턴 검사(로컬, 오프라인). 매칭되면 저장하지 않고 삭제.
+    const mal = await yara.scanFile(f.path);
+    if (!mal.ok) { await fsp.unlink(f.path).catch(() => {}); rejected.push({ name: originalName, reason: `악성 패턴 감지(${mal.rule})` }); await audit(req, 'malware_blocked', `${originalName} (${mal.rule})`); continue; }
+    accepted.push({ f, originalName, note });
+  }
+
+  // ② 통과한 파일만, 잠금 안에서는 빠른 일(용량 확인·이름 정하기·기록)만 한다.
   try {
-    // 동시 업로드 쿼터 경합(TOCTOU) 방지: 소유자별 어드바이저리 락 + 쿼터 재확인 + 저장을 한 트랜잭션에서
-    await withTransaction(async (client) => {
+    if (accepted.length) await withTransaction(async (client) => {
+      // 동시 업로드 쿼터 경합(TOCTOU) 방지: 소유자별 어드바이저리 락 + 쿼터 재확인 + 저장을 한 트랜잭션에서
       // 공유 풀(담당자↔영업점) 기준으로 락·검사: 락은 풀 루트에 걸어 형제 영업점 동시업로드도 직렬화
       const qc = client.query.bind(client);
       const rootId = await poolRootId(req.targetOwnerId, qc);
       await client.query('SELECT pg_advisory_xact_lock($1)', [rootId]);
-      // 관리자는 무제한, 그 외는 풀 할당량 적용(0=미할당이므로 업로드 불가)
+      // 관리자는 무제한, 그 외는 풀 할당량 적용(0=미할당이므로 업로드 불가). 차단된 파일은 용량에 넣지 않는다.
       if (!isAdmin) {
         const pool = await poolUsage(rootId, qc, true);
-        const incoming = req.files.reduce((s, f) => s + f.size, 0);
+        const incoming = accepted.reduce((sum, a) => sum + a.f.size, 0);
         if (!pool.unlimited && pool.used + incoming > pool.quota) {
           const e = new Error(pool.quota === 0 ? '디스크가 할당되지 않은 계정입니다. 관리자에게 문의하세요.' : '저장 용량 할당량을 초과했습니다.');
           e.status = 413; throw e;
         }
       }
-      for (let i = 0; i < req.files.length; i++) {
-        const f = req.files[i];
-        // 경로 구분자·제어문자 제거 (zip-slip/헤더 주입 방어)
-        let originalName = Buffer.from(f.originalname, 'latin1').toString('utf8')
-          .replace(/[/\\]/g, '_').replace(/[\x00-\x1f]/g, '').trim() || 'file';
-        // 사용자가 제목을 직접 입력했으면 확장자는 유지한 채 파일명 교체
-        const title = String(titles[i] || '').replace(/[/\\]/g, '_').replace(/[\x00-\x1f]/g, '').trim();
-        if (title) {
-          const ext = originalName.includes('.') ? originalName.slice(originalName.lastIndexOf('.')) : '';
-          originalName = title.toLowerCase().endsWith(ext.toLowerCase()) ? title : title + ext;
-        }
-        const note = String(notes[i] || '').slice(0, 2000).trim();
-        // 매직바이트 검증: 실행파일 위장·확장자-내용 불일치 차단 (데몬 불필요)
-        const ft = await filetype.verify(f.path, originalName);
-        if (!ft.ok) { await fsp.unlink(f.path).catch(() => {}); rejected.push({ name: originalName, reason: ft.reason }); await audit(req, 'file_blocked', `${originalName} (${ft.reason})`); continue; }
-        // YARA 악성 패턴 검사(로컬, 오프라인). 매칭되면 저장하지 않고 삭제.
-        const mal = await yara.scanFile(f.path);
-        if (!mal.ok) { await fsp.unlink(f.path).catch(() => {}); rejected.push({ name: originalName, reason: `악성 패턴 감지(${mal.rule})` }); await audit(req, 'malware_blocked', `${originalName} (${mal.rule})`); continue; }
+      for (const { f, originalName, note } of accepted) {
         let name;
         if (overwrite) {
           // 덮어쓰기: 같은 이름 기존 파일을 휴지통으로 보내고(30일 복원 가능) 원래 이름 유지
