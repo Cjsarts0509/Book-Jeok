@@ -174,7 +174,7 @@ const App = (() => {
     renderOfflineBadge();
     if (!offlineHooked) {
       offlineHooked = true;
-      window.addEventListener('online', () => { UI.toast('인터넷이 돌아왔습니다 — 대기 중이던 업로드를 이어서 올립니다', 'info'); offlineFlush(); });
+      window.addEventListener('online', () => { UI.toast('인터넷이 돌아왔습니다 — 대기 중이던 업로드를 이어서 올립니다', 'info'); offlineFlush.auto = true; offlineFlush(); });
       window.addEventListener('offline', () => UI.toast('인터넷이 끊겼습니다. 지금 올리는 파일은 대기열에 보관됩니다', 'info'));
     }
     setTimeout(() => offlineFlush(true), 2500);   // 로그인 직후 조용히 한 번
@@ -1655,16 +1655,41 @@ const App = (() => {
   const isNetworkFailure = (err) => !err.status || err.status === 0 || err.status === 502 || err.status === 503 || err.status === 504
     || /네트워크|Failed to fetch|NetworkError|취소됨/i.test(err.message || '');
 
+  // 대기열 파일이 이미 그 폴더에 있는가? (같은 크기 + 같은 이름 또는 서버가 붙인 'name (2).ext')
+  // 실패로 알았던 업로드가 실제로는 서버에 저장됐거나, 실패 뒤 사람이 직접 다시 올린 경우
+  // 대기열이 또 올리면 사본이 생긴다 — 예전에 '하나 올렸는데 여러 개'가 된 원인.
+  const stemExt = (n) => { const i = String(n).lastIndexOf('.'); return i > 0 ? [n.slice(0, i), n.slice(i)] : [n, '']; };
+  function sameUpload(serverFile, it) {
+    if (Number(serverFile.size) !== Number(it.size)) return false;
+    if (serverFile.name === it.name) return true;
+    const [st, ex] = stemExt(it.name);
+    const esc = (x) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return new RegExp(`^${esc(st)} \\(\\d+\\)${esc(ex)}$`).test(serverFile.name);
+  }
+  // 자동으로(로그인 직후·인터넷 복구 시) 다시 올리는 건 하루 안에 실패한 것만.
+  // 며칠 지난 건 사람이 대기열을 열어 보고 '지금 올리기'를 눌러야 올라간다 — 잊고 있던 파일이
+  // 어느 날 갑자기 올라오면 그게 더 혼란스럽다.
+  const OQ_AUTO_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
   let oqFlushing = false;
   async function offlineFlush(quiet) {
     if (oqFlushing || !navigator.onLine || !state.user) return;
     let items = [];
     try { items = await oqAll(); } catch (_) { return; }
-    if (!items.length) return;
+    const manual = !quiet && !offlineFlush.auto;
+    if (offlineFlush.auto) offlineFlush.auto = false;
+    if (!manual) items = items.filter((it) => Date.now() - (it.at || 0) < OQ_AUTO_MAX_AGE_MS);
+    if (!items.length) { renderOfflineBadge(); return; }
     oqFlushing = true;
-    let ok = 0, fail = 0;
+    let ok = 0, fail = 0, dup = 0;
     if (!quiet) UI.toast(`대기 중이던 ${items.length}건을 올립니다…`, 'info');
+    const listed = new Map();   // '계정|폴더' → 그 폴더의 파일 목록(한 번만 조회)
     for (const it of items) {
+      // 이미 올라가 있으면 다시 보내지 않고 대기열에서만 뺀다
+      const lk = `${it.ownerId || ''}|${it.folder}`;
+      if (!listed.has(lk)) { try { listed.set(lk, (await API.listFiles(it.folder, it.ownerId)).files || []); } catch (_) { listed.set(lk, null); } }
+      const there = listed.get(lk);
+      if (there && there.some((f) => sameUpload(f, it))) { await oqDel(it.id).catch(() => {}); dup++; continue; }
       const t = Xfer.add(it.name + ' (대기분)', 'up');
       try {
         const fd = new FormData();
@@ -1683,7 +1708,9 @@ const App = (() => {
     }
     oqFlushing = false;
     renderOfflineBadge();
-    if (ok) { UI.toast(`대기분 ${ok}건 업로드 완료${fail ? ` · ${fail}건 실패` : ''}`, fail ? 'info' : 'success'); loadAll(); }
+    const dupNote = dup ? ` · ${dup}건은 이미 올라가 있어 건너뜀` : '';
+    if (ok) { UI.toast(`대기분 ${ok}건 업로드 완료${fail ? ` · ${fail}건 실패` : ''}${dupNote}`, fail ? 'info' : 'success'); loadAll(); }
+    else if (dup) UI.toast(`대기열 정리 — ${dup}건은 이미 올라가 있어 다시 올리지 않았습니다`, 'info');
   }
 
   // 대기 중인 게 있으면 상단바에 조용히 알린다. 눌러서 목록을 보고 지금 올리거나 버릴 수 있다.
@@ -1699,7 +1726,7 @@ const App = (() => {
     const items = await oqAll().catch(() => []);
     const esc = UI.escapeHtml;
     const m = UI.modal(`<h3>📥 업로드 대기열</h3>
-      <p class="muted" style="font-size:12px;margin:-6px 0 12px">인터넷이 끊겨 올리지 못한 파일입니다. 연결이 돌아오면 자동으로 올라갑니다.</p>
+      <p class="muted" style="font-size:12px;margin:-6px 0 12px">인터넷이 끊겨 올리지 못한 파일입니다. 하루 안에 실패한 것은 연결이 돌아오면 자동으로 올라가고, 그보다 오래된 것은 '지금 올리기'를 눌러야 올라갑니다. 이미 그 폴더에 같은 파일이 있으면 다시 올리지 않습니다.</p>
       <div class="oq-list">${items.length ? items.map((it) => `
         <div class="oq-row"><div class="oq-main"><b>${esc(it.name)}</b>
           <div class="muted" style="font-size:11px">${UI.bytes(it.size)} · ${esc(prettyPath(it.folder))} · ${new Date(it.at).toLocaleString('ko-KR')}${it.tries ? ` · 시도 ${it.tries}회` : ''}</div>
