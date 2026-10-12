@@ -45,7 +45,7 @@ const config = {
   // CORS 허용 오리진 (콤마 구분)
   corsOrigins: (process.env.CORS_ORIGINS || 'http://localhost:3000,http://localhost:5173')
     .split(',')
-    .map((s) => s.trim())
+    .map((s) => s.trim().replace(/\/+$/, '')) // 'https://a.com/' 처럼 끝에 / 를 붙여 넣어도 맞도록
     .filter(Boolean),
 
   // 업로드 한 요청에 담을 수 있는 파일 수. multer 한도이자 프런트가 나눠 보내는 단위 —

@@ -52,22 +52,29 @@ app.use(helmet({
   hsts: { maxAge: 31536000, includeSubDomains: true },
 }));
 
-app.use(cors({
-  origin(origin, cb) {
-    if (!origin || config.corsOrigins.includes(origin)) return cb(null, true);
-    // status 를 붙이지 않으면 전역 핸들러가 500 으로 처리해 '서버 오류'로 보이고
-    // 요청마다 스택트레이스가 로그에 쌓인다. 실제로는 설정 문제이므로 그렇게 알려 준다.
-    cb(Object.assign(
-      new Error(`허용되지 않은 접속 위치입니다: ${origin} — 서버 .env 의 CORS_ORIGINS 에 이 주소를 넣어 주세요.`),
-      { status: 403 }
-    ));
-  },
+// 화면과 같은 주소에서 온 요청(SERVE_FRONTEND=1 로 새 도메인을 붙인 경우 등)은 목록에 없어도 허용한다.
+// 브라우저는 같은 출처 POST 에도 Origin 을 붙이므로, 이걸 빼먹으면 주소를 하나 늘릴 때마다
+// .env 를 고치기 전까지 로그인이 막힌다. Host 는 브라우저가 실제 접속한 주소라 위조할 수 없다.
+function sameHost(origin, req) {
+  try { return new URL(origin).host === req.get('host'); } catch { return false; }
+}
+const corsBase = {
   credentials: true,
   exposedHeaders: ['Content-Disposition'], // 브라우저 JS가 다운로드 파일명을 읽을 수 있도록
   // 화면(bookjeok…)과 API(bookjeok-api…)가 다른 주소라, 브라우저는 요청마다 '보내도 되나' 확인(OPTIONS)을 먼저 보낸다.
   // 이 값을 안 주면 확인 결과를 5초만 기억해서 거의 모든 요청이 왕복을 두 번 한다
   // (해외 거점을 거치는 회선에서는 클릭마다 체감될 만큼 느려진다). 크롬 상한인 2시간으로 둔다.
   maxAge: 7200,
+};
+app.use(cors((req, cb) => {
+  const origin = req.headers.origin;
+  if (!origin || config.corsOrigins.includes(origin) || sameHost(origin, req)) return cb(null, { ...corsBase, origin: true });
+  // status 를 붙이지 않으면 전역 핸들러가 500 으로 처리해 '서버 오류'로 보이고
+  // 요청마다 스택트레이스가 로그에 쌓인다. 실제로는 설정 문제이므로 그렇게 알려 준다.
+  cb(Object.assign(
+    new Error(`허용되지 않은 접속 위치입니다: ${origin} — 서버 .env 의 CORS_ORIGINS 에 이 주소를 넣어 주세요.`),
+    { status: 403 }
+  ));
 }));
 
 // ── CSP 위반 수집 ───────────────────────────────────
