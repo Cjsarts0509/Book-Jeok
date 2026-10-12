@@ -1,0 +1,2 @@
+# Windows 용 실행 파일: 줄바꿈(CRLF)·BOM 을 바이트 그대로 보존(변환되면 .bat/.ps1 이 깨질 수 있음)
+scripts/windows/* -text
