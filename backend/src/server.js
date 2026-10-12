@@ -166,7 +166,16 @@ app.use('/api/meta', require('./routes/meta')); // 영업점 목록·활성 공�
 
 // (선택) 프런트엔드를 같은 서버에서 서빙하려면 SERVE_FRONTEND=1
 if (process.env.SERVE_FRONTEND === '1') {
-  const frontDir = path.join(__dirname, '..', '..', 'frontend');
+  // 화면 폴더 위치는 실행 환경마다 다르다.
+  //   도커: 코드가 /app/src, 화면은 compose 가 /app/frontend 에 연결 → 한 단계 위
+  //   저장소에서 직접 실행: backend/src → 두 단계 위의 frontend
+  // 예전에는 '두 단계 위'만 봐서 도커에서는 /frontend 를 찾느라 화면이 하나도 안 나갔다.
+  // FRONTEND_DIR 로 직접 지정할 수도 있다. index.html 이 있는 첫 후보를 쓴다.
+  const candidates = [process.env.FRONTEND_DIR, path.join(__dirname, '..', 'frontend'), path.join(__dirname, '..', '..', 'frontend')]
+    .filter(Boolean);
+  const frontDir = candidates.find((d) => fs.existsSync(path.join(d, 'index.html'))) || candidates[candidates.length - 1];
+  if (fs.existsSync(path.join(frontDir, 'index.html'))) console.log(`[front] 화면도 함께 서빙: ${frontDir}`);
+  else console.warn(`[front] ⚠️ SERVE_FRONTEND=1 인데 화면 폴더를 찾지 못했습니다(찾아본 곳: ${candidates.join(', ')}). FRONTEND_DIR 로 지정하세요.`);
   // 주소에 ?v=<버전> 이 붙은 정적 파일은 그 버전에서 내용이 절대 바뀌지 않는다(바꾸면 v 를 올린다).
   // 그래서 1년 동안 '다시 묻지 말고 그대로 쓰라'고 알려 준다. 예전엔 매번 '바뀌었나?'를 물어서
   // 페이지를 열 때마다 왕복 한 번이 더 들었다. 버전 없는 요청(index.html 등)은 종전처럼 매번 확인한다.
