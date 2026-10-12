@@ -19,6 +19,7 @@ const { poolRootId, poolUsage } = require('../pool');
 const { isAllowed, allowedLabel, getAllowedExtensions } = require('../settings');
 const filetype = require('../filetype');
 const yara = require('../yara');
+const uploadLog = require('../uploadLog');
 const notify = require('../notify');
 
 const router = express.Router();
@@ -124,6 +125,7 @@ function upload(req, res, next) {
 }
 
 router.post('/:token', uploadLimiter, attemptLimiter, wrap(gate), wrap(diskGate), upload, wrap(async (req, res) => {
+  uploadLog.received(req);
   const u = req._uploadReq; const owner = u.owner_id;
   if (!req.files || !req.files.length) return res.status(400).json({ error: '업로드할 파일이 없습니다.' });
   const incoming = req.files.reduce((s, f) => s + f.size, 0);

@@ -13,6 +13,7 @@ const { audit, wrap, canAccessOwner } = require('../util');
 const { generateToken, hashPassword } = require('../crypto');
 const filetype = require('../filetype');
 const yara = require('../yara');
+const uploadLog = require('../uploadLog');
 const officePdf = require('../officePdf');
 const listcache = require('../listcache');
 const { diskGate } = require('../disk');
@@ -506,6 +507,7 @@ router.get('/', authenticate, wrap(resolveOwner), wrap(async (req, res) => {
 
 // ── 업로드 ──────────
 router.post('/upload', authenticate, wrap(resolveOwner), wrap(diskGate), upload.array('file', config.uploadMaxFiles), wrap(async (req, res) => {
+  uploadLog.received(req);
   const folder = normalizeFolder(req.body.folder);
   if (!req.files || req.files.length === 0) return res.status(400).json({ error: '업로드할 파일이 없습니다.' });
   const owner = await query('SELECT role, upload_conflict FROM users WHERE id=$1', [req.targetOwnerId]);
@@ -542,6 +544,7 @@ router.post('/upload', authenticate, wrap(resolveOwner), wrap(diskGate), upload.
     if (!mal.ok) { await fsp.unlink(f.path).catch(() => {}); rejected.push({ name: originalName, reason: `악성 패턴 감지(${mal.rule})` }); await audit(req, 'malware_blocked', `${originalName} (${mal.rule})`); continue; }
     accepted.push({ f, originalName, note });
   }
+  uploadLog.scanned(req);
 
   // ② 통과한 파일만, 잠금 안에서는 빠른 일(용량 확인·이름 정하기·기록)만 한다.
   try {
@@ -612,6 +615,7 @@ router.post('/upload/init', authenticate, wrap(resolveOwner), wrap(async (req, r
 
 // 청크 수신: 조각 하나를 임시폴더에 저장. 소유자·보안 검사는 완료(complete) 시점에 수행하므로 인증만.
 router.post('/upload/chunk', authenticate, wrap(diskGate), chunkUpload.single('chunk'), wrap(async (req, res) => {
+  uploadLog.received(req);
   const uploadId = String(req.body.uploadId || '');
   const index = parseInt(req.body.index, 10);
   if (!UPLOAD_ID_RE.test(uploadId) || !Number.isInteger(index) || index < 0 || index > 100000 || !req.file) {
@@ -647,6 +651,7 @@ router.get('/upload/:uploadId/status', authenticate, wrap(async (req, res) => {
 
 // 완료: 조각을 순서대로 합쳐 최종 파일 생성 → 매직바이트·YARA·할당량 검사 후 저장. (단일 업로드와 동일 정책)
 router.post('/upload/complete', authenticate, wrap(resolveOwner), wrap(diskGate), wrap(async (req, res) => {
+  uploadLog.received(req);   // 조각은 이미 받았다 — 여기서부터는 합치기·검사·저장
   const uploadId = String(req.body.uploadId || '');
   const totalChunks = parseInt(req.body.totalChunks, 10);
   const folder = normalizeFolder(req.body.folder);
@@ -705,6 +710,7 @@ router.post('/upload/complete', authenticate, wrap(resolveOwner), wrap(diskGate)
   if (!ft.ok) { await fsp.unlink(finalPath).catch(() => {}); await audit(req, 'file_blocked', `${originalName} (${ft.reason})`); return res.status(422).json({ error: `업로드가 차단되었습니다: ${ft.reason}` }); }
   const mal = await yara.scanFile(finalPath);
   if (!mal.ok) { await fsp.unlink(finalPath).catch(() => {}); await audit(req, 'malware_blocked', `${originalName} (${mal.rule})`); return res.status(422).json({ error: `악성 패턴 감지(${mal.rule})` }); }
+  uploadLog.scanned(req);
 
   await ensureFolder(owner, folder);
   let name;

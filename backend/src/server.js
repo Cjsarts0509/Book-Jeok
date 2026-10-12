@@ -129,6 +129,7 @@ app.use('/api/', rateLimit({
 // 라우트보다 먼저 붙여 모든 응답의 status 를 본다. 집계는 res 'finish' 에서만 하므로 지연이 없다.
 const metrics = require('./metrics');
 app.use('/api/', metrics.requestMetrics);
+app.use('/api/', require('./uploadLog').middleware);   // 업로드마다 접속 주소·거점·받기/검사 시간 한 줄 기록
 
 // ── 요청 타임아웃 (S33) ─────────────────────────────
 // 응답이 영영 안 오는 요청은 브라우저를 무한 로딩에 빠뜨리고 DB 커넥션을 붙잡는다.
