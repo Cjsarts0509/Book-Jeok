@@ -36,14 +36,31 @@ const App = (() => {
   async function boot() {
     setupGlobal();
     if (API.hasToken()) {
+      // 로그인 확인을 먼저 보내고(화면이 기다리는 건 이것), 첫 화면 목록도 곧바로 같이 출발시킨다.
+      const mePromise = API.me();
+      prefetchFirstScreen();
       try {
-        state.user = (await API.me()).user;
+        state.user = (await mePromise).user;
         state.qrEnabled = state.user.qrEnabled !== false;
         if (state.user.role === 'admin' && !state.user.totpEnabled) return force2faSetup();
         return renderApp();
       } catch { API.setToken(null); }
     }
     renderLogin();
+  }
+  // 첫 화면에서 부를 GET 들을 /auth/me 와 같이 보낸다(api.js 의 prefetch 설명 참고).
+  // 폴더는 restoreLoc 과 같은 규칙으로 예측한다 — 틀려도 그 요청 하나가 안 쓰일 뿐이다.
+  function prefetchFirstScreen() {
+    let folder = '/';
+    try {
+      const s = JSON.parse(localStorage.getItem(LOC_KEY) || 'null');
+      if (!state.ownerId && s && !s.ownerId && s.folder && Date.now() - (s.at || 0) <= 60 * 60 * 1000) folder = s.folder;
+    } catch (_) {}
+    const o = state.ownerId;
+    API.prefetch(() => {
+      API.tree(o); API.listFiles(folder, o); API.usage(o); API.tags(o); API.activity(o, 30);
+      API.allowedExtensions(); API.branches(); API.activeNotices(); API.notifications(1); API.accounts();
+    });
   }
   // 관리자 2FA 필수: 설정 완료 전까지 앱 진입 차단
   function force2faSetup() {
@@ -2826,7 +2843,7 @@ const App = (() => {
         const msg = `${label} 완료 · ${Math.round(took / 1000)}초 걸렸습니다`;
         if (wentAway && document.visibilityState === 'hidden' && await ensureDesktopNotice()) {
           try {
-            const n = new Notification('북적북적', { body: msg, tag: 'bj-job', icon: 'assets/logo.svg' });
+            const n = new Notification('북적북적', { body: msg, tag: 'bj-job', icon: 'assets/logo.svg?v=200' });
             n.onclick = () => { window.focus(); n.close(); };
           } catch (_) { UI.toast(msg, 'success'); }
         } else UI.toast(msg, 'success');

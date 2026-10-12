@@ -5,3 +5,13 @@
   Referrer-Policy: strict-origin-when-cross-origin
   Permissions-Policy: geolocation=(), microphone=(), camera=(self)
   Strict-Transport-Security: max-age=31536000; includeSubDomains
+
+# 버전(?v=)을 붙여 부르는 정적 파일 — 내용이 바뀌면 v 를 올리므로 1년 캐시해도 안전하다.
+# 페이지를 열 때마다 '바뀌었나?' 재확인 왕복을 없앤다. (index.html 등 HTML 은 해당 없음)
+# ⚠ js/css/vendor 파일을 부를 때는 반드시 ?v= 를 붙일 것.
+/js/*
+  Cache-Control: public, max-age=31536000, immutable
+/css/*
+  Cache-Control: public, max-age=31536000, immutable
+/vendor/*
+  Cache-Control: public, max-age=31536000, immutable

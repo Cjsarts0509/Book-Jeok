@@ -167,7 +167,14 @@ app.use('/api/meta', require('./routes/meta')); // 영업점 목록·활성 공�
 // (선택) 프런트엔드를 같은 서버에서 서빙하려면 SERVE_FRONTEND=1
 if (process.env.SERVE_FRONTEND === '1') {
   const frontDir = path.join(__dirname, '..', '..', 'frontend');
-  app.use(express.static(frontDir));
+  // 주소에 ?v=<버전> 이 붙은 정적 파일은 그 버전에서 내용이 절대 바뀌지 않는다(바꾸면 v 를 올린다).
+  // 그래서 1년 동안 '다시 묻지 말고 그대로 쓰라'고 알려 준다. 예전엔 매번 '바뀌었나?'를 물어서
+  // 페이지를 열 때마다 왕복 한 번이 더 들었다. 버전 없는 요청(index.html 등)은 종전처럼 매번 확인한다.
+  app.use(express.static(frontDir, {
+    setHeaders(res) {
+      if (res.req && res.req.query && res.req.query.v) res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+    },
+  }));
   app.get('*', (req, res, next) => {
     if (req.path.startsWith('/api/')) return next();
     res.sendFile(path.join(frontDir, 'index.html'));

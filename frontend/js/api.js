@@ -9,7 +9,25 @@ const API = (() => {
     else localStorage.removeItem('bj_token');
   }
 
-  async function req(method, path, body, isForm = false) {
+  // 첫 화면 미리 받기: 로그인 확인(/auth/me)을 기다리는 동안 첫 화면에 필요한 목록 요청도 같이 보내 둔다.
+  // 왕복이 비싼 회선(해외 거점을 거치는 경우 요청 한 번에 1초 이상)에서 '줄 서서 기다리는' 횟수를 한 번 줄인다.
+  // prefetch(fn) 안에서 부른 GET 은 결과를 보관했다가, 같은 경로를 처음 부를 때 한 번만 그대로 돌려준다.
+  // 예측이 틀린 경로는 그냥 안 쓰일 뿐이고(서버는 토큰 기준으로 권한을 다시 따진다), 15초 넘은 건 버린다.
+  const prefetched = new Map();
+  let capturing = false;
+  const PREFETCH_TTL_MS = 15000;
+  function req(method, path, body, isForm = false) {
+    if (method === 'GET' && !capturing) {
+      const hit = prefetched.get(path);
+      if (hit) { prefetched.delete(path); if (Date.now() - hit.at < PREFETCH_TTL_MS) return hit.pr; }
+    }
+    const pr = send(method, path, body, isForm);
+    if (capturing && method === 'GET') { pr.catch(() => {}); prefetched.set(path, { pr, at: Date.now() }); }
+    return pr;
+  }
+  function prefetch(fn) { capturing = true; try { fn(); } catch (_) { /* 미리 받기 실패는 무시 */ } finally { capturing = false; } }
+
+  async function send(method, path, body, isForm = false) {
     const headers = {};
     if (token) headers['Authorization'] = 'Bearer ' + token;
     let payload;
@@ -31,6 +49,7 @@ const API = (() => {
 
   return {
     setToken,
+    prefetch,
     hasToken: () => !!token,
     getToken: () => token,
     base: BASE,
