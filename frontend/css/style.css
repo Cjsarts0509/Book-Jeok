@@ -143,7 +143,7 @@ textarea.input { resize: vertical; }
 }
 
 /* 관리자 페이지 컨텐츠 (트리 없이 중앙 정렬) */
-.admin-content { flex: 1; width: 100%; max-width: 1120px; margin: 0 auto; }
+.admin-content { flex: 1; width: 100%; max-width: 1840px; margin: 0 auto; }   /* 넓은 화면을 다 쓴다(예전 1120px — 표가 여러 줄로 접혔다) */
 .admin-title { font-size: 22px; font-weight: 800; margin-bottom: 18px; }
 .user-chip-sm { font-size: 13px; color: var(--text-muted); font-weight: 600; padding-left: 8px; border-left: 1px solid var(--border); }
 
@@ -513,7 +513,7 @@ textarea.input { resize: vertical; }
 
 /* 감사 로그 동작코드 */
 .act-code { font-family: ui-monospace, Menlo, monospace; font-size: 12px; color: var(--text-muted); background: var(--bg); padding: 2px 6px; border-radius: 5px; white-space: nowrap; }
-.audit-detail { color: var(--text-muted); word-break: break-all; white-space: normal; max-width: 420px; }
+.audit-detail { color: var(--text-muted); white-space: normal; }
 .audit-table .badge { white-space: nowrap; }
 
 /* 알림 벨 · 목록 */
@@ -1232,3 +1232,10 @@ th { background: var(--bg); font-weight: 700; color: var(--text-muted); font-siz
 .ss-up tr.ss-up-err td { color: var(--danger); white-space: normal; padding-top: 0; background: #FFF5F5; }
 .ss-ok { color: var(--accent); font-weight: 700; } .ss-fail { color: var(--danger); font-weight: 700; } .ss-cut { color: #d9480f; font-weight: 700; }
 .ss-up td.ss-up-time { white-space: normal; min-width: 150px; }
+
+/* 관리자 표: 짧은 칸(시각·사람·동작·IP …)은 한 줄로, 긴 내용 칸(.wide-cell)만 남는 폭을 다 쓰며 필요할 때만 접힌다.
+   예전엔 모든 칸이 좁게 나눠 가져서 '상품지원/팀', '감/사', '110/5' 처럼 짧은 값까지 두 줄이 됐다. */
+.compact-table th, .compact-table td { white-space: nowrap; padding: 7px 10px; }
+.compact-table td.wide-cell { white-space: normal; width: 100%; min-width: 260px; overflow-wrap: anywhere; }
+.dash-2col-wide { grid-template-columns: minmax(320px, 2fr) 3fr; }
+@media (max-width: 768px) { .dash-2col-wide { grid-template-columns: 1fr; } }

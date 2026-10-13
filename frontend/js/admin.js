@@ -2,6 +2,12 @@
 const Admin = (() => {
   const state = { user: null, tab: 'dashboard', users: [] };
   const root = () => document.getElementById('app');
+  // 표에 쓰는 시각: '2026. 10. 13. 오후 1:49:43'(24자) 대신 '2026-10-13 13:49:43' — 칸이 좁아져 한 줄에 더 들어간다
+  const fmtDT = (v) => {
+    const d = new Date(v); if (isNaN(d)) return '-';
+    const p2 = (x) => String(x).padStart(2, '0');
+    return `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())} ${p2(d.getHours())}:${p2(d.getMinutes())}:${p2(d.getSeconds())}`;
+  };
 
   async function boot() {
     if (!API.hasToken()) return (location.href = 'index.html');
@@ -99,7 +105,7 @@ const item = (tab, ico, label) => `<div class="nav-item ${state.tab === tab ? 'a
 
       const tops = d.topAccounts.map((t) => `<div class="rep-row"><div class="rep-name">${UI.escapeHtml(t.displayName)} <span class="muted" style="font-size:11px">@${UI.escapeHtml(t.username)}</span></div><div class="rep-bar"><span style="width:${d.topAccounts[0].usedBytes ? (t.usedBytes / d.topAccounts[0].usedBytes * 100) : 0}%"></span></div><div class="rep-val num">${UI.bytes(t.usedBytes)} · ${t.fileCount}개</div></div>`).join('') || '<p class="muted">데이터 없음</p>';
 
-      const recent = d.recent.map((r) => `<tr><td class="num" style="color:var(--text-muted);white-space:nowrap">${new Date(r.createdAt).toLocaleString('ko-KR')}</td><td>${UI.escapeHtml(r.username || '—')}</td><td><span class="badge user">${UI.escapeHtml(r.action)}</span></td><td class="muted" style="font-size:12px">${UI.escapeHtml(r.detail || '')}</td></tr>`).join('');
+      const recent = d.recent.map((r) => `<tr><td class="num" style="color:var(--text-muted);white-space:nowrap">${fmtDT(r.createdAt)}</td><td style="white-space:nowrap">${UI.escapeHtml(r.username || '—')}</td><td style="white-space:nowrap"><span class="badge user">${UI.escapeHtml(r.action)}</span></td><td class="muted wide-cell" style="font-size:12px">${UI.escapeHtml(r.detail || '')}</td></tr>`).join('');
 
       view.innerHTML = `
         ${warnBox}
@@ -116,9 +122,9 @@ const item = (tab, ico, label) => `<div class="nav-item ${state.tab === tab ? 'a
           <div class="dash-h">최근 14일 추이 <span class="muted" style="font-size:12px;font-weight:400">· <span class="dash-leg up"></span> 업로드 <span class="dash-leg lg"></span> 로그인</span></div>
           <div class="dash-chart">${bars}</div>
         </div>
-        <div class="dash-2col">
+        <div class="dash-2col dash-2col-wide">
           <div class="dash-card"><div class="dash-h">사용량 상위 계정</div>${tops}</div>
-          <div class="dash-card"><div class="dash-h">최근 활동</div><div class="table-wrap" style="border:none"><table><tbody>${recent || '<tr><td class="muted">기록 없음</td></tr>'}</tbody></table></div></div>
+          <div class="dash-card"><div class="dash-h">최근 활동</div><div class="table-wrap" style="border:none"><table class="compact-table"><tbody>${recent || '<tr><td class="muted">기록 없음</td></tr>'}</tbody></table></div></div>
         </div>`;
     } catch (err) { view.innerHTML = `<div class="empty">⚠️ ${UI.escapeHtml(err.message)}</div>`; }
   }
@@ -573,18 +579,18 @@ const item = (tab, ico, label) => `<div class="nav-item ${state.tab === tab ? 'a
       const esc = UI.escapeHtml;
       if (!d.rows.length) { box.innerHTML = '<p class="muted">조건에 맞는 기록이 없습니다.</p>'; return; }
       const rows = d.rows.map((r) => `<tr>
-        <td class="num muted" style="white-space:nowrap">${new Date(r.at).toLocaleString('ko-KR')}</td>
+        <td class="num muted" style="white-space:nowrap">${fmtDT(r.at)}</td>
         <td><span class="log-src ${r.source}">${r.source === 'login' ? '로그인' : '감사'}</span></td>
         <td>${esc(LOG_ACTION_LABEL[r.action] || r.action)}</td>
         <td>${esc(r.by)}</td>
         <td class="muted">${esc(r.owner || '')}</td>
-        <td class="muted" style="font-size:11px;word-break:break-all">${esc(r.detail)}</td>
-        <td class="muted" style="font-size:11px;white-space:nowrap">${esc(r.ip)}</td>
+        <td class="muted wide-cell" style="font-size:12px">${esc(r.detail)}</td>
+        <td class="muted" style="font-size:11px">${esc(r.ip)}</td>
         <td class="num muted" style="font-size:11px">${r.chainSeq ?? ''}</td></tr>`).join('');
       const shown = d.offset + d.rows.length;
       box.innerHTML = `
         <div class="log-sum">조건에 맞는 기록 <b>${d.total.toLocaleString()}</b>건 중 ${d.offset + 1}~${shown}번째</div>
-        <div class="table-wrap"><table class="hl-table"><thead><tr>
+        <div class="table-wrap"><table class="hl-table compact-table"><thead><tr>
           <th>시각</th><th>구분</th><th>동작</th><th>수행자</th><th>대상 계정</th><th>내용</th><th>IP</th><th class="num" title="감사로그 사슬 번호">사슬</th>
         </tr></thead><tbody>${rows}</tbody></table></div>
         <div class="log-pager">
@@ -783,7 +789,7 @@ const item = (tab, ico, label) => `<div class="nav-item ${state.tab === tab ? 'a
         <tr class="fade-in">${ck('folder', f.id)}
           <td>📁 <b>${UI.escapeHtml(f.path)}</b><br><span class="muted" style="font-size:12px">폴더 · 파일 ${f.fileCount}개</span></td>
           <td>${UI.escapeHtml(f.displayName || f.username || '—')}</td>
-          <td class="num muted">${new Date(f.deletedAt).toLocaleString('ko-KR')}</td>
+          <td class="num muted">${fmtDT(f.deletedAt)}</td>
           <td class="row-actions" style="text-align:right">
             <button class="btn btn-sm btn-secondary" data-rf="${f.id}">↩️ 복원</button>
             <button class="btn btn-sm btn-danger" data-pf="${f.id}">🗑️ 영구삭제</button>
@@ -792,7 +798,7 @@ const item = (tab, ico, label) => `<div class="nav-item ${state.tab === tab ? 'a
         <tr class="fade-in">${ck('file', f.id)}
           <td>${UI.fileIcon(f.name)} <b>${UI.escapeHtml(f.name)}</b><br><span class="muted" style="font-size:12px">${UI.escapeHtml(f.folder)} · ${UI.bytes(f.size)}</span></td>
           <td>${UI.escapeHtml(f.displayName || f.username || '—')}</td>
-          <td class="num muted">${new Date(f.deletedAt).toLocaleString('ko-KR')}</td>
+          <td class="num muted">${fmtDT(f.deletedAt)}</td>
           <td class="row-actions" style="text-align:right">
             <button class="btn btn-sm btn-secondary" data-rfi="${f.id}">↩️ 복원</button>
             <button class="btn btn-sm btn-danger" data-pfi="${f.id}">🗑️ 영구삭제</button>
@@ -1151,7 +1157,7 @@ const item = (tab, ico, label) => `<div class="nav-item ${state.tab === tab ? 'a
     view.innerHTML = '<div class="empty"><div class="big">⏳</div>확인 중…</div>';
     const ago = (iso) => { if (!iso) return '기록 없음'; const mi = Math.floor((Date.now() - new Date(iso).getTime()) / 60000); if (mi < 1) return '방금'; if (mi < 60) return mi + '분 전'; if (mi < 1440) return Math.floor(mi / 60) + '시간 전'; return Math.floor(mi / 1440) + '일 전'; };
     const fresh = (iso, hrs) => iso && (Date.now() - new Date(iso).getTime()) < hrs * 3600000;
-    const when = (iso) => (iso ? new Date(iso).toLocaleString('ko-KR') : '-');
+    const when = (iso) => (iso ? fmtDT(iso) : '-');
     // 로컬 날짜키(YYYY-MM-DD) — 백엔드 KST 키와 맞추기 위해 로컬 구성요소 사용(사용자=국내)
     const dkey = (dt) => `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
     const mondayOf = (dt) => { const d = new Date(dt.getFullYear(), dt.getMonth(), dt.getDate()); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return d; };
@@ -1329,15 +1335,15 @@ const item = (tab, ico, label) => `<div class="nav-item ${state.tab === tab ? 'a
       const danger = new Set(['login_failed', 'delete_user', 'purge_file', 'purge_folder', 'file_blocked', 'malware_blocked', 'admin_delete_share', '2fa_disabled']);
       const rows = logs.map((l) => `
         <tr>
-          <td class="num" style="color:var(--text-muted);white-space:nowrap">${new Date(l.created_at).toLocaleString('ko-KR')}</td>
+          <td class="num" style="color:var(--text-muted);white-space:nowrap">${fmtDT(l.created_at)}</td>
           <td style="white-space:nowrap">${UI.escapeHtml(l.username || '—')}</td>
           <td style="white-space:nowrap">${l.owner_username ? `${UI.escapeHtml(l.owner_display_name || l.owner_username)} <span class="muted" style="font-size:11px">@${UI.escapeHtml(l.owner_username)}</span>` : '<span class="muted">—</span>'}</td>
           <td style="white-space:nowrap"><code class="act-code">${UI.escapeHtml(l.action)}</code></td>
           <td style="white-space:nowrap"><span class="badge ${danger.has(l.action) ? 'off' : 'user'}">${UI.escapeHtml(actionKo(l.action))}</span></td>
-          <td class="audit-detail">${UI.escapeHtml(l.detail)}</td>
+          <td class="audit-detail wide-cell">${UI.escapeHtml(l.detail)}</td>
           <td class="num" style="color:var(--text-muted);white-space:nowrap">${UI.escapeHtml(l.ip)}</td>
         </tr>`).join('');
-      view.innerHTML = `<div class="table-wrap"><table class="audit-table"><thead><tr><th>시각</th><th>사용자</th><th>대상 계정</th><th>동작코드</th><th>동작명</th><th style="width:99%">상세</th><th>IP</th></tr></thead><tbody>${rows || '<tr><td colspan=7>기록 없음</td></tr>'}</tbody></table></div>`;
+      view.innerHTML = `<div class="table-wrap"><table class="audit-table compact-table"><thead><tr><th>시각</th><th>사용자</th><th>대상 계정</th><th>동작코드</th><th>동작명</th><th style="width:99%">상세</th><th>IP</th></tr></thead><tbody>${rows || '<tr><td colspan=7>기록 없음</td></tr>'}</tbody></table></div>`;
     } catch (err) { view.innerHTML = `<div class="empty">⚠️ ${UI.escapeHtml(err.message)}</div>`; }
   }
 
