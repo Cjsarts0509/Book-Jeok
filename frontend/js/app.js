@@ -1682,8 +1682,10 @@ const App = (() => {
     } catch (_) { return false; }
   }
   // 네트워크 때문에 실패했는가? (권한·용량초과·확장자 거부는 다시 시도해도 소용없다)
-  const isNetworkFailure = (err) => !err.status || err.status === 0 || err.status === 502 || err.status === 503 || err.status === 504
-    || /네트워크|Failed to fetch|NetworkError|취소됨/i.test(err.message || '');
+  //  사람이 ✕ 로 취소한 건 네트워크 실패가 아니다 — 예전엔 '취소됨'도 여기 걸려서, 대기분을 취소해도
+  //  대기열에 남아 새로고침할 때마다 다시 올라갔다.
+  const isNetworkFailure = (err) => !err.canceled && (!err.status || err.status === 0 || err.status === 502 || err.status === 503 || err.status === 504
+    || /네트워크|Failed to fetch|NetworkError/i.test(err.message || ''));
 
   // 대기열 파일이 이미 그 폴더에 있는가? (같은 크기 + 같은 이름 또는 서버가 붙인 'name (2).ext')
   // 실패로 알았던 업로드가 실제로는 서버에 저장됐거나, 실패 뒤 사람이 직접 다시 올린 경우
@@ -1700,6 +1702,9 @@ const App = (() => {
   // 며칠 지난 건 사람이 대기열을 열어 보고 '지금 올리기'를 눌러야 올라간다 — 잊고 있던 파일이
   // 어느 날 갑자기 올라오면 그게 더 혼란스럽다.
   const OQ_AUTO_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+  // 자동으로는 이만큼까지만 다시 시도한다. 계속 실패하는 파일이 새로고침할 때마다 올라가다 끊기기를
+  // 반복하지 않게 — 그 뒤로는 📥 대기열에서 '지금 올리기'를 눌러야 올라간다.
+  const OQ_AUTO_MAX_TRIES = 3;
 
   let oqFlushing = false;
   async function offlineFlush(quiet) {
@@ -1708,10 +1713,10 @@ const App = (() => {
     try { items = await oqAll(); } catch (_) { return; }
     const manual = !quiet && !offlineFlush.auto;
     if (offlineFlush.auto) offlineFlush.auto = false;
-    if (!manual) items = items.filter((it) => Date.now() - (it.at || 0) < OQ_AUTO_MAX_AGE_MS);
+    if (!manual) items = items.filter((it) => Date.now() - (it.at || 0) < OQ_AUTO_MAX_AGE_MS && (it.tries || 0) < OQ_AUTO_MAX_TRIES);
     if (!items.length) { renderOfflineBadge(); return; }
     oqFlushing = true;
-    let ok = 0, fail = 0, dup = 0;
+    let ok = 0, fail = 0, dup = 0, dropped = 0;
     if (!quiet) UI.toast(`대기 중이던 ${items.length}건을 올립니다…`, 'info');
     const listed = new Map();   // '계정|폴더' → 그 폴더의 파일 목록(한 번만 조회)
     for (const it of items) {
@@ -1728,6 +1733,8 @@ const App = (() => {
         await xhrPost(`/files/upload${it.ownerId ? '?ownerId=' + it.ownerId : ''}`, fd, (l, tot) => t.update(l, tot), t);
         t.done(); await oqDel(it.id); ok++;
       } catch (err) {
+        // ✕ 로 취소했으면 '이 파일은 안 올리겠다'는 뜻 — 대기열에서 뺀다(다시 올라오지 않게)
+        if (t.canceled() || err.canceled) { await oqDel(it.id).catch(() => {}); dropped++; continue; }
         t.fail(err.message);
         fail++;
         // 네트워크 문제가 아니면(형식 거부 등) 계속 두어도 소용없으니 대기열에서 뺀다
@@ -1741,6 +1748,7 @@ const App = (() => {
     const dupNote = dup ? ` · ${dup}건은 이미 올라가 있어 건너뜀` : '';
     if (ok) { UI.toast(`대기분 ${ok}건 업로드 완료${fail ? ` · ${fail}건 실패` : ''}${dupNote}`, fail ? 'info' : 'success'); loadAll(); }
     else if (dup) UI.toast(`대기열 정리 — ${dup}건은 이미 올라가 있어 다시 올리지 않았습니다`, 'info');
+    if (dropped) UI.toast(`취소한 ${dropped}건은 대기열에서 뺐습니다 — 다시 올라가지 않습니다`, 'info');
   }
 
   // 대기 중인 게 있으면 상단바에 조용히 알린다. 눌러서 목록을 보고 지금 올리거나 버릴 수 있다.
@@ -1756,7 +1764,7 @@ const App = (() => {
     const items = await oqAll().catch(() => []);
     const esc = UI.escapeHtml;
     const m = UI.modal(`<h3>📥 업로드 대기열</h3>
-      <p class="muted" style="font-size:12px;margin:-6px 0 12px">인터넷이 끊겨 올리지 못한 파일입니다. 하루 안에 실패한 것은 연결이 돌아오면 자동으로 올라가고, 그보다 오래된 것은 '지금 올리기'를 눌러야 올라갑니다. 이미 그 폴더에 같은 파일이 있으면 다시 올리지 않습니다.</p>
+      <p class="muted" style="font-size:12px;margin:-6px 0 12px">인터넷이 끊겨 올리지 못한 파일입니다. 하루 안에 실패한 것은 연결이 돌아오거나 다시 접속하면 자동으로 올라갑니다(최대 ${OQ_AUTO_MAX_TRIES}번). 그보다 오래됐거나 계속 실패한 것은 '지금 올리기'를 눌러야 올라갑니다. 올라가는 중에 ✕ 로 취소하면 대기열에서 빠집니다. 이미 그 폴더에 같은 파일이 있으면 다시 올리지 않습니다.</p>
       <div class="oq-list">${items.length ? items.map((it) => `
         <div class="oq-row"><div class="oq-main"><b>${esc(it.name)}</b>
           <div class="muted" style="font-size:11px">${UI.bytes(it.size)} · ${esc(prettyPath(it.folder))} · ${new Date(it.at).toLocaleString('ko-KR')}${it.tries ? ` · 시도 ${it.tries}회` : ''}</div>
@@ -2856,7 +2864,7 @@ const App = (() => {
         const msg = `${label} 완료 · ${Math.round(took / 1000)}초 걸렸습니다`;
         if (wentAway && document.visibilityState === 'hidden' && await ensureDesktopNotice()) {
           try {
-            const n = new Notification('북적북적', { body: msg, tag: 'bj-job', icon: 'assets/logo.svg?v=204' });
+            const n = new Notification('북적북적', { body: msg, tag: 'bj-job', icon: 'assets/logo.svg?v=205' });
             n.onclick = () => { window.focus(); n.close(); };
           } catch (_) { UI.toast(msg, 'success'); }
         } else UI.toast(msg, 'success');
