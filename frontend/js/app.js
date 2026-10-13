@@ -1,5 +1,8 @@
 /* 북적북적 메인 앱 — 파일 웹하드 (v3) */
 const App = (() => {
+  // 화면을 새로고침(F5)하면 브라우저가 보던 스크롤 위치로 되돌리는데, 목록이 다시 그려지는 동안
+  // 엉뚱한 중간 지점에 멈춰 있게 된다. 항상 맨 위에서 시작한다.
+  try { if ('scrollRestoration' in history) history.scrollRestoration = 'manual'; } catch (_) {}
   const state = {
     user: null, folder: '/', ownerId: null, ownerName: null,
     rev: null, stale: false,
@@ -58,7 +61,7 @@ const App = (() => {
     } catch (_) {}
     const o = state.ownerId;
     API.prefetch(() => {
-      API.tree(o); API.listFiles(folder, o); API.usage(o); API.tags(o); API.activity(o, 30);
+      API.tree(o); API.listFiles(folder, o); API.usage(o); API.tags(o);
       API.allowedExtensions(); API.branches(); API.activeNotices(); API.notifications(1); API.accounts();
     });
   }
@@ -122,6 +125,7 @@ const App = (() => {
             <div class="nav-item" data-nav="files" title="내 파일"><span class="ico">📁</span><span class="t">내 파일</span></div>
             <div class="nav-item" data-nav="shares" title="공유"><span class="ico">🔗</span><span class="t">공유</span></div>
             <div class="nav-item" data-nav="trash" title="휴지통"><span class="ico">🗑️</span><span class="t">휴지통</span></div>
+            <div class="nav-item" data-nav="activity" title="최근 활동"><span class="ico">🕘</span><span class="t">최근 활동</span></div>
             <div class="nav-item nav-bell" data-nav="notif" title="알림"><span class="ico">🔔</span><span class="t">알림</span><span class="notif-badge hidden" id="notif-badge">0</span></div>
             ${admin ? '<a class="nav-item" href="admin.html" title="관리자"><span class="ico">🛡️</span><span class="t">관리자</span></a>' : ''}
             ${isPriv() ? '<div class="nav-item" data-nav="stockaudit" title="재고조사 오차체크"><span class="ico">📊</span><span class="t">재고조사 오차체크</span></div>' : ''}
@@ -136,10 +140,6 @@ const App = (() => {
           <aside class="tree-sidebar" id="tree-sidebar">
             <div class="tree-head"><span>폴더</span><div class="tree-head-btns"><button class="tree-hbtn" id="expand-all" title="전체 펴기">⊞</button><button class="tree-hbtn" id="collapse-all" title="전체 닫기">⊟</button></div></div>
             <div id="tree"></div>
-            <div class="act-panel">
-              <div class="act-head"><span>최근 활동</span><button class="act-refresh" id="act-refresh" title="새로고침">🔄</button></div>
-              <div class="act-list" id="act-list"></div>
-            </div>
           </aside>
           <div class="tree-backdrop" id="tree-backdrop"></div>
           <main class="content" id="view"></main>
@@ -178,7 +178,7 @@ const App = (() => {
     root().querySelectorAll('.appbar-nav [data-nav]').forEach((el) => el.addEventListener('click', () => {
       const n = el.dataset.nav;
       closeNavMenu();
-      if (n === 'logout') doLogout(); else if (n === 'settings') settingsModal(); else if (n === 'files') resetToOwn(); else if (n === 'help') helpModal(); else if (n === 'trash') trashModal(); else if (n === 'shares') shareManageModal(); else if (n === 'notif') notifModal(); else if (n === 'serverstatus') serverStatusModal(); else if (n === 'stockaudit') stockAuditModal();
+      if (n === 'logout') doLogout(); else if (n === 'settings') settingsModal(); else if (n === 'files') resetToOwn(); else if (n === 'help') helpModal(); else if (n === 'trash') trashModal(); else if (n === 'activity') activityModal(); else if (n === 'shares') shareManageModal(); else if (n === 'notif') notifModal(); else if (n === 'serverstatus') serverStatusModal(); else if (n === 'stockaudit') stockAuditModal();
     }));
     // 모바일: 상단바 메뉴(햄버거) → 텍스트 리스트 드롭다운
     const navMenuBtn = document.getElementById('nav-menu-toggle');
@@ -214,7 +214,6 @@ const App = (() => {
     document.getElementById('brand-home').addEventListener('click', () => goTo('/'));
     document.getElementById('expand-all').addEventListener('click', expandAll);
     document.getElementById('collapse-all').addEventListener('click', collapseAll);
-    document.getElementById('act-refresh')?.addEventListener('click', loadActivity);
     if (isPriv()) setupAccountSwitcher();
     restoreLoc();   // 마지막 폴더로 복귀(모바일 재로딩 대비) — loadAll 전에 folder 설정
     loadAll();
@@ -377,7 +376,9 @@ const App = (() => {
 
   async function loadAll() { await Promise.all([loadTree(), loadFiles(), loadTags(), loadActivity()]); markFresh(); }
 
-  // ── 사이드바 하단: 이 클라우드(계정)의 최근 활동 30개 ──
+  // ── 상단 메뉴 '최근 활동': 이 클라우드(계정)의 최근 활동 30개 ──
+  //  예전엔 사이드바 아래에 붙어 있었는데, 폴더가 많으면 트리에 밀려 한참 아래로 내려가 안 보였다.
+  //  창이 열려 있을 때만 불러온다(loadAll 이 부르면 열린 창만 새로 고침).
   // 행위=큰 글씨, 경로/대상·수행자·시각=작은 글씨. 담당자·관리자가 남의 계정에 올린 것도 그 계정 기준으로 보인다.
   const ACT_LABEL = {
     upload: '업로드', download: '다운로드', rename: '이름 변경', update_note: '비고 수정',
@@ -414,6 +415,14 @@ const App = (() => {
         </div>`).join('') : '<div class="act-empty">아직 기록이 없습니다.</div>';
       box.querySelectorAll('[data-undo]').forEach((el) => el.addEventListener('click', () => undoActivity(el.dataset.undo, el)));
     } catch (_) { box.innerHTML = '<div class="act-empty">활동을 불러오지 못했습니다.</div>'; }
+  }
+  function activityModal() {
+    const m = UI.modal(`<h3 class="act-mhead">🕘 최근 활동 <span class="muted" style="font-size:13px;font-weight:400">· ${UI.escapeHtml(state.ownerName || '내 파일')} · 최근 30개</span><button class="act-refresh" id="act-refresh" title="새로고침">🔄</button></h3>
+      <div class="act-list act-list-modal" id="act-list"><div class="act-empty">불러오는 중…</div></div>
+      <div class="modal-actions"><button class="btn btn-primary" id="act-close">닫기</button></div>`);
+    m.q('#act-close').addEventListener('click', m.close);
+    m.q('#act-refresh').addEventListener('click', loadActivity);
+    loadActivity();
   }
   // 최근 활동의 '되돌리기' — 휴지통에서 원래 자리로 복원(보관기간이 지났으면 서버가 거절).
   async function undoActivity(auditId, btn) {
@@ -960,7 +969,7 @@ const App = (() => {
     document.getElementById('tpl-btn')?.addEventListener('click', templateModal);
     document.getElementById('refresh-btn')?.addEventListener('click', async (e) => {
       const b = e.currentTarget; b.disabled = true; b.classList.add('spinning');
-      try { await loadAll(); UI.toast('목록을 새로고침했습니다', 'success'); }
+      try { await loadAll(); scrollListTop(); UI.toast('목록을 새로고침했습니다', 'success'); }
       catch { UI.toast('새로고침 실패', 'error'); }
       finally { b.disabled = false; b.classList.remove('spinning'); }
     });
@@ -1047,11 +1056,15 @@ const App = (() => {
   function normFolder(p) { if (!p || p === '/') return '/'; return '/' + String(p).split('/').filter(Boolean).join('/'); }
   function pathChain(folder) { const s = new Set(['/']); let acc = ''; for (const p of folder.split('/').filter(Boolean)) { acc += '/' + p; s.add(acc); } return s; }
   function syncTreeToFolder() { state.expanded = pathChain(state.folder); } // 현재 위치의 경로만 펼침
+  // 목록 맨 위로. 페이지 전체(창)가 스크롤되는 화면과 목록 칸(#view)이 스크롤되는 화면 둘 다 올린다.
+  function scrollListTop() { window.scrollTo(0, 0); const v = document.getElementById('view'); if (v) v.scrollTop = 0; }
   function goTo(path, record = true) {
     path = normFolder(path);
     if (record) { const n = state.nav; if (n.stack[n.idx] !== path) { n.stack = n.stack.slice(0, n.idx + 1); n.stack.push(path); n.idx = n.stack.length - 1; } }
-    if (state.folder === path) { syncTreeToFolder(); renderTree(); return; }
-    state.folder = path; syncTreeToFolder(); loadFiles(); renderTree();
+    if (state.folder === path) { syncTreeToFolder(); renderTree(); scrollListTop(); return; }
+    // 다른 폴더로 가면 이전 폴더에서 내려가 있던 위치가 아니라 맨 위부터 보여 준다.
+    //  목록이 그려진 뒤에 한 번 더 올린다(새 목록이 짧다가 길어지는 사이 브라우저가 위치를 붙잡는 경우).
+    state.folder = path; syncTreeToFolder(); scrollListTop(); Promise.resolve(loadFiles()).then(scrollListTop, () => {}); renderTree();
     if (window.innerWidth <= 768 && document.getElementById('tree-sidebar')?.classList.contains('open')) toggleTree();
   }
   function navBack() { const n = state.nav; if (n.idx > 0) { n.idx--; goTo(n.stack[n.idx], false); } }
@@ -2843,7 +2856,7 @@ const App = (() => {
         const msg = `${label} 완료 · ${Math.round(took / 1000)}초 걸렸습니다`;
         if (wentAway && document.visibilityState === 'hidden' && await ensureDesktopNotice()) {
           try {
-            const n = new Notification('북적북적', { body: msg, tag: 'bj-job', icon: 'assets/logo.svg?v=203' });
+            const n = new Notification('북적북적', { body: msg, tag: 'bj-job', icon: 'assets/logo.svg?v=204' });
             n.onclick = () => { window.focus(); n.close(); };
           } catch (_) { UI.toast(msg, 'success'); }
         } else UI.toast(msg, 'success');
@@ -3500,7 +3513,6 @@ const App = (() => {
     }
 
     const esc = UI.escapeHtml;
-    const base = ['분야', 'ISBN', '도서명', '출판사', '전산재고', '실재고', '누락재고', '예외여부', '스캔재고', '차이'];
     let disc = [];                 // 오차 항목(상세·바코드검색·다운로드 공용)
     let isbnSet = new Set();        // 리스트에 있는 ISBN 집합(빠른 조회)
     let saCurrentFolder = (preload && preload.folder) || state.folder || '/';  // 사진 저장·확인 대상 폴더
@@ -3511,13 +3523,15 @@ const App = (() => {
     let saSort = { col: null, dir: 1 };  // 항목 정렬 열(null=원래 순서)·방향. 서가는 '항목 안에서' 중분류로 정렬.
     let saFilterFields = new Set();  // 분야 필터(비어있으면 전체, 아니면 선택된 분야만)
     let saFilterPhoto = '';         // 사진 필터('' 전체 · 'has' 있음 · 'no' 없음)
-    // 정렬용 열 정의(17열). shelf=true 는 서가 분해값(수불처코드·대/중/소분류·스캔수량)으로 disc 항목이 아닌 '행'에서 취함.
+    // 표·엑셀 열(12열). 실재고·누락재고·예외여부·스캔재고·차이는 쓰지 않는다
+    //   (예외여부 Y 는 분석에서 이미 빠지고, 원본 차이 = 스캔재고 − 전산재고 = 스캔차이라 겹친다).
+    //   shelf=true 는 서가 분해값(수불처코드·대/중/소분류·스캔수량)으로 disc 항목이 아닌 '행'에서 취함.
     //   calc 는 항목 값으로 계산하는 열(스캔합계·스캔차이).
-    const SA_HEADERS = ['분야', 'ISBN', '도서명', '출판사', '전산재고', '실재고', '누락재고', '예외여부', '스캔재고', '차이', '수불처코드', '대분류', '중분류', '소분류', '스캔수량', '스캔합계', '스캔차이'];
+    const SA_HEADERS = ['분야', 'ISBN', '도서명', '출판사', '수불처코드', '대분류', '중분류', '소분류', '전산재고', '스캔수량', '스캔합계', '스캔차이'];
     const SA_COLS = [
       { k: 'field', num: false }, { k: 'isbn', num: false }, { k: 'name', num: false }, { k: 'pub', num: false },
-      { k: 'sys', num: true }, { k: 'real', num: true }, { k: 'miss', num: true }, { k: 'exc', num: false }, { k: 'scan', num: true }, { k: 'diff', num: true },
-      { k: 'code', num: false, shelf: true }, { k: 'maj', num: false, shelf: true }, { k: 'mid', num: false, shelf: true }, { k: 'min', num: false, shelf: true }, { k: 'qty', num: true, shelf: true },
+      { k: 'code', num: false, shelf: true }, { k: 'maj', num: false, shelf: true }, { k: 'mid', num: false, shelf: true }, { k: 'min', num: false, shelf: true },
+      { k: 'sys', num: true }, { k: 'qty', num: true, shelf: true },
       { k: 'ssum', num: true, calc: (d) => scanSum(d) }, { k: 'sdiff', num: true, calc: (d) => scanDiff(d) },
     ];
 
@@ -3602,13 +3616,13 @@ const App = (() => {
         const d = disc[ri];
         const sh = itemShelves(d);
         const stack = (arr) => (arr.length ? arr.map((v) => esc(String(v == null ? '' : v))).join('<br>') : '');
-        const b10 = [d.field, d.isbn, d.name, d.pub, d.sys, d.real, d.miss, d.exc, d.scan, d.diff]
+        const b4 = [d.field, d.isbn, d.name, d.pub]
           .map((c, idx) => `<td class="${idx === 1 ? 'sa-isbn' : ''}">${esc(String(c == null ? '' : c))}</td>`).join('');
-        const shc = [stack(sh.map((x) => x.code)), stack(sh.map((x) => x.maj)), stack(sh.map((x) => x.mid)), stack(sh.map((x) => x.min)), stack(sh.map((x) => x.qty))]
-          .map((h) => `<td class="sa-shelf">${h}</td>`).join('');
+        const shelfTd = (h) => `<td class="sa-shelf">${h}</td>`;
+        const shc = [stack(sh.map((x) => x.code)), stack(sh.map((x) => x.maj)), stack(sh.map((x) => x.mid)), stack(sh.map((x) => x.min))].map(shelfTd).join('');
         const sd = scanDiff(d);
-        const sums = `<td>${scanSum(d)}</td><td class="${sd ? 'sa-sdiff' : ''}">${sd}</td>`;
-        return `<tr data-ri="${ri}">${b10}${shc}${sums}</tr>`;
+        const tail = `<td>${esc(String(d.sys == null ? '' : d.sys))}</td>${shelfTd(stack(sh.map((x) => x.qty)))}<td>${scanSum(d)}</td><td class="${sd ? 'sa-sdiff' : ''}">${sd}</td>`;
+        return `<tr data-ri="${ri}">${b4}${shc}${tail}</tr>`;
       }).join('');
       wrap.innerHTML = order.length
         ? `<table class="sa-table">${thead}<tbody>${tbody}</tbody></table>`
@@ -3893,37 +3907,64 @@ const App = (() => {
       if (s.length >= 11) return [s.slice(0, 3), s.slice(3, 5), s.slice(5, 9), s.slice(9)];
       return [s, '', '', ''];
     }
-    // 오차 목록 → 워크북. 항목(ISBN)은 붙어있게(그룹) 두고, 항목 안 서가는 중분류 순으로 행 분리.
-    //  ISBN 하나가 서가 여러 곳에 있으면 행도 여러 개가 되는데, 예전엔 전산재고·차이 같은 '항목 숫자'를
-    //  행마다 반복해서 서가번호별로 합치면 2~3배로 부풀었다. 이제 항목 숫자는 그 ISBN 의 '첫 행'에만 적고,
-    //  서가 행에는 그 서가의 스캔수량만 둔다. 스캔합계·스캔차이(=스캔합계−전산재고)도 첫 행에만.
-    //  → 어느 열로 합계/피벗을 내도 중복이 없다(스캔수량 합 = 스캔합계, 전산재고 합 = 수불재고 합).
+    // 오차 목록 → 워크북(시트 2개). 열은 화면 표와 같다(SA_HEADERS).
+    //  ① '서가별' — ISBN 마다 서가 수만큼 행. 항목 칸(분야·ISBN·도서명·출판사·전산재고·스캔합계·스캔차이)은
+    //     그 ISBN 의 행들을 세로로 '병합'해 한 번만 보인다. 값은 맨 위 칸에만 있으므로 서가번호별로 합쳐도
+    //     두 번 세어지지 않는다(예전엔 행마다 반복돼 2~3배로 부풀었다).
+    //     단, 엑셀은 크기가 다른 병합 칸이 섞이면 정렬을 못 한다 → 정렬은 ②에서.
+    //  ② '항목별(정렬용)' — ISBN 당 한 행, 서가는 한 칸에 '036-04-0021-01 ×1 / …' 로. 병합이 없어 어느 열로든 정렬·필터 가능.
     function buildDiscWorkbook(XLSX) {
-      const headers = ['분야', 'ISBN', '도서명', '출판사', '전산재고', '실재고', '누락재고', '예외여부', '스캔재고', '차이', '수불처코드', '대분류', '중분류', '소분류', '스캔수량', '스캔합계', '스캔차이'];
-      const rows = [];
-      for (const d of disc) {
-        const sh = itemShelves(d);                        // 항목 내 서가 위치 순 정렬
-        const shelves = sh.length ? sh : [{ code: '', maj: '', mid: '', min: '', qty: '' }];
-        shelves.forEach((s, k) => {
-          const first = k === 0;
-          const item = first ? [d.sys, d.real, d.miss, d.exc, d.scan, d.diff] : ['', '', '', '', '', ''];
-          const sums = first ? [scanSum(d), scanDiff(d)] : ['', ''];
-          rows.push([d.field, d.isbn, d.name, d.pub, ...item, s.code, s.maj, s.mid, s.min, s.qty, ...sums]);
-        });
-      }
-      const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
-      // 앞자리 0이 있는 코드 열(ISBN·대/중/소분류)은 '텍스트' 셀로 못박는다.
-      //  xlsx 는 셀 타입이 파일에 들어가므로 CSV 와 달리 엑셀 버전/자동변환 설정과 무관하게 0이 보존되지만,
-      //  서식까지 텍스트(@)로 지정해 두면 사용자가 셀을 편집·재저장해도 숫자로 바뀌지 않는다.
-      const TEXT_COLS = [1, 10, 11, 12, 13];   // ISBN, 수불처코드, 대분류, 중분류, 소분류
-      for (let r = 1; r <= rows.length; r++) {
-        for (const c of TEXT_COLS) {
-          const cell = ws[XLSX.utils.encode_cell({ r, c })];
+      const enc = XLSX.utils.encode_cell;
+      // 앞자리 0이 있는 코드 칸은 '텍스트' 셀로 못박는다(셀 타입 + 서식 @ — 편집·재저장해도 숫자로 안 바뀜).
+      const asText = (ws, nRows, cols) => {
+        for (let r = 1; r <= nRows; r++) for (const c of cols) {
+          const cell = ws[enc({ r, c })];
           if (!cell || cell.v === '' || cell.v == null) continue;
           cell.t = 's'; cell.v = String(cell.v); cell.z = '@';
         }
+      };
+      const widths = (arr) => arr.map((wch) => ({ wch }));
+      const filterAll = (ws, nRows, nCols) => { ws['!autofilter'] = { ref: XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: nRows, c: nCols - 1 } }) }; };
+
+      // ① 서가별(병합) — 분야 ISBN 도서명 출판사 | 수불처코드 대 중 소 | 전산재고 | 스캔수량 | 스캔합계 스캔차이
+      const MERGE_COLS = [0, 1, 2, 3, 8, 10, 11];
+      const rows = []; const merges = [];
+      for (const d of disc) {
+        const sh = itemShelves(d);                        // 항목 내 서가 위치 순 정렬
+        const shelves = sh.length ? sh : [{ code: '', maj: '', mid: '', min: '', qty: '' }];
+        const top = rows.length + 1;                      // 머리글 다음 줄부터(0=머리글)
+        shelves.forEach((s, k) => {
+          const first = k === 0;
+          rows.push([
+            first ? d.field : '', first ? d.isbn : '', first ? d.name : '', first ? d.pub : '',
+            s.code, s.maj, s.mid, s.min,
+            first ? d.sys : '', s.qty,
+            first ? scanSum(d) : '', first ? scanDiff(d) : '',
+          ]);
+        });
+        if (shelves.length > 1) for (const c of MERGE_COLS) merges.push({ s: { r: top, c }, e: { r: top + shelves.length - 1, c } });
       }
-      const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, '재고오차');
+      const ws = XLSX.utils.aoa_to_sheet([SA_HEADERS, ...rows]);
+      asText(ws, rows.length, [1, 4, 5, 6, 7]);   // ISBN, 수불처코드, 대분류, 중분류, 소분류
+      ws['!merges'] = merges;
+      ws['!cols'] = widths([12, 15, 34, 14, 10, 7, 7, 7, 8, 8, 8, 8]);
+      filterAll(ws, rows.length, SA_HEADERS.length);
+
+      // ② 항목별(정렬용)
+      const h2 = ['분야', 'ISBN', '도서명', '출판사', '전산재고', '스캔합계', '스캔차이', '서가수', '서가 (스캔수량)'];
+      const rows2 = disc.map((d) => {
+        const sh = itemShelves(d);
+        const list = sh.map((s) => (s.maj ? `${s.code}-${s.maj}-${s.mid}-${s.min}` : s.code) + ` ×${s.qty}`).join(' / ');
+        return [d.field, d.isbn, d.name, d.pub, d.sys, scanSum(d), scanDiff(d), sh.length, list];
+      });
+      const ws2 = XLSX.utils.aoa_to_sheet([h2, ...rows2]);
+      asText(ws2, rows2.length, [1]);
+      ws2['!cols'] = widths([12, 15, 34, 14, 8, 8, 8, 6, 60]);
+      filterAll(ws2, rows2.length, h2.length);
+
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, '서가별');
+      XLSX.utils.book_append_sheet(wb, ws2, '항목별(정렬용)');
       return wb;
     }
     async function downloadXlsx() {
