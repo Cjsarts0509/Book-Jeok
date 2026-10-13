@@ -2843,7 +2843,7 @@ const App = (() => {
         const msg = `${label} 완료 · ${Math.round(took / 1000)}초 걸렸습니다`;
         if (wentAway && document.visibilityState === 'hidden' && await ensureDesktopNotice()) {
           try {
-            const n = new Notification('북적북적', { body: msg, tag: 'bj-job', icon: 'assets/logo.svg?v=201' });
+            const n = new Notification('북적북적', { body: msg, tag: 'bj-job', icon: 'assets/logo.svg?v=202' });
             n.onclick = () => { window.focus(); n.close(); };
           } catch (_) { UI.toast(msg, 'success'); }
         } else UI.toast(msg, 'success');
@@ -3513,12 +3513,14 @@ const App = (() => {
     let saSort = { col: null, dir: 1 };  // 항목 정렬 열(null=원래 순서)·방향. 서가는 '항목 안에서' 중분류로 정렬.
     let saFilterFields = new Set();  // 분야 필터(비어있으면 전체, 아니면 선택된 분야만)
     let saFilterPhoto = '';         // 사진 필터('' 전체 · 'has' 있음 · 'no' 없음)
-    // 정렬용 열 정의(15열). shelf=true 는 서가 분해값(수불처코드·대/중/소분류·스캔수량)으로 disc 항목이 아닌 '행'에서 취함.
-    const SA_HEADERS = ['분야', 'ISBN', '도서명', '출판사', '전산재고', '실재고', '누락재고', '예외여부', '스캔재고', '차이', '수불처코드', '대분류', '중분류', '소분류', '스캔수량'];
+    // 정렬용 열 정의(17열). shelf=true 는 서가 분해값(수불처코드·대/중/소분류·스캔수량)으로 disc 항목이 아닌 '행'에서 취함.
+    //   calc 는 항목 값으로 계산하는 열(스캔합계·스캔차이).
+    const SA_HEADERS = ['분야', 'ISBN', '도서명', '출판사', '전산재고', '실재고', '누락재고', '예외여부', '스캔재고', '차이', '수불처코드', '대분류', '중분류', '소분류', '스캔수량', '스캔합계', '스캔차이'];
     const SA_COLS = [
       { k: 'field', num: false }, { k: 'isbn', num: false }, { k: 'name', num: false }, { k: 'pub', num: false },
       { k: 'sys', num: true }, { k: 'real', num: true }, { k: 'miss', num: true }, { k: 'exc', num: false }, { k: 'scan', num: true }, { k: 'diff', num: true },
       { k: 'code', num: false, shelf: true }, { k: 'maj', num: false, shelf: true }, { k: 'mid', num: false, shelf: true }, { k: 'min', num: false, shelf: true }, { k: 'qty', num: true, shelf: true },
+      { k: 'ssum', num: true, calc: (d) => scanSum(d) }, { k: 'sdiff', num: true, calc: (d) => scanDiff(d) },
     ];
 
     // ── 목록 저장/불러오기(서버 보관 · 계정별) — 같은 계정이면 어느 기기서든 이어서 작업 ──
@@ -3563,6 +3565,15 @@ const App = (() => {
       arr.sort((a, b) => String(a.maj + a.mid).localeCompare(String(b.maj + b.mid), 'ko', { numeric: true }));
       return arr;
     }
+    // 스캔합계 = 이 ISBN 을 '모든 서가'에서 센 수량의 합. 분석 때 전체 서가로 계산해 둔 값(ssum)을 쓴다
+    //   (표에는 서가를 최대 SA_MAX_SHELF 칸만 싣기 때문). 예전에 저장한 목록엔 없으니 실린 서가로 계산.
+    // 스캔차이 = 스캔합계 − 전산(수불)재고. 원본 '차이'(실재고 − 전산재고)와 같은 방향 — 모자라면 음수.
+    //   서가가 여러 개여도 수불재고는 한 번만 빼므로, 서가별로 나눠 합쳐도 부풀지 않는다.
+    function scanSum(d) {
+      if (d.ssum != null && d.ssum !== '') return num(d.ssum);
+      return (d.shelves || []).reduce((a, s) => a + num(s[1]), 0);
+    }
+    const scanDiff = (d) => scanSum(d) - num(d.sys);
     // 표시할 항목(disc) 순서: 필터 적용 + (열 클릭 시) 항목 정렬. 서가 열로 정렬하면 그 항목의 '첫(=중분류 최소)' 서가값 기준.
     function buildOrder() {
       let idx = disc.map((_, i) => i).filter((i) => {
@@ -3574,7 +3585,7 @@ const App = (() => {
       });
       if (saSort.col != null) {
         const c = SA_COLS[saSort.col];
-        const keyOf = (i) => { if (!c.shelf) return disc[i][c.k]; const sh = itemShelves(disc[i]); return sh.length ? sh[0][c.k] : ''; };
+        const keyOf = (i) => { if (c.calc) return c.calc(disc[i]); if (!c.shelf) return disc[i][c.k]; const sh = itemShelves(disc[i]); return sh.length ? sh[0][c.k] : ''; };
         idx.sort((a, b) => {
           const va = keyOf(a), vb = keyOf(b);
           const r = c.num ? (num(va) - num(vb)) : String(va == null ? '' : va).localeCompare(String(vb == null ? '' : vb), 'ko', { numeric: true });
@@ -3597,7 +3608,9 @@ const App = (() => {
           .map((c, idx) => `<td class="${idx === 1 ? 'sa-isbn' : ''}">${esc(String(c == null ? '' : c))}</td>`).join('');
         const shc = [stack(sh.map((x) => x.code)), stack(sh.map((x) => x.maj)), stack(sh.map((x) => x.mid)), stack(sh.map((x) => x.min)), stack(sh.map((x) => x.qty))]
           .map((h) => `<td class="sa-shelf">${h}</td>`).join('');
-        return `<tr data-ri="${ri}">${b10}${shc}</tr>`;
+        const sd = scanDiff(d);
+        const sums = `<td>${scanSum(d)}</td><td class="${sd ? 'sa-sdiff' : ''}">${sd}</td>`;
+        return `<tr data-ri="${ri}">${b10}${shc}${sums}</tr>`;
       }).join('');
       wrap.innerHTML = order.length
         ? `<table class="sa-table">${thead}<tbody>${tbody}</tbody></table>`
@@ -3709,7 +3722,7 @@ const App = (() => {
             <div class="sad-title">${esc(String(d.name == null ? '(제목없음)' : d.name))}</div>
             <div class="sad-sub">${esc(String(d.pub == null ? '' : d.pub))}${d.field ? ' · ' + esc(String(d.field)) : ''}</div>
             <div class="sad-isbn">ISBN ${esc(d.isbn)}</div>
-            <div class="sad-stock"><span>전산재고<b>${esc(String(d.sys == null ? '' : d.sys))}</b></span><span>스캔재고<b>${esc(String(d.scan == null ? '' : d.scan))}</b></span><span class="diff">차이<b>${esc(String(d.diff == null ? '' : d.diff))}</b></span></div>
+            <div class="sad-stock"><span>전산재고<b>${esc(String(d.sys == null ? '' : d.sys))}</b></span><span>스캔재고<b>${esc(String(d.scan == null ? '' : d.scan))}</b></span><span class="diff">차이<b>${esc(String(d.diff == null ? '' : d.diff))}</b></span><span>스캔합계<b>${scanSum(d)}</b></span><span class="diff">스캔차이<b>${scanDiff(d)}</b></span></div>
           </div>
         </div>
         <div class="sad-shelves"><div class="lbl">서가번호 (실사수량)</div>${shelfChips}</div>
@@ -3883,13 +3896,22 @@ const App = (() => {
       return [s, '', '', ''];
     }
     // 오차 목록 → 워크북. 항목(ISBN)은 붙어있게(그룹) 두고, 항목 안 서가는 중분류 순으로 행 분리.
+    //  ISBN 하나가 서가 여러 곳에 있으면 행도 여러 개가 되는데, 예전엔 전산재고·차이 같은 '항목 숫자'를
+    //  행마다 반복해서 서가번호별로 합치면 2~3배로 부풀었다. 이제 항목 숫자는 그 ISBN 의 '첫 행'에만 적고,
+    //  서가 행에는 그 서가의 스캔수량만 둔다. 스캔합계·스캔차이(=스캔합계−전산재고)도 첫 행에만.
+    //  → 어느 열로 합계/피벗을 내도 중복이 없다(스캔수량 합 = 스캔합계, 전산재고 합 = 수불재고 합).
     function buildDiscWorkbook(XLSX) {
-      const headers = ['분야', 'ISBN', '도서명', '출판사', '전산재고', '실재고', '누락재고', '예외여부', '스캔재고', '차이', '수불처코드', '대분류', '중분류', '소분류', '스캔수량'];
+      const headers = ['분야', 'ISBN', '도서명', '출판사', '전산재고', '실재고', '누락재고', '예외여부', '스캔재고', '차이', '수불처코드', '대분류', '중분류', '소분류', '스캔수량', '스캔합계', '스캔차이'];
       const rows = [];
       for (const d of disc) {
         const sh = itemShelves(d);                        // 항목 내 서가 위치 순 정렬
         const shelves = sh.length ? sh : [{ code: '', maj: '', mid: '', min: '', qty: '' }];
-        for (const s of shelves) rows.push([d.field, d.isbn, d.name, d.pub, d.sys, d.real, d.miss, d.exc, d.scan, d.diff, s.code, s.maj, s.mid, s.min, s.qty]);
+        shelves.forEach((s, k) => {
+          const first = k === 0;
+          const item = first ? [d.sys, d.real, d.miss, d.exc, d.scan, d.diff] : ['', '', '', '', '', ''];
+          const sums = first ? [scanSum(d), scanDiff(d)] : ['', ''];
+          rows.push([d.field, d.isbn, d.name, d.pub, ...item, s.code, s.maj, s.mid, s.min, s.qty, ...sums]);
+        });
       }
       const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
       // 앞자리 0이 있는 코드 열(ISBN·대/중/소분류)은 '텍스트' 셀로 못박는다.
@@ -4035,6 +4057,7 @@ const App = (() => {
         for (const d of disc) {
           const mm = shelfMap.get(d.isbn);
           d.shelves = mm ? [...mm.entries()].sort((a, b) => Number(a[0]) - Number(b[0])).slice(0, SA_MAX_SHELF) : [];
+          d.ssum = mm ? [...mm.values()].reduce((a, q) => a + q, 0) : 0;   // 잘라내기 전 '모든 서가' 합계
           if (d.shelves.length) matched++;
         }
         saAnalyzedYear = Number(yr) || null;

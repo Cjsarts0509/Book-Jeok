@@ -976,6 +976,7 @@ th { background: var(--bg); font-weight: 700; color: var(--text-muted); font-siz
 .sa-table tbody tr { cursor: pointer; }
 .sa-table tbody tr:hover { background: var(--hover); }
 .sa-table td.sa-isbn { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--primary-dark); font-weight: 700; }
+.sa-table td.sa-sdiff { color: var(--danger); font-weight: 700; }   /* 스캔차이 ≠ 0 */
 .sa-table tbody tr.sa-has td { background: rgba(16,185,129,.14); }
 .sa-table tbody tr.sa-has:hover td { background: rgba(16,185,129,.24); }
 .sa-table tbody tr.sa-has td.sa-isbn::after { content: ' 📷'; }
