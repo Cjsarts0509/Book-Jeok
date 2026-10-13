@@ -205,6 +205,11 @@ router.delete('/users/:id', wrap(async (req, res) => {
 }));
 
 // GET /api/admin/db-status  DB 상태 (요구사항 7)
+// 업로드 현황: 지금 올라가는 중인 것 + 최근 결과(완료·실패·끊김). 메모리 보관이라 재시작(배포) 때 비워진다.
+router.get('/uploads', (req, res) => {
+  res.json(require('../uploadLog').snapshot(Math.min(300, Math.max(1, parseInt(req.query.limit, 10) || 50))));
+});
+
 router.get('/db-status', wrap(async (req, res) => {
   try {
     const stats = await healthStats();

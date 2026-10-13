@@ -2864,7 +2864,7 @@ const App = (() => {
         const msg = `${label} 완료 · ${Math.round(took / 1000)}초 걸렸습니다`;
         if (wentAway && document.visibilityState === 'hidden' && await ensureDesktopNotice()) {
           try {
-            const n = new Notification('북적북적', { body: msg, tag: 'bj-job', icon: 'assets/logo.svg?v=205' });
+            const n = new Notification('북적북적', { body: msg, tag: 'bj-job', icon: 'assets/logo.svg?v=206' });
             n.onclick = () => { window.focus(); n.close(); };
           } catch (_) { UI.toast(msg, 'success'); }
         } else UI.toast(msg, 'success');
@@ -3338,10 +3338,42 @@ const App = (() => {
       const note = p.scope === 'container' ? '<div class="pnote">※ 현재 이 앱 컨테이너 기준입니다. 서버 전체를 보려면 배포 설정 반영이 필요합니다.</div>' : '';
       return `<div class="ss-sec">무엇이 쓰고 있나</div><div class="ss-procs"><div><div class="ss-pt">🔥 CPU 상위</div><ul class="ss-plist">${cpu}</ul></div><div><div class="ss-pt">🧠 메모리 상위</div><ul class="ss-plist">${mem}</ul></div></div>${note}`;
     };
+    // 관리자만: 업로드 현황 — 지금 올라가는 중인 것 + 최근 결과(완료·실패·끊김). 서버 재시작(배포) 이후 것만.
+    const isAdmin = state.user && state.user.role === 'admin';
+    const esc = UI.escapeHtml;
+    const hm = (iso) => { const d = new Date(iso); const p2 = (x) => String(x).padStart(2, '0'); return `${p2(d.getMonth() + 1)}/${p2(d.getDate())} ${p2(d.getHours())}:${p2(d.getMinutes())}:${p2(d.getSeconds())}`; };
+    const secs = (ms) => (ms == null ? '-' : (ms / 1000).toFixed(1) + 's');
+    const speed = (bytes, ms) => (bytes && ms > 0 ? UI.bytes(bytes / (ms / 1000)) + '/s' : '-');
+    const where = (r) => `${esc(r.colo)}${r.colo === 'ICN' ? '' : r.colo === '-' ? '' : ' ⚠️'} · <span class="muted">${esc(r.host)}</span>`;
+    const uploadsHtml = (u) => {
+      if (!u) return '';
+      const act = u.active.length ? u.active.map((a) => {
+        const pct = a.total ? Math.round((a.bytes / a.total) * 100) : 0;
+        return `<div class="ss-up-act"><b>${esc(a.user)}</b> · ${esc(a.stage)} · <span class="num">${UI.bytes(a.bytes)} / ${UI.bytes(a.total)} (${pct}%)</span> · ${secs(a.elapsedMs)} · ${speed(a.bytes, a.elapsedMs)} · ${where(a)}
+          <div class="ss-bar"><span style="width:${pct}%;background:var(--secondary)"></span></div></div>`;
+      }).join('') : '<p class="muted" style="font-size:12px;margin:2px 0 8px">지금 올라가는 중인 업로드는 없습니다.</p>';
+      const badge = (r) => (r.result === 'ok' ? '<span class="ss-ok">✅ 완료</span>' : r.result === 'cut' ? '<span class="ss-cut">✂️ 끊김</span>' : `<span class="ss-fail">⚠️ 실패 ${r.code || ''}</span>`);
+      const rows = u.recent.length ? u.recent.map((r) => {
+        const name = r.files && r.files.length ? esc(r.files[0]) + (r.fileCount > 1 ? ` 외 ${r.fileCount - 1}개` : '')
+          : `<span class="muted">${r.kind === '파일' ? '(이름 받기 전)' : esc(r.kind)}</span>`;
+        const size = r.result === 'cut' ? `${UI.bytes(r.bytes)} / ${UI.bytes(r.total)}` : UI.bytes(r.total);
+        // 걸린 시간: 받기(속도) · 검사 · 전체. 끊긴 건 받은 만큼의 평균 속도.
+        const time = r.result === 'cut'
+          ? `${secs(r.totalMs)} 만에 끊김 <span class="muted">(${speed(r.bytes, r.totalMs)})</span>`
+          : `<b>전체 ${secs(r.totalMs)}</b><div class="muted">받기 ${secs(r.recvMs)} (${speed(r.total, r.recvMs)}) · 검사 ${secs(r.scanMs)}</div>`;
+        return `<tr class="${r.result !== 'ok' ? 'ss-up-bad' : ''}"><td class="num">${hm(r.at)}</td><td>${badge(r)}<div class="ss-up-where">${where(r)}</div></td><td>${esc(r.user)}</td><td class="ss-up-name" title="${esc((r.files || []).join(', '))}">${name}<div class="muted">${size}</div></td><td class="num ss-up-time">${time}</td></tr>`
+          + (r.error ? `<tr class="ss-up-err"><td></td><td colspan="4">${esc(r.error)}</td></tr>` : '');
+      }).join('') : '<tr><td colspan="5" class="muted">아직 기록이 없습니다.</td></tr>';
+      const bad = u.recent.filter((r) => r.result !== 'ok').length;
+      return `<div class="ss-sec">⬆️ 업로드 현황 <span class="muted" style="font-weight:400;font-size:12px">· ${hm(u.since)} 서버 시작 이후 · 최근 ${u.recent.length}건${bad ? ` 중 실패·끊김 <b style="color:var(--danger)">${bad}</b>건` : ''}</span></div>
+        ${act}
+        <div class="ss-up-wrap"><table class="ss-up"><thead><tr><th>시각</th><th>결과 · 거점</th><th>누가</th><th>파일 · 크기</th><th>걸린 시간</th></tr></thead><tbody>${rows}</tbody></table></div>
+        <p class="muted" style="font-size:11px;margin-top:6px">받기가 길면 회선·경로 문제, 검사가 길면 서버 문제입니다. 거점이 ICN(서울)이 아니면 ⚠️ — 해외를 돌아온 접속입니다.</p>`;
+    };
     async function load() {
       if (!document.body.contains(m.el)) { stop(); return; } // 배경클릭·ESC 등으로 닫혔으면 폴링 종료
       try {
-        const s = await API.serverStatus();
+        const [s, up] = await Promise.all([API.serverStatus(), isAdmin ? API.adminUploads(40).catch(() => null) : null]);
         m.q('#ss-time').textContent = '· ' + new Date(s.time).toLocaleTimeString('ko-KR');
         m.q('#ss-body').innerHTML =
           bar('CPU 부하', s.cpu.loadPct, `${s.cpu.loadPct}% · load ${s.cpu.load1.toFixed(2)} / ${s.cpu.cores}코어`) +
@@ -3352,7 +3384,7 @@ const App = (() => {
             <div><span class="muted">서비스 가동</span><b>${dur(s.uptime.process)}</b></div>
             <div><span class="muted">데이터베이스</span><b style="color:${s.db.connected ? 'var(--accent)' : 'var(--danger)'}">${s.db.connected ? '정상' : '끊김'}</b></div>
           </div>` +
-          procHtml(s.procs);
+          procHtml(s.procs) + uploadsHtml(up);
       } catch (e) { m.q('#ss-body').innerHTML = `<p class="muted" style="color:var(--danger)">${UI.escapeHtml(e.message)}</p>`; }
     }
     load();
