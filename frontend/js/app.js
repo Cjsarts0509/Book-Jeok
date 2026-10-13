@@ -2843,7 +2843,7 @@ const App = (() => {
         const msg = `${label} 완료 · ${Math.round(took / 1000)}초 걸렸습니다`;
         if (wentAway && document.visibilityState === 'hidden' && await ensureDesktopNotice()) {
           try {
-            const n = new Notification('북적북적', { body: msg, tag: 'bj-job', icon: 'assets/logo.svg?v=202' });
+            const n = new Notification('북적북적', { body: msg, tag: 'bj-job', icon: 'assets/logo.svg?v=203' });
             n.onclick = () => { window.focus(); n.close(); };
           } catch (_) { UI.toast(msg, 'success'); }
         } else UI.toast(msg, 'success');
@@ -3339,7 +3339,6 @@ const App = (() => {
   }
 
   // ── 재고조사 오차체크(영업점) : 두 엑셀 → 오차 추출 + 서가별 실사수량 병합 표 ──────────
-  const SA_MAX_SHELF = 10;
   // 진행 중 세션 자동 보관(브라우저) — 모바일 재로딩으로 모달이 닫혀도 하던 목록으로 자동 복귀
   const SA_SESSION_KEY = 'bj_sa_session';
   function saSessionSave(patch) {
@@ -3502,7 +3501,6 @@ const App = (() => {
 
     const esc = UI.escapeHtml;
     const base = ['분야', 'ISBN', '도서명', '출판사', '전산재고', '실재고', '누락재고', '예외여부', '스캔재고', '차이'];
-    const shelfHead = Array.from({ length: SA_MAX_SHELF }, (_, i) => `서가${i + 1}`);
     let disc = [];                 // 오차 항목(상세·바코드검색·다운로드 공용)
     let isbnSet = new Set();        // 리스트에 있는 ISBN 집합(빠른 조회)
     let saCurrentFolder = (preload && preload.folder) || state.folder || '/';  // 사진 저장·확인 대상 폴더
@@ -3565,9 +3563,9 @@ const App = (() => {
       arr.sort((a, b) => String(a.maj + a.mid).localeCompare(String(b.maj + b.mid), 'ko', { numeric: true }));
       return arr;
     }
-    // 스캔합계 = 이 ISBN 을 '모든 서가'에서 센 수량의 합. 분석 때 전체 서가로 계산해 둔 값(ssum)을 쓴다
-    //   (표에는 서가를 최대 SA_MAX_SHELF 칸만 싣기 때문). 예전에 저장한 목록엔 없으니 실린 서가로 계산.
-    // 스캔차이 = 스캔합계 − 전산(수불)재고. 원본 '차이'(실재고 − 전산재고)와 같은 방향 — 모자라면 음수.
+    // 스캔합계 = 이 ISBN 을 '모든 서가'에서 센 수량의 합. 분석 때 계산해 둔 값(ssum)을 쓰고,
+    //   예전에 저장한 목록엔 없으니 실린 서가로 계산한다.
+    // 스캔차이 = 스캔합계 − 전산(수불)재고. 원본 '차이'(스캔재고 − 전산재고)와 같은 방향 — 모자라면 음수.
     //   서가가 여러 개여도 수불재고는 한 번만 빼므로, 서가별로 나눠 합쳐도 부풀지 않는다.
     function scanSum(d) {
       if (d.ssum != null && d.ssum !== '') return num(d.ssum);
@@ -4052,12 +4050,14 @@ const App = (() => {
           if (!shelfMap.has(isbn)) shelfMap.set(isbn, new Map());
           const mm = shelfMap.get(isbn); mm.set(shelf, (mm.get(shelf) || 0) + qty);
         }
-        // 서가번호 숫자 정렬 + 최대 10칸
+        // 서가번호 숫자 정렬. 서가 수는 자르지 않는다 —
+        //   예전엔 10곳까지만 실어서, 서가가 더 많은 책(예: 베스트셀러가 매대 수십 곳)은 나머지 서가 수량이
+        //   엑셀에서 통째로 빠져 서가별로 합치면 스캔재고보다 적게 나왔다.
         let matched = 0;
         for (const d of disc) {
           const mm = shelfMap.get(d.isbn);
-          d.shelves = mm ? [...mm.entries()].sort((a, b) => Number(a[0]) - Number(b[0])).slice(0, SA_MAX_SHELF) : [];
-          d.ssum = mm ? [...mm.values()].reduce((a, q) => a + q, 0) : 0;   // 잘라내기 전 '모든 서가' 합계
+          d.shelves = mm ? [...mm.entries()].sort((a, b) => Number(a[0]) - Number(b[0])) : [];
+          d.ssum = mm ? [...mm.values()].reduce((a, q) => a + q, 0) : 0;
           if (d.shelves.length) matched++;
         }
         saAnalyzedYear = Number(yr) || null;
