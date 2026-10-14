@@ -2864,7 +2864,7 @@ const App = (() => {
         const msg = `${label} 완료 · ${Math.round(took / 1000)}초 걸렸습니다`;
         if (wentAway && document.visibilityState === 'hidden' && await ensureDesktopNotice()) {
           try {
-            const n = new Notification('북적북적', { body: msg, tag: 'bj-job', icon: 'assets/logo.svg?v=208' });
+            const n = new Notification('북적북적', { body: msg, tag: 'bj-job', icon: 'assets/logo.svg?v=210' });
             n.onclick = () => { window.focus(); n.close(); };
           } catch (_) { UI.toast(msg, 'success'); }
         } else UI.toast(msg, 'success');
@@ -3447,9 +3447,11 @@ const App = (() => {
     //   '/광화문점/…' · '/2025 광화문 재고조사/…' → 광화문점. 공백과 끝의 '점'은 무시하고 비교한다.
     //   안쪽 폴더부터 보고, 한 폴더에 여러 이름이 걸리면 가장 긴 이름(더 구체적인 것)을 고른다.
     const brCore = (x) => String(x || '').replace(/\s+/g, '').replace(/점$/, '');
+    const stripExt = (n) => String(n || '').replace(/\.[^.]+$/, '');
     function branchOf(f) {
       const names = (state.branches || []).map((b) => ({ name: b.name, c: brCore(b.name) })).filter((b) => b.c.length >= 2);
-      const segs = String(f.folder || '').split('/').filter(Boolean).reverse();
+      // 안쪽 폴더부터 보고, 폴더에 없으면 파일 이름에서도 찾는다('광화문점_결과확인리스트_2026.xlsx')
+      const segs = [...String(f.folder || '').split('/').filter(Boolean).reverse(), stripExt(f.name)];
       for (const seg of segs) {
         const sc = String(seg).replace(/\s+/g, '');
         const hit = names.filter((b) => sc.includes(b.c)).sort((a, b) => b.c.length - a.c.length)[0];
@@ -3563,6 +3565,11 @@ const App = (() => {
     let saSort = { col: null, dir: 1 };  // 항목 정렬 열(null=원래 순서)·방향. 서가는 '항목 안에서' 중분류로 정렬.
     let saFilterFields = new Set();  // 분야 필터(비어있으면 전체, 아니면 선택된 분야만)
     let saFilterPhoto = '';         // 사진 필터('' 전체 · 'has' 있음 · 'no' 없음)
+    // 예외(결과확인리스트 예외여부 Y) 필터: '' 예외 빼기(기본) · 'all' 예외 포함 · 'only' 예외만.
+    //  예전엔 분석에서 아예 버렸는데, 볼지 말지를 고를 수 있게 목록에는 남기고 여기서 거른다.
+    let saFilterExc = '';
+    const isExc = (d) => String(d.exc == null ? '' : d.exc).trim().toUpperCase() === 'Y';
+    const excOk = (d) => (saFilterExc === 'all' ? true : saFilterExc === 'only' ? isExc(d) : !isExc(d));
     // 표·엑셀 열(12열). 실재고·누락재고·예외여부·스캔재고·차이는 쓰지 않는다
     //   (예외여부 Y 는 분석에서 이미 빠지고, 원본 차이 = 스캔재고 − 전산재고 = 스캔차이라 겹친다).
     //   shelf=true 는 서가 분해값(수불처코드·대/중/소분류·스캔수량)으로 disc 항목이 아닌 '행'에서 취함.
@@ -3631,6 +3638,7 @@ const App = (() => {
       let idx = disc.map((_, i) => i).filter((i) => {
         const d = disc[i];
         if (saFilterFields.size && !saFilterFields.has(String(d.field == null ? '' : d.field))) return false;
+        if (!excOk(d)) return false;
         if (saFilterPhoto === 'has' && !saPhotoStems.has(d.isbn)) return false;
         if (saFilterPhoto === 'no' && saPhotoStems.has(d.isbn)) return false;
         return true;
@@ -3659,7 +3667,7 @@ const App = (() => {
         const b4 = [d.field, d.isbn, d.name, d.pub]
           .map((c, idx) => `<td class="${idx === 1 ? 'sa-isbn' : ''}">${esc(String(c == null ? '' : c))}</td>`).join('');
         const shelfTd = (h) => `<td class="sa-shelf">${h}</td>`;
-        const shc = [stack(sh.map((x) => x.code)), stack(sh.map((x) => x.maj)), stack(sh.map((x) => x.mid)), stack(sh.map((x) => x.min))].map(shelfTd).join('');
+        const shc = [stack(sh.map((x) => x.code)), stack(sh.map((x) => majLabel(x.maj))), stack(sh.map((x) => x.mid)), stack(sh.map((x) => x.min))].map(shelfTd).join('');
         const sd = scanDiff(d);
         const tail = `<td>${esc(String(d.sys == null ? '' : d.sys))}</td>${shelfTd(stack(sh.map((x) => x.qty)))}<td>${scanSum(d)}</td><td class="${sd ? 'sa-sdiff' : ''}">${sd}</td>`;
         return `<tr data-ri="${ri}">${b4}${shc}${tail}</tr>`;
@@ -3876,15 +3884,17 @@ const App = (() => {
     function renderResult() {
       if (!disc.length) { m.q('#sa-result').innerHTML = '<p class="muted" style="padding:14px">오차 항목이 없습니다.</p>'; return; }
       // 필터 상태 초기화(새 목록/이어서 보기 시)
-      saSort = { col: null, dir: 1 }; saFilterFields = new Set(); saFilterPhoto = '';
+      saSort = { col: null, dir: 1 }; saFilterFields = new Set(); saFilterPhoto = ''; saFilterExc = '';
+      const nExc = disc.filter(isExc).length;
       const matched = disc.filter((d) => d.shelves && d.shelves.length).length;
       const fields = [...new Set(disc.map((d) => String(d.field == null ? '' : d.field)).filter((x) => x !== ''))].sort((a, b) => a.localeCompare(b, 'ko'));
       m.q('#sa-result').innerHTML = `
         <div class="sa-resulthead">
-          <div class="sa-summary">오차 항목 <b>${disc.length.toLocaleString()}건</b> · 서가 매칭 <b>${matched.toLocaleString()}건</b><span id="sa-photocount" class="muted" style="font-size:12px"></span><span id="sa-shown" class="muted" style="font-size:12px"></span> <span class="muted" style="font-size:12px">· 열 제목으로 정렬 · 행을 누르면 상세</span></div>
+          <div class="sa-summary">오차 항목 <b>${(disc.length - nExc).toLocaleString()}건</b>${nExc ? ` <span class="muted" style="font-size:12px">(+ 예외 ${nExc}건)</span>` : ''} · 서가 매칭 <b>${matched.toLocaleString()}건</b><span id="sa-photocount" class="muted" style="font-size:12px"></span><span id="sa-shown" class="muted" style="font-size:12px"></span> <span class="muted" style="font-size:12px">· 열 제목으로 정렬 · 행을 누르면 상세</span></div>
           <label class="sa-foldersel">📁 <select id="sa-folder">${folderOptions(saCurrentFolder)}</select></label>
           <button type="button" class="sa-fieldbtn" id="sa-ffield-btn">분야 <span id="sa-ffield-lbl">전체</span> <span class="sa-caret">▾</span></button>
           <label class="sa-foldersel">사진 <select id="sa-fphoto"><option value="">전체</option><option value="has">있음</option><option value="no">없음</option></select></label>
+          ${nExc ? `<label class="sa-foldersel" title="결과확인리스트의 예외여부 Y — 엑셀·HTML 다운로드도 이 선택을 따릅니다">예외 <select id="sa-fexc"><option value="">빼기 (${nExc}건)</option><option value="all">포함</option><option value="only">예외만</option></select></label>` : ''}
           ${window.ISBN ? '<button class="btn btn-secondary btn-sm" id="sa-scan">📷 바코드로 찾기</button>' : ''}
           <button class="btn btn-secondary btn-sm" id="sa-save">💾 저장</button>
           <button class="btn btn-primary btn-sm" id="sa-dl">⬇ 엑셀 다운로드</button>
@@ -3899,6 +3909,7 @@ const App = (() => {
       m.q('#sa-save')?.addEventListener('click', persist);
       m.q('#sa-folder')?.addEventListener('change', (e) => setFolder(e.target.value));
       m.q('#sa-fphoto')?.addEventListener('change', (e) => { saFilterPhoto = e.target.value; renderTable(); });
+      m.q('#sa-fexc')?.addEventListener('change', (e) => { saFilterExc = e.target.value; renderTable(); });
       // 정렬 헤더·행 클릭을 wrap 에 위임 1회 등록(renderTable 마다 1000+ 개별 바인딩 안 함)
       m.q('#sa-tablewrap')?.addEventListener('click', (e) => {
         const th = e.target.closest('.sa-sortable');
@@ -3944,6 +3955,12 @@ const App = (() => {
 
     // 서가번호(11자리) → [수불처코드(3), 대분류(2), 중분류(4), 소분류(2)]. 형식이 다르면 통째로 수불처코드 칸에.
     //   예) 001 12 3456 78  →  수불처 001 · 대분류 12 · 중분류 3456 · 소분류 78
+    // 대분류 표기: 01 → 01(A), 04 → 04(D) … 26 → 26(Z). 숫자가 아니거나 범위 밖이면 그대로.
+    function majLabel(m) {
+      const s = String(m == null ? '' : m);
+      const n = /^\d{1,2}$/.test(s) ? parseInt(s, 10) : 0;
+      return n >= 1 && n <= 26 ? `${s}(${String.fromCharCode(64 + n)})` : s;
+    }
     function splitShelf(num) {
       const s = String(num == null ? '' : num).trim();
       if (s.length >= 11) return [s.slice(0, 3), s.slice(3, 5), s.slice(5, 9), s.slice(9)];
@@ -3968,10 +3985,15 @@ const App = (() => {
       const widths = (arr) => arr.map((wch) => ({ wch }));
       const filterAll = (ws, nRows, nCols) => { ws['!autofilter'] = { ref: XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: nRows, c: nCols - 1 } }) }; };
 
-      // ① 서가별(병합) — 분야 ISBN 도서명 출판사 | 수불처코드 대 중 소 | 전산재고 | 스캔수량 | 스캔합계 스캔차이
-      const MERGE_COLS = [0, 1, 2, 3, 8, 10, 11];
+      // 내보낼 항목: 화면의 '예외' 선택을 따른다(기본 예외 빼기). 예외를 넣으면 끝에 '예외' 칸이 붙는다.
+      const list = disc.filter(excOk);
+      const withExc = list.some(isExc);
+      const H1 = withExc ? [...SA_HEADERS, '예외'] : SA_HEADERS;
+
+      // ① 서가별(병합) — 분야 ISBN 도서명 출판사 | 수불처코드 대 중 소 | 전산재고 | 스캔수량 | 스캔합계 스캔차이 (| 예외)
+      const MERGE_COLS = withExc ? [0, 1, 2, 3, 8, 10, 11, 12] : [0, 1, 2, 3, 8, 10, 11];
       const rows = []; const merges = [];
-      for (const d of disc) {
+      for (const d of list) {
         const sh = itemShelves(d);                        // 항목 내 서가 위치 순 정렬
         const shelves = sh.length ? sh : [{ code: '', maj: '', mid: '', min: '', qty: '' }];
         const top = rows.length + 1;                      // 머리글 다음 줄부터(0=머리글)
@@ -3983,27 +4005,29 @@ const App = (() => {
         const asStr = (v) => (v === '' || v == null ? '' : String(v));
         shelves.forEach((s, k) => {
           const first = k === 0;
-          rows.push([
+          const row = [
             d.field, d.isbn, d.name, d.pub,
-            s.code, s.maj, s.mid, s.min,
+            s.code, majLabel(s.maj), s.mid, s.min,
             first ? sys : asStr(sys), s.qty,
             first ? ss : asStr(ss), first ? sd : asStr(sd),
-          ]);
+          ];
+          if (withExc) row.push(isExc(d) ? 'Y' : '');
+          rows.push(row);
         });
         if (shelves.length > 1) for (const c of MERGE_COLS) merges.push({ s: { r: top, c }, e: { r: top + shelves.length - 1, c } });
       }
-      const ws = XLSX.utils.aoa_to_sheet([SA_HEADERS, ...rows]);
+      const ws = XLSX.utils.aoa_to_sheet([H1, ...rows]);
       asText(ws, rows.length, [1, 4, 5, 6, 7]);   // ISBN, 수불처코드, 대분류, 중분류, 소분류
       ws['!merges'] = merges;
-      ws['!cols'] = widths([12, 15, 34, 14, 10, 7, 7, 7, 8, 8, 8, 8]);
-      filterAll(ws, rows.length, SA_HEADERS.length);
+      ws['!cols'] = widths([12, 15, 34, 14, 10, 8, 7, 7, 8, 8, 8, 8, 6]);
+      filterAll(ws, rows.length, H1.length);
 
       // ② 항목별(정렬용)
-      const h2 = ['분야', 'ISBN', '도서명', '출판사', '전산재고', '스캔합계', '스캔차이', '서가수', '서가 (스캔수량)'];
-      const rows2 = disc.map((d) => {
+      const h2 = ['분야', 'ISBN', '도서명', '출판사', '전산재고', '스캔합계', '스캔차이', '서가수', '서가 (스캔수량)', ...(withExc ? ['예외'] : [])];
+      const rows2 = list.map((d) => {
         const sh = itemShelves(d);
-        const list = sh.map((s) => (s.maj ? `${s.code}-${s.maj}-${s.mid}-${s.min}` : s.code) + ` ×${s.qty}`).join(' / ');
-        return [d.field, d.isbn, d.name, d.pub, d.sys, scanSum(d), scanDiff(d), sh.length, list];
+        const where = sh.map((s) => (s.maj ? `${s.code}-${majLabel(s.maj)}-${s.mid}-${s.min}` : s.code) + ` ×${s.qty}`).join(' / ');
+        return [d.field, d.isbn, d.name, d.pub, d.sys, scanSum(d), scanDiff(d), sh.length, where, ...(withExc ? [isExc(d) ? 'Y' : ''] : [])];
       });
       const ws2 = XLSX.utils.aoa_to_sheet([h2, ...rows2]);
       asText(ws2, rows2.length, [1]);
@@ -4015,11 +4039,14 @@ const App = (() => {
       XLSX.utils.book_append_sheet(wb, ws2, '항목별(정렬용)');
       return wb;
     }
-    // 저장 이름: <영업점명>_재고조사오차_<년월일>. 영업점명은 분석에 쓴 파일의 폴더(영업점) →
-    //  전달받은 파일에 적힌 영업점 → 보고 있는 계정 이름 순으로 찾는다. 못 찾으면 영업점명 없이.
+    // 저장 이름: <영업점명>_재고조사오차_<년월일>. '영업점'만 쓴다 — 사용자(계정) 이름은 쓰지 않는다.
+    //  분석에 쓴 파일의 영업점(폴더·파일 이름) → 전달받은 파일에 적힌 영업점 →
+    //  보고 있는 계정이 영업점 계정이면 그 이름 → 내가 영업점 계정이면 내 이름. 못 찾으면 영업점명 없이.
     function saBranchLabel() {
-      return saAnalyzedBranch || (preload && preload.branchName) || state.ownerName
-        || (state.user && state.user.role === 'branch' ? state.user.displayName : '') || '';
+      const viewing = state.ownerId ? (state.accounts || []).find((a) => String(a.id) === String(state.ownerId)) : null;
+      return saAnalyzedBranch || (preload && preload.branchName)
+        || (viewing && viewing.role === 'branch' ? viewing.displayName : '')
+        || (!state.ownerId && state.user && state.user.role === 'branch' ? state.user.displayName : '') || '';
     }
     function saFileBase() {
       const dt = new Date(); const p2 = (x) => String(x).padStart(2, '0');
@@ -4037,20 +4064,25 @@ const App = (() => {
     async function downloadHtml() {
       try {
         if (!window.SAReport) {
-          await new Promise((res, rej) => { const sc = document.createElement('script'); sc.src = 'js/sa-report.js?v=208'; sc.onload = res; sc.onerror = () => rej(new Error('보고서 모듈을 불러오지 못했습니다.')); document.head.appendChild(sc); });
+          await new Promise((res, rej) => { const sc = document.createElement('script'); sc.src = 'js/sa-report.js?v=210'; sc.onload = res; sc.onerror = () => rej(new Error('보고서 모듈을 불러오지 못했습니다.')); document.head.appendChild(sc); });
         }
         const br = saBranchLabel();
         const dt = new Date(); const p2 = (x) => String(x).padStart(2, '0');
+        // 예외 항목도 넣고(e) 보고서의 '예외' 필터로 고른다(기본 빼기)
         const items = disc.map((d) => ({
           f: String(d.field == null ? '' : d.field), i: String(d.isbn), n: d.name == null ? '' : String(d.name), p: d.pub == null ? '' : String(d.pub),
-          s: num(d.sys), ss: scanSum(d), sd: scanDiff(d),
+          s: num(d.sys), ss: scanSum(d), sd: scanDiff(d), e: isExc(d),
           sh: itemShelves(d).map((x) => [x.code, x.maj, x.mid, x.min, num(x.qty)]),
         }));
+        // 바코드 인식 모듈을 보고서 안에 넣는다(인터넷 없이 📷 바코드로 찾기·사진 속 바코드 인식). 못 가져오면 사진만.
+        const grab = (u) => fetch(u).then((r) => (r.ok ? r.text() : '')).catch(() => '');
+        const [zxing, isbn] = await Promise.all([grab('vendor/zxing.min.js?v=210'), grab('js/isbn.js?v=210')]);
         const html = window.SAReport.build({
           title: `${br ? br + ' ' : ''}재고조사 오차`,
           source: [saAnalyzedYear ? `${saAnalyzedYear}년` : '', br].filter(Boolean).join(' · '),
           generatedAt: `${dt.getFullYear()}-${p2(dt.getMonth() + 1)}-${p2(dt.getDate())} ${p2(dt.getHours())}:${p2(dt.getMinutes())}`,
-        }, items);
+          fileBase: saFileBase(),
+        }, items, { zxing, isbn });
         const url = URL.createObjectURL(new Blob([html], { type: 'text/html;charset=utf-8' }));
         const a = document.createElement('a'); a.href = url; a.download = saFileBase() + '.html';
         document.body.appendChild(a); a.click(); a.remove();
@@ -4152,12 +4184,12 @@ const App = (() => {
         const r2 = readSheet(XLSX, b2);
         status('오차 계산 중…'); await new Promise((r) => setTimeout(r));
 
-        // ① 오차 추출: 예외여부 Y는 제외 + (차이≠0 '또는' 실재고-스캔재고≠0)이면 포함
+        // ① 오차 추출: (차이≠0 '또는' 실재고-스캔재고≠0)이면 포함. 예외여부 Y 는 표시만(필터로 선택)
         // 칼럼: ISBN0 도서명1 분야2 출판사3 전산재고4 실재고5 누락재고6 예외여부7 스캔재고8 차이9
         disc = []; isbnSet = new Set();
         for (let i = 1; i < r1.length; i++) {
           const r = r1[i]; if (!r || r[0] == null || r[0] === '') continue;
-          if (String(r[7] || '').trim().toUpperCase() === 'Y') continue;           // 예외여부 Y 제외
+          // 예외여부 Y 도 목록에는 남긴다(exc='Y') — 화면·다운로드의 '예외' 필터로 빼거나 넣는다(기본: 빼기)
           if (num(r[9]) === 0 && num(r[5]) - num(r[8]) === 0) continue;            // 둘 다 0이면 제외(하나라도 ≠0이면 포함)
           const isbn = String(r[0]).trim();
           disc.push({ isbn, name: r[1], field: r[2], pub: r[3], sys: r[4], real: r[5], miss: r[6], exc: r[7], scan: r[8], diff: r[9] });
@@ -4184,7 +4216,8 @@ const App = (() => {
           if (d.shelves.length) matched++;
         }
         saAnalyzedYear = Number(yr) || null;
-        saAnalyzedBranch = m.q('#sa-sbranch').value || '';
+        const fb = (id) => ((saXlsFiles.find((f) => String(f.id) === String(id)) || {}).branch || '');
+        saAnalyzedBranch = m.q('#sa-sbranch').value || fb(id1) || fb(id2) || '';
         status('');
         renderResult();
         preselectDeliver();

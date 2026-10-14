@@ -1,79 +1,274 @@
 /* 재고조사 오차 → 혼자 열리는 HTML 보고서(파일 하나, 인터넷 없이도 동작).
-   화면 표와 같은 열·같은 필터(분야)에 검색·스캔차이·대분류 필터, 열 제목 정렬, 합계를 더했다.
-   ISBN 하나가 서가 여러 곳이면 항목 칸은 행을 합쳐(rowspan) 한 번만 보이고, 필터는 '항목 단위'로 걸린다 —
-   엑셀처럼 합친 칸의 첫 줄만 숨고 나머지 줄이 남는 일이 없다.
+   - 화면 표와 같은 열. ISBN 하나가 서가 여러 곳이면 항목 칸은 행을 합쳐(rowspan) 한 번만 보인다.
+   - 필터: 검색 · 분야 · 스캔차이 · 대분류 · 사진 · 예외. 필터는 '항목 단위'라 서가 여러 줄 항목이 통째로 보이고 숨는다.
+   - 머리글 줄 틀 고정, 열 제목 정렬, 필터 결과 합계, 인쇄.
+   - 앱의 재고조사와 같은 흐름: 📷 바코드로 찾기 → 항목 상세 → 📷 사진 촬영(사진 속 다른 바코드도 함께) → 비고 → 저장.
+     바코드 인식 모듈(isbn.js + ZXing)을 파일 안에 넣어 인터넷 없이 인식한다.
+   - 사진은 이 HTML 파일 안에 저장된다: '💾 사진 포함 저장'을 누르면 사진이 들어간 새 HTML 파일을 내려받는다.
+     그 사이에는 브라우저 임시 저장(되는 환경에서)으로 새로고침해도 남는다.
    내려받을 때만 불러온다(app.js 의 downloadHtml). */
 (function () {
   'use strict';
 
   const CSS = `
 :root{--bg:#f6f7f9;--surface:#fff;--text:#1f2328;--muted:#6b7280;--border:#e5e7eb;--head:#f1f3f5;--accent:#f5b400;--accent-soft:#fff6d6;
-  --neg:#d1242f;--neg-soft:#fff1f1;--pos:#0a7c42;--pos-soft:#ecfdf3;--chip:#eef2ff;--chip-text:#3b4cca;--group:#fafbfc}
+  --neg:#d1242f;--neg-soft:#fff1f1;--pos:#0a7c42;--pos-soft:#ecfdf3;--chip:#eef2ff;--chip-text:#3b4cca;--group:#fafbfc;--photo:#eaf7ff;--exc:#fff4e5;--shadow:0 12px 40px rgba(0,0,0,.18)}
 @media (prefers-color-scheme:dark){:root{--bg:#0f1115;--surface:#171a21;--text:#e6e8eb;--muted:#9aa3ae;--border:#2a2f3a;--head:#1d212a;--accent:#f5b400;--accent-soft:#3a2f0a;
-  --neg:#ff6b6b;--neg-soft:#3a1517;--pos:#4ade80;--pos-soft:#0f2a1a;--chip:#232a45;--chip-text:#a5b4fc;--group:#1a1e26}}
+  --neg:#ff6b6b;--neg-soft:#3a1517;--pos:#4ade80;--pos-soft:#0f2a1a;--chip:#232a45;--chip-text:#a5b4fc;--group:#1a1e26;--photo:#10283a;--exc:#33270f;--shadow:0 12px 40px rgba(0,0,0,.6)}}
 *{box-sizing:border-box}html,body{margin:0}
 body{background:var(--bg);color:var(--text);font:14px/1.5 "Pretendard","Apple SD Gothic Neo","Malgun Gothic",system-ui,sans-serif;-webkit-font-smoothing:antialiased}
-.wrap{max-width:1600px;margin:0 auto;padding:24px 20px 60px}
+.wrap{max-width:1680px;margin:0 auto;padding:20px 20px 40px}
+header{display:flex;flex-wrap:wrap;align-items:flex-end;gap:10px}header .ttl{flex:1 1 auto}
 header h1{margin:0;font-size:22px;letter-spacing:-.3px}header .sub{color:var(--muted);font-size:13px;margin-top:4px}
-.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin:18px 0}
-.card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:12px 14px}
-.card .k{font-size:12px;color:var(--muted)}.card .v{font-size:22px;font-weight:800;margin-top:2px;font-variant-numeric:tabular-nums}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin:16px 0}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:11px 14px}
+.card .k{font-size:12px;color:var(--muted)}.card .v{font-size:21px;font-weight:800;margin-top:2px;font-variant-numeric:tabular-nums}
 .card .v small{font-size:12px;font-weight:500;color:var(--muted)}.card.neg .v{color:var(--neg)}.card.pos .v{color:var(--pos)}
-.bar{position:sticky;top:0;z-index:5;display:flex;flex-wrap:wrap;gap:8px;align-items:center;background:var(--bg);padding:10px 0;border-bottom:1px solid var(--border)}
-.bar input[type=search],.bar select,.btn{height:34px;border:1px solid var(--border);background:var(--surface);color:var(--text);border-radius:8px;padding:0 10px;font:inherit;font-size:13px}
-.bar input[type=search]{min-width:240px;flex:1 1 240px;max-width:380px}
-.btn{cursor:pointer;display:inline-flex;align-items:center;gap:6px}.btn:hover{border-color:var(--accent)}
-.btn.on{background:var(--accent-soft);border-color:var(--accent);font-weight:700}
-.dd{position:relative}.dd-panel{display:none;position:absolute;top:38px;left:0;z-index:20;background:var(--surface);border:1px solid var(--border);border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,.15);padding:8px;min-width:220px;max-height:60vh;overflow:auto}
+.bar{position:sticky;top:0;z-index:30;display:flex;flex-wrap:wrap;gap:8px;align-items:center;background:var(--bg);padding:10px 0}
+.bar input[type=search],.bar select,.btn{height:36px;border:1px solid var(--border);background:var(--surface);color:var(--text);border-radius:9px;padding:0 11px;font:inherit;font-size:13px}
+.bar input[type=search]{min-width:200px;flex:1 1 220px;max-width:360px}
+.btn{cursor:pointer;display:inline-flex;align-items:center;gap:6px;white-space:nowrap}.btn:hover{border-color:var(--accent)}.btn:disabled{opacity:.5;cursor:default}
+.btn.on,select.on{background:var(--accent-soft);border-color:var(--accent);font-weight:700}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#1f2328;font-weight:800}
+.btn.save{font-weight:700}.btn.save.dirty{background:#1f6feb;border-color:#1f6feb;color:#fff}
+.dd{position:relative}.dd-panel{display:none;position:absolute;top:40px;left:0;z-index:40;background:var(--surface);border:1px solid var(--border);border-radius:10px;box-shadow:var(--shadow);padding:8px;min-width:220px;max-height:60vh;overflow:auto}
 .dd.open .dd-panel{display:block}.dd-panel label{display:flex;gap:8px;align-items:center;padding:5px 6px;border-radius:6px;cursor:pointer;font-size:13px;white-space:nowrap}
 .dd-panel label:hover{background:var(--head)}.dd-panel .dd-act{display:flex;gap:6px;padding:4px 4px 8px;border-bottom:1px solid var(--border);margin-bottom:4px}
 .dd-panel .dd-act button{flex:1;height:28px;border:1px solid var(--border);background:var(--surface);color:var(--text);border-radius:6px;cursor:pointer;font-size:12px}
 .count{color:var(--muted);font-size:13px;margin-left:auto}
-.tbl-wrap{background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:auto;margin-top:12px}
-table{border-collapse:collapse;width:100%;font-size:13px}
-thead th{position:sticky;top:0;background:var(--head);text-align:left;font-weight:700;padding:9px 10px;border-bottom:1px solid var(--border);white-space:nowrap;cursor:pointer;user-select:none;z-index:2}
+/* 표: 머리글 줄 틀 고정 — 표 칸이 화면 높이만큼만 차지하고 그 안에서 스크롤, 머리글·합계 줄은 위·아래에 붙는다 */
+.tbl-wrap{background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:auto;max-height:calc(100vh - var(--barh,60px) - 12px)}
+@supports (height:100dvh){.tbl-wrap{max-height:calc(100dvh - var(--barh,60px) - 12px)}}
+table{border-collapse:separate;border-spacing:0;width:100%;font-size:13px}
+thead th{position:sticky;top:0;background:var(--head);text-align:left;font-weight:700;padding:9px 10px;border-bottom:1px solid var(--border);white-space:nowrap;cursor:pointer;user-select:none;z-index:3}
 thead th.num{text-align:right}thead th:hover{color:var(--chip-text)}thead th .ar{font-size:10px;margin-left:3px;color:var(--chip-text)}
 td{padding:7px 10px;border-bottom:1px solid var(--border);vertical-align:top;white-space:nowrap}
-td.num{text-align:right;font-variant-numeric:tabular-nums}td.name{white-space:normal;min-width:220px;font-weight:600}
+td.num{text-align:right;font-variant-numeric:tabular-nums}td.name{white-space:normal;min-width:200px;font-weight:600}
 td.code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;color:var(--muted)}
 td.isbn{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-weight:700}
-tbody.g:nth-of-type(even) td{background:var(--group)}tbody.g:hover td{background:var(--accent-soft)}
+tbody.g{cursor:pointer}tbody.g:nth-of-type(even) td{background:var(--group)}tbody.g.ph td{background:var(--photo)}tbody.g:hover td{background:var(--accent-soft)}
 td.diff{font-weight:800}td.diff.neg{color:var(--neg);background:var(--neg-soft)!important}td.diff.pos{color:var(--pos);background:var(--pos-soft)!important}td.diff.zero{color:var(--muted)}
 .chip{display:inline-block;padding:1px 8px;border-radius:999px;background:var(--chip);color:var(--chip-text);font-size:12px;font-weight:600}
-tfoot td{position:sticky;bottom:0;background:var(--head);font-weight:800;border-top:2px solid var(--border)}
+.tag{display:inline-block;margin-left:6px;padding:0 6px;border-radius:6px;font-size:11px;font-weight:700;vertical-align:1px}
+.tag.ph{background:#1f6feb;color:#fff}.tag.ex{background:var(--exc);color:#b45309;border:1px solid #f0bc3c}
+tfoot td{position:sticky;bottom:0;background:var(--head);font-weight:800;border-top:2px solid var(--border);z-index:2}
 .empty{padding:40px;text-align:center;color:var(--muted)}
 .hint{color:var(--muted);font-size:12px;margin-top:10px}
-@media print{.bar,.hint,.noprint{display:none!important}body{background:#fff}.wrap{max-width:none;padding:0}.tbl-wrap{border:none;overflow:visible}thead th{position:static}tfoot td{position:static}
+/* 상세 창 */
+.mbg{position:fixed;inset:0;background:rgba(15,17,21,.55);z-index:100;display:flex;align-items:flex-start;justify-content:center;padding:4vh 12px;overflow:auto}
+.modal{background:var(--surface);color:var(--text);border-radius:16px;box-shadow:var(--shadow);width:min(760px,100%);padding:18px 18px 14px;position:relative}
+.modal h3{margin:0 0 12px;font-size:17px}.modal .x{position:absolute;top:10px;right:10px;width:34px;height:34px;border-radius:50%;border:1px solid var(--border);background:var(--surface);color:var(--text);cursor:pointer;font-size:16px}
+.d-top{display:flex;gap:14px}.d-cover{width:110px;min-width:110px;height:150px;border-radius:10px;background:var(--head);display:flex;align-items:center;justify-content:center;overflow:hidden;color:var(--muted);font-size:12px;position:relative;cursor:pointer}
+.d-cover img{width:100%;height:100%;object-fit:cover}.d-cover .more{position:absolute;right:4px;bottom:4px;background:rgba(0,0,0,.6);color:#fff;border-radius:6px;font-size:10px;padding:1px 5px}
+.d-meta{flex:1;min-width:0}.d-title{font-size:16px;font-weight:800;line-height:1.35}.d-sub{color:var(--muted);font-size:13px;margin-top:2px}.d-isbn{font-family:ui-monospace,Menlo,monospace;font-size:13px;margin-top:4px}
+.d-stock{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}.d-stock span{flex:1;min-width:76px;text-align:center;padding:8px 6px;background:var(--bg);border:1px solid var(--border);border-radius:10px;font-size:12px;color:var(--muted)}
+.d-stock b{display:block;font-size:18px;color:var(--text);margin-top:2px}.d-stock .neg b{color:var(--neg)}.d-stock .pos b{color:var(--pos)}
+.d-lbl{font-size:13px;font-weight:700;margin:14px 0 6px}.d-chips{display:flex;gap:6px;flex-wrap:wrap}
+.d-chip{font-family:ui-monospace,Menlo,monospace;font-size:12.5px;padding:4px 10px;background:var(--bg);border:1px solid var(--border);border-radius:999px}.d-chip b{color:var(--chip-text)}.d-chip.cur{border-color:var(--accent);background:var(--accent-soft)}
+.d-photos{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:8px}
+.d-photo{position:relative;border:1px solid var(--border);border-radius:10px;overflow:hidden;background:var(--bg)}
+.d-photo img{width:100%;height:120px;object-fit:cover;display:block;cursor:zoom-in}.d-photo .meta{font-size:11px;color:var(--muted);padding:4px 6px;line-height:1.35}
+.d-photo .del{position:absolute;top:4px;right:4px;width:26px;height:26px;border-radius:50%;border:none;background:rgba(0,0,0,.6);color:#fff;cursor:pointer}
+.stage{display:flex;gap:12px;flex-wrap:wrap;margin-top:12px;padding:12px;border:2px dashed var(--accent);border-radius:12px;background:var(--accent-soft)}
+.stage img{width:180px;max-width:100%;border-radius:8px}.stage .sb{flex:1;min-width:200px;display:flex;flex-direction:column;gap:8px}
+.stage input{height:36px;border:1px solid var(--border);border-radius:8px;padding:0 10px;background:var(--surface);color:var(--text);font:inherit}
+.acts{display:flex;gap:8px;align-items:center;margin-top:14px}.acts .sp{flex:1}
+.toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:#1f2328;color:#fff;padding:10px 16px;border-radius:10px;z-index:200;font-size:13px;box-shadow:var(--shadow);max-width:90vw}
+.toast.err{background:#d1242f}.toast.ok{background:#0a7c42}
+.zoom{position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:150;display:flex;align-items:center;justify-content:center;cursor:zoom-out}.zoom img{max-width:96vw;max-height:92vh;border-radius:8px}
+.banner{margin:10px 0 0;padding:10px 12px;border-radius:10px;background:var(--exc);border:1px solid #f0bc3c;font-size:13px}
+@media (max-width:700px){.bar{position:static}.wrap{padding:12px 10px 30px}header h1{font-size:18px}.card .v{font-size:17px}.bar input[type=search]{max-width:none}.count{width:100%;margin-left:0}
+  .d-top{flex-direction:column}.d-cover{width:100%;height:220px}}
+@media print{.bar,.hint,.noprint,.banner{display:none!important}body{background:#fff}.wrap{max-width:none;padding:0}.tbl-wrap{border:none;overflow:visible;max-height:none}thead th,tfoot td{position:static}
   td,th{padding:4px 6px;font-size:11px}tbody.g{break-inside:avoid}.card{padding:6px 10px}.card .v{font-size:16px}}
 `;
 
   // 보고서 페이지 안에서 돌아가는 코드. 문자열로 직렬화해 넣으므로 바깥 변수를 쓰면 안 된다.
   function pageMain() {
+    // 지금 이 순간의 문서 = 아직 아무것도 그리지 않은 원본. '사진 포함 저장' 때 사진 칸만 바꿔 끼워 새 파일로 만든다.
+    const PRISTINE = '<!doctype html>\n' + document.documentElement.outerHTML;
     const D = JSON.parse(document.getElementById('sa-data').textContent);
-    const items = D.items;
-    const $ = (s) => document.querySelector(s);
+    const items = D.items, META = D.meta || {};
+    let PH = JSON.parse(document.getElementById('sa-photos').textContent || '{}');
+    if (!PH.photos) PH = { photos: {}, updatedAt: 0 };
+    const $ = (s, r) => (r || document).querySelector(s);
     const esc = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
     const fmt = (n) => Number(n || 0).toLocaleString('ko-KR');
     const sgn = (n) => (n > 0 ? '+' + fmt(n) : fmt(n));
-    const st = { q: '', fields: new Set(), diff: '', maj: '', sort: { k: null, dir: 1 } };
+    const majL = (m) => { const s = String(m == null ? '' : m); const n = /^\d{1,2}$/.test(s) ? parseInt(s, 10) : 0; return n >= 1 && n <= 26 ? `${s}(${String.fromCharCode(64 + n)})` : s; };
+    const byIsbn = new Map(items.map((x) => [x.i, x]));
+    const st = { q: '', fields: new Set(), diff: '', maj: '', photo: '', exc: '', sort: { k: null, dir: 1 } };
     const fields = [...new Set(items.map((x) => x.f).filter((x) => x !== ''))].sort((a, b) => a.localeCompare(b, 'ko'));
     const majs = [...new Set(items.flatMap((x) => x.sh.map((s) => s[1])).filter(Boolean))].sort();
-    const loc = (x) => (x.sh[0] ? x.sh[0].slice(0, 4).join('') : '￿');
+    const nExc = items.filter((x) => x.e).length;
+    const LAST = String.fromCharCode(65535);
+    const loc = (x) => (x.sh[0] ? x.sh[0].slice(0, 4).join('') : LAST);
+    let dirty = false;
 
-    // 필터 막대 채우기
+    // ── 사진 보관 ─────────────────────────────
+    const photosOf = (isbn) => Object.entries(PH.photos).filter(([, p]) => p.isbns.includes(isbn)).map(([id, p]) => ({ id, ...p })).sort((a, b) => a.at - b.at);
+    const photoCount = (isbn) => { let n = 0; for (const p of Object.values(PH.photos)) if (p.isbns.includes(isbn)) n++; return n; };
+    const nPhotos = () => Object.keys(PH.photos).length;
+    // 브라우저 임시 저장(IndexedDB). 파일로 연 HTML 은 브라우저에 따라 막혀 있을 수 있다 → 그땐 조용히 포기.
+    const IDB = { db: null, ok: false };
+    function idbOpen() {
+      return new Promise((res) => {
+        try {
+          const r = indexedDB.open('bookjeok-sa-report', 1);
+          r.onupgradeneeded = () => r.result.createObjectStore('photos');
+          r.onsuccess = () => { IDB.db = r.result; IDB.ok = true; res(true); };
+          r.onerror = () => res(false);
+        } catch (_) { res(false); }
+      });
+    }
+    function idbGet(key) { return new Promise((res) => { try { const g = IDB.db.transaction('photos').objectStore('photos').get(key); g.onsuccess = () => res(g.result || null); g.onerror = () => res(null); } catch (_) { res(null); } }); }
+    function idbPut(key, val) { try { IDB.db.transaction('photos', 'readwrite').objectStore('photos').put(val, key); } catch (_) {} }
+    function changed() {
+      PH.updatedAt = Date.now(); dirty = true;
+      if (IDB.ok) idbPut(META.rid, PH);
+      refreshSaveBtn(); render();
+    }
+    function refreshSaveBtn() {
+      const b = $('#f-savefile');
+      b.classList.toggle('dirty', dirty);
+      b.innerHTML = `💾 사진 포함 저장${nPhotos() ? ` <b>${nPhotos()}</b>` : ''}${dirty ? ' · 저장 안 됨' : ''}`;
+      const z = $('#f-zip'); z.disabled = !nPhotos(); z.innerHTML = `📦 사진 ZIP 받기${nPhotos() ? ` <b>${nPhotos()}</b>` : ''}`;
+    }
+    window.addEventListener('beforeunload', (e) => { if (dirty) { e.preventDefault(); e.returnValue = ''; } });
+
+    // 사진이 든 새 HTML 파일로 내려받기 = 이 파일 안에 사진 저장
+    function saveFile() {
+      const key = 'id="sa-photos">';
+      const i = PRISTINE.indexOf(key); const j = PRISTINE.indexOf('<' + '/script>', i);   // 글자를 나눠 써야 이 스크립트가 HTML 안에서 끊기지 않는다
+      if (i < 0 || j < 0) return toast('저장할 수 없습니다(파일 구조 오류)', 'err');
+      const json = JSON.stringify(PH).replace(/</g, '\\u003c');
+      const html = PRISTINE.slice(0, i + key.length) + json + PRISTINE.slice(j);
+      const url = URL.createObjectURL(new Blob([html], { type: 'text/html;charset=utf-8' }));
+      const a = document.createElement('a'); a.href = url; a.download = (META.fileBase || '재고조사오차') + '.html';
+      document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 5000);
+      dirty = false; refreshSaveBtn();
+      toast(`사진 ${nPhotos()}장을 넣어 새 파일로 저장했습니다 — 앞으로는 그 파일을 여세요`, 'ok');
+    }
+
+    // 사진 ZIP 받기: 사진 한 장이 여러 항목에 들어가 있으면 항목마다 'ISBN.jpg'(같은 ISBN 이 또 있으면 'ISBN_2.jpg')로,
+    //  앱이 웹하드에 올릴 때와 같은 이름. 사진 목록(ISBN·도서명·비고·시각)은 '사진목록.csv'로 함께 넣는다.
+    //  JPEG 는 이미 압축된 형식이라 다시 압축하지 않고 그대로 담는다(ZIP 'stored') — 라이브러리 없이 작게.
+    function zipPhotos() {
+      const list = Object.values(PH.photos).sort((a, b) => a.at - b.at);
+      if (!list.length) return toast('저장된 사진이 없습니다', 'err');
+      const files = []; const used = new Map();
+      const p2 = (x) => String(x).padStart(2, '0');
+      const when = (t) => { const d = new Date(t); return `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())} ${p2(d.getHours())}:${p2(d.getMinutes())}`; };
+      const csv = [['파일', 'ISBN', '도서명', '분야', '전산재고', '스캔차이', '비고', '찍은 시각']];
+      for (const p of list) {
+        const bin = atob(p.d.slice(p.d.indexOf(',') + 1)); const bytes = new Uint8Array(bin.length);
+        for (let k = 0; k < bin.length; k++) bytes[k] = bin.charCodeAt(k);
+        for (const isbn of p.isbns) {
+          const n = (used.get(isbn) || 0) + 1; used.set(isbn, n);
+          const name = n === 1 ? `${isbn}.jpg` : `${isbn}_${n}.jpg`;
+          files.push({ name, data: bytes, at: p.at });
+          const x = byIsbn.get(isbn) || {};
+          csv.push([name, isbn, x.n || '', x.f || '', x.s == null ? '' : x.s, x.sd == null ? '' : x.sd, p.note || '', when(p.at)]);
+        }
+      }
+      const cell = (v) => { const t = String(v); return /[",\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t; };
+      files.push({ name: '사진목록.csv', data: new TextEncoder().encode('\ufeff' + csv.map((r) => r.map(cell).join(',')).join('\r\n')), at: Date.now() });
+      const blob = makeZip(files);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href = url; a.download = (META.fileBase || '재고조사오차') + '_사진.zip';
+      document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 5000);
+      toast(`사진 ${files.length - 1}개 파일을 ZIP 으로 받았습니다`, 'ok');
+    }
+    // 최소 ZIP 작성기(저장 방식 · UTF-8 파일 이름)
+    function makeZip(files) {
+      const T = new Uint32Array(256);
+      for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; T[n] = c >>> 0; }
+      const crc32 = (b) => { let c = 0xFFFFFFFF; for (let k = 0; k < b.length; k++) c = T[(c ^ b[k]) & 0xFF] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; };
+      const enc = new TextEncoder();
+      const parts = [], central = []; let off = 0;
+      for (const f of files) {
+        const name = enc.encode(f.name), d = new Date(f.at || Date.now());
+        const time = (d.getHours() << 11) | (d.getMinutes() << 5) | (d.getSeconds() >> 1);
+        const date = ((Math.max(1980, d.getFullYear()) - 1980) << 9) | ((d.getMonth() + 1) << 5) | d.getDate();
+        const crc = crc32(f.data), size = f.data.length;
+        const lh = new DataView(new ArrayBuffer(30));
+        lh.setUint32(0, 0x04034b50, true); lh.setUint16(4, 20, true); lh.setUint16(6, 0x0800, true); lh.setUint16(8, 0, true);
+        lh.setUint16(10, time, true); lh.setUint16(12, date, true); lh.setUint32(14, crc, true); lh.setUint32(18, size, true); lh.setUint32(22, size, true);
+        lh.setUint16(26, name.length, true); lh.setUint16(28, 0, true);
+        parts.push(lh.buffer, name, f.data);
+        const ch = new DataView(new ArrayBuffer(46));
+        ch.setUint32(0, 0x02014b50, true); ch.setUint16(4, 20, true); ch.setUint16(6, 20, true); ch.setUint16(8, 0x0800, true); ch.setUint16(10, 0, true);
+        ch.setUint16(12, time, true); ch.setUint16(14, date, true); ch.setUint32(16, crc, true); ch.setUint32(20, size, true); ch.setUint32(24, size, true);
+        ch.setUint16(28, name.length, true); ch.setUint32(42, off, true);
+        central.push(ch.buffer, name);
+        off += 30 + name.length + size;
+      }
+      const cdSize = central.reduce((a, b) => a + (b.byteLength || b.length), 0);
+      const end = new DataView(new ArrayBuffer(22));
+      end.setUint32(0, 0x06054b50, true); end.setUint16(8, files.length, true); end.setUint16(10, files.length, true);
+      end.setUint32(12, cdSize, true); end.setUint32(16, off, true);
+      return new Blob([...parts, ...central, end.buffer], { type: 'application/zip' });
+    }
+
+    // ── 공용 ─────────────────────────────
+    let toastT = null;
+    function toast(msg, kind) {
+      let el = $('#toast'); if (!el) { el = document.createElement('div'); el.id = 'toast'; document.body.appendChild(el); }
+      el.className = 'toast ' + (kind || ''); el.textContent = msg; el.style.display = '';
+      clearTimeout(toastT); toastT = setTimeout(() => { el.style.display = 'none'; }, 3200);
+    }
+    function modal(html, onClose) {
+      const bg = document.createElement('div'); bg.className = 'mbg';
+      bg.innerHTML = `<div class="modal" role="dialog"><button class="x" type="button" aria-label="닫기">✕</button>${html}</div>`;
+      document.body.appendChild(bg); document.body.style.overflow = 'hidden';
+      const close = () => { bg.remove(); if (!document.querySelector('.mbg')) document.body.style.overflow = ''; if (onClose) onClose(); };
+      bg.addEventListener('click', (e) => { if (e.target === bg) close(); });
+      $('.x', bg).addEventListener('click', close);
+      return { el: bg, q: (s) => $(s, bg), close };
+    }
+    const loadImg = (url) => new Promise((res, rej) => { const im = new Image(); im.onload = () => res(im); im.onerror = () => rej(new Error('이미지를 읽지 못했습니다')); im.src = url; });
+    // 사진을 긴 변 1280px JPEG 로 줄인다(파일 크기를 위해)
+    async function shrink(file) {
+      const url = URL.createObjectURL(file);
+      try {
+        const im = await loadImg(url);
+        const k = Math.min(1, 1280 / Math.max(im.naturalWidth, im.naturalHeight));
+        const c = document.createElement('canvas'); c.width = Math.round(im.naturalWidth * k); c.height = Math.round(im.naturalHeight * k);
+        c.getContext('2d').drawImage(im, 0, 0, c.width, c.height);
+        return { img: im, data: c.toDataURL('image/jpeg', 0.8) };
+      } finally { setTimeout(() => URL.revokeObjectURL(url), 1000); }
+    }
+    async function barcodes(img) {
+      if (!window.ISBN) return [];
+      try { const found = await window.ISBN.scanMulti(img); return [...new Set(found.map((f) => window.ISBN.clean(f.code)))]; } catch (_) { return []; }
+    }
+    function camera(onFile) {
+      const cam = document.createElement('input'); cam.type = 'file'; cam.accept = 'image/*'; cam.capture = 'environment'; cam.style.display = 'none';
+      document.body.appendChild(cam);
+      cam.addEventListener('change', () => { const f = cam.files[0]; cam.remove(); if (f) onFile(f); });
+      cam.click();
+    }
+
+    // ── 표 ─────────────────────────────
     $('#f-field-list').innerHTML = fields.map((f) => `<label><input type="checkbox" value="${esc(f)}"> ${esc(f)} <span style="color:var(--muted);margin-left:auto">${items.filter((x) => x.f === f).length}</span></label>`).join('');
-    $('#f-maj').innerHTML = '<option value="">대분류 전체</option>' + majs.map((m) => `<option value="${esc(m)}">대분류 ${esc(m)}</option>`).join('');
+    $('#f-maj').innerHTML = '<option value="">대분류 전체</option>' + majs.map((m) => `<option value="${esc(m)}">대분류 ${esc(majL(m))}</option>`).join('');
+    if (!nExc) $('#f-exc').style.display = 'none'; else $('#f-exc').options[0].textContent = `예외 빼기 (${nExc}건)`;
+    if (!window.ISBN) { $('#f-scan').title = '이 파일에는 바코드 인식 모듈이 없습니다'; }
 
+    const excOk = (x) => (st.exc === 'all' ? true : st.exc === 'only' ? x.e : !x.e);
     function view() {
       const q = st.q.trim().toLowerCase();
       const out = [];
       for (const x of items) {
+        if (!excOk(x)) continue;
         if (st.fields.size && !st.fields.has(x.f)) continue;
         if (q && !(x.i.toLowerCase().includes(q) || String(x.n).toLowerCase().includes(q) || String(x.p).toLowerCase().includes(q))) continue;
         if (st.diff === 'nz' && x.sd === 0) continue;
         if (st.diff === 'neg' && !(x.sd < 0)) continue;
         if (st.diff === 'pos' && !(x.sd > 0)) continue;
         if (st.diff === 'zero' && x.sd !== 0) continue;
+        if (st.photo === 'has' && !photoCount(x.i)) continue;
+        if (st.photo === 'no' && photoCount(x.i)) continue;
         let sh = x.sh;
         if (st.maj) { sh = sh.filter((s) => s[1] === st.maj); if (!sh.length) continue; }
         out.push({ x, sh });
@@ -86,7 +281,19 @@ tfoot td{position:sticky;bottom:0;background:var(--head);font-weight:800;border-
       }
       return out;
     }
-
+    function cards() {
+      const base = items.filter(excOk);
+      const sum = (k) => base.reduce((a, x) => a + (Number(x[k]) || 0), 0);
+      const sd = sum('sd'), withPh = base.filter((x) => photoCount(x.i)).length;
+      $('#cards').innerHTML = `
+        <div class="card"><div class="k">오차 항목${st.exc === 'all' ? ' (예외 포함)' : st.exc === 'only' ? ' (예외만)' : ''}</div><div class="v">${fmt(base.length)}<small> 건</small></div></div>
+        <div class="card"><div class="k">전산재고 합계</div><div class="v">${fmt(sum('s'))}</div></div>
+        <div class="card"><div class="k">스캔합계</div><div class="v">${fmt(sum('ss'))}</div></div>
+        <div class="card ${sd < 0 ? 'neg' : sd > 0 ? 'pos' : ''}"><div class="k">스캔차이 합계</div><div class="v">${sgn(sd)}</div></div>
+        <div class="card neg"><div class="k">부족 항목 (−)</div><div class="v">${fmt(base.filter((x) => x.sd < 0).length)}<small> 건</small></div></div>
+        <div class="card pos"><div class="k">초과 항목 (+)</div><div class="v">${fmt(base.filter((x) => x.sd > 0).length)}<small> 건</small></div></div>
+        <div class="card"><div class="k">📷 사진 있는 항목</div><div class="v">${fmt(withPh)}<small> 건 · 사진 ${fmt(nPhotos())}장</small></div></div>`;
+    }
     function render() {
       const rows = view();
       let html = '', sSys = 0, sQty = 0, sSum = 0, sDiff = 0;
@@ -94,13 +301,14 @@ tfoot td{position:sticky;bottom:0;background:var(--head);font-weight:800;border-
         const shelves = sh.length ? sh : [['', '', '', '', '']];
         const n = shelves.length, rs = n > 1 ? ` rowspan="${n}"` : '';
         const dc = x.sd < 0 ? 'neg' : x.sd > 0 ? 'pos' : 'zero';
+        const pc = photoCount(x.i);
         sSys += x.s; sSum += x.ss; sDiff += x.sd;
-        html += '<tbody class="g">';
+        html += `<tbody class="g${pc ? ' ph' : ''}" data-i="${esc(x.i)}">`;
         shelves.forEach((s, k) => {
           sQty += Number(s[4]) || 0;
           html += '<tr>';
-          if (k === 0) html += `<td${rs}>${x.f ? `<span class="chip">${esc(x.f)}</span>` : ''}</td><td${rs} class="isbn">${esc(x.i)}</td><td${rs} class="name">${esc(x.n)}</td><td${rs}>${esc(x.p)}</td>`;
-          html += `<td class="code">${esc(s[0])}</td><td class="code">${esc(s[1])}</td><td class="code">${esc(s[2])}</td><td class="code">${esc(s[3])}</td>`;
+          if (k === 0) html += `<td${rs}>${x.f ? `<span class="chip">${esc(x.f)}</span>` : ''}</td><td${rs} class="isbn">${esc(x.i)}</td><td${rs} class="name">${esc(x.n)}${pc ? `<span class="tag ph">📷 ${pc}</span>` : ''}${x.e ? '<span class="tag ex">예외</span>' : ''}</td><td${rs}>${esc(x.p)}</td>`;
+          html += `<td class="code">${esc(s[0])}</td><td class="code">${esc(majL(s[1]))}</td><td class="code">${esc(s[2])}</td><td class="code">${esc(s[3])}</td>`;
           if (k === 0) html += `<td${rs} class="num">${fmt(x.s)}</td>`;
           html += `<td class="num">${s[4] === '' ? '' : fmt(s[4])}</td>`;
           if (k === 0) html += `<td${rs} class="num">${fmt(x.ss)}</td><td${rs} class="num diff ${dc}">${sgn(x.sd)}</td>`;
@@ -108,26 +316,115 @@ tfoot td{position:sticky;bottom:0;background:var(--head);font-weight:800;border-
         });
         html += '</tbody>';
       }
-      // 항목마다 <tbody class="g"> 하나(줄무늬·마우스 강조가 항목 단위로). tbody 안에 tbody 는 못 넣으므로
-      // 표에 바로 붙인다 — 이전 묶음을 지우고 tfoot 앞에 끼운다.
+      // 항목마다 <tbody class="g"> 하나(줄무늬·강조·클릭이 항목 단위로). 이전 묶음을 지우고 tfoot 앞에 끼운다.
       document.querySelectorAll('#t > tbody.g').forEach((g) => g.remove());
       if (rows.length) $('#tf').insertAdjacentHTML('beforebegin', html);
       $('#empty').style.display = rows.length ? 'none' : '';
       $('#tf').innerHTML = rows.length ? `<tr><td colspan="8">합계 · 항목 ${fmt(rows.length)}건</td><td class="num">${fmt(sSys)}</td><td class="num">${fmt(sQty)}</td><td class="num">${fmt(sSum)}</td><td class="num diff ${sDiff < 0 ? 'neg' : sDiff > 0 ? 'pos' : 'zero'}">${sgn(sDiff)}</td></tr>` : '';
-      $('#count').textContent = rows.length === items.length ? `전체 ${fmt(items.length)}건` : `${fmt(rows.length)}건 / 전체 ${fmt(items.length)}건`;
-      document.querySelectorAll('thead th[data-k]').forEach((th) => {
-        const on = st.sort.k === th.dataset.k;
-        th.querySelector('.ar').textContent = on ? (st.sort.dir > 0 ? '▲' : '▼') : '';
-      });
+      const total = items.filter(excOk).length;
+      $('#count').textContent = rows.length === total ? `전체 ${fmt(total)}건` : `${fmt(rows.length)}건 / 전체 ${fmt(total)}건`;
+      document.querySelectorAll('thead th[data-k]').forEach((th) => { const on = st.sort.k === th.dataset.k; th.querySelector('.ar').textContent = on ? (st.sort.dir > 0 ? '▲' : '▼') : ''; });
       $('#f-field-btn').classList.toggle('on', st.fields.size > 0);
       $('#f-field-lbl').textContent = st.fields.size ? `${st.fields.size}개` : '전체';
+      cards();
     }
 
-    // 이벤트
+    // ── 상세 · 사진 촬영 (앱과 같은 흐름) ─────────────────────────────
+    function cover(el, isbn) {
+      const i = String(isbn || '').replace(/[^0-9Xx]/g, '');
+      if (i.length < 10) { el.textContent = '표지 없음'; return; }
+      const urls = [`https://contents.kyobobook.co.kr/sih/fit-in/400x0/pdt/${i}.jpg`];
+      for (let n = 1; n <= 6; n++) urls.push(`https://contents.kyobobook.co.kr/sih/fit-in/400x0/pdt/addt/${i}_${String(n).padStart(2, '0')}.jpg`);
+      const ok = []; let view = 0;
+      const img = document.createElement('img'); img.alt = '표지';
+      img.onerror = () => { if (!ok.length) { img.remove(); el.textContent = navigator.onLine ? '표지 없음' : '표지(인터넷 필요)'; } };
+      img.onload = () => { if (!ok.length) { ok.push(urls[0]); probe(); } };
+      img.src = urls[0]; el.appendChild(img);
+      // 추가 이미지가 있으면 표지를 누를 때마다 넘긴다
+      function probe() { urls.slice(1).forEach((u) => { const t = new Image(); t.onload = () => { ok.push(u); badge(); }; t.src = u; }); }
+      function badge() { let b = $('.more', el); if (!b) { b = document.createElement('span'); b.className = 'more'; el.appendChild(b); } b.textContent = `⇄ ${view + 1}/${ok.length}`; }
+      el.addEventListener('click', () => { if (ok.length < 2) return; view = (view + 1) % ok.length; img.src = ok[view]; badge(); });
+    }
+    function openDetail(isbn) {
+      const x = byIsbn.get(isbn); if (!x) return;
+      const dc = x.sd < 0 ? 'neg' : x.sd > 0 ? 'pos' : '';
+      const chips = x.sh.length
+        ? `<div class="d-chips">${x.sh.map((s) => `<span class="d-chip">${esc(s[0])}-${esc(majL(s[1]))}-${esc(s[2])}-${esc(s[3])} <b>×${fmt(s[4])}</b></span>`).join('')}</div>`
+        : '<div style="color:var(--muted);font-size:13px">서가 스캔 데이터 없음</div>';
+      const m = modal(`<h3>📖 도서 상세${x.e ? ' <span class="tag ex">예외</span>' : ''}</h3>
+        <div class="d-top"><div class="d-cover" id="d-cover"></div>
+          <div class="d-meta"><div class="d-title">${esc(x.n || '(제목없음)')}</div><div class="d-sub">${esc(x.p)}${x.f ? ' · ' + esc(x.f) : ''}</div><div class="d-isbn">ISBN ${esc(x.i)}</div>
+            <div class="d-stock"><span>전산재고<b>${fmt(x.s)}</b></span><span>스캔합계<b>${fmt(x.ss)}</b></span><span class="${dc}">스캔차이<b>${sgn(x.sd)}</b></span></div></div></div>
+        <div class="d-lbl">서가 (수불처-대-중-소 × 스캔수량)</div>${chips}
+        <div class="d-lbl">📷 사진 <span id="d-pn" style="color:var(--muted);font-weight:400"></span></div><div class="d-photos" id="d-photos"></div>
+        <div id="d-stage"></div>
+        <div class="acts"><button class="btn" type="button" id="d-close">닫기</button><span class="sp"></span><button class="btn primary" type="button" id="d-shoot">📷 사진 촬영</button></div>`);
+      cover(m.q('#d-cover'), x.i);
+      m.q('#d-close').addEventListener('click', m.close);
+      const drawPhotos = () => {
+        const list = photosOf(x.i);
+        m.q('#d-pn').textContent = list.length ? `${list.length}장` : '아직 없음';
+        m.q('#d-photos').innerHTML = list.map((p) => `<div class="d-photo"><img src="${p.d}" data-z="${p.id}" alt=""><button class="del" type="button" data-del="${p.id}" title="이 사진 지우기">✕</button>
+          <div class="meta">${esc(new Date(p.at).toLocaleString('ko-KR'))}${p.isbns.length > 1 ? ` · 함께 찍힌 ${p.isbns.length - 1}건` : ''}${p.note ? '<br>' + esc(p.note) : ''}</div></div>`).join('');
+        m.q('#d-photos').querySelectorAll('[data-z]').forEach((im) => im.addEventListener('click', () => zoom(PH.photos[im.dataset.z].d)));
+        m.q('#d-photos').querySelectorAll('[data-del]').forEach((b) => b.addEventListener('click', () => {
+          const p = PH.photos[b.dataset.del]; if (!p) return;
+          if (!confirm(p.isbns.length > 1 ? `이 사진은 ${p.isbns.length}개 항목에 함께 들어가 있습니다. 모두에서 지울까요?` : '이 사진을 지울까요?')) return;
+          delete PH.photos[b.dataset.del]; changed(); drawPhotos();
+        }));
+      };
+      drawPhotos();
+      m.q('#d-shoot').addEventListener('click', () => camera(async (file) => {
+        const btn = m.q('#d-shoot'); btn.disabled = true; btn.textContent = '⏳ 처리 중…';
+        try {
+          const { img, data } = await shrink(file);
+          // 사진 속 바코드를 모두 인식 → 지금 항목 + 목록에 있는 다른 바코드도 저장 대상
+          const codes = await barcodes(img);
+          const targets = [x.i]; let skipped = 0;
+          for (const c of codes) { if (c === x.i) continue; if (byIsbn.has(c)) targets.push(c); else skipped++; }
+          stage(data, targets, skipped);
+        } catch (e) { toast(e.message || '사진 처리 실패', 'err'); }
+        finally { btn.disabled = false; btn.textContent = '📷 사진 촬영'; }
+      }));
+      function stage(data, targets, skipped) {
+        m.q('#d-stage').innerHTML = `<div class="stage"><img src="${data}" alt="">
+          <div class="sb"><div>저장 대상 <b>${targets.length}건</b></div><div class="d-chips">${targets.map((t) => `<span class="d-chip${t === x.i ? ' cur' : ''}">${esc(t)}</span>`).join('')}</div>
+            ${skipped ? `<div style="color:var(--muted);font-size:12px">· 목록에 없는 바코드 ${skipped}건은 넣지 않음</div>` : ''}
+            <input type="text" id="d-note" maxlength="200" placeholder="비고(선택) — 예: 파본·위치 등">
+            <div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn" type="button" id="d-cancel">취소</button><button class="btn primary" type="button" id="d-save">💾 저장</button></div></div></div>`;
+        m.q('#d-cancel').addEventListener('click', () => { m.q('#d-stage').innerHTML = ''; });
+        m.q('#d-save').addEventListener('click', () => {
+          const id = 'p' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+          PH.photos[id] = { d: data, isbns: targets, note: (m.q('#d-note').value || '').trim(), at: Date.now() };
+          m.q('#d-stage').innerHTML = '';
+          changed(); drawPhotos();
+          toast(`${targets.length}건에 사진 저장${targets.length > 1 ? ` (함께 찍힌 ${targets.length - 1}건)` : ''} — 끝나면 '💾 사진 포함 저장'`, 'ok');
+        });
+      }
+    }
+    function zoom(src) { const z = document.createElement('div'); z.className = 'zoom'; z.innerHTML = `<img src="${src}" alt="">`; z.addEventListener('click', () => z.remove()); document.body.appendChild(z); }
+    // 바코드로 찾기: 카메라 → 인식된 ISBN 중 목록에 있는 것 열기
+    function scanFind() {
+      if (!window.ISBN) return toast('이 파일에는 바코드 인식 모듈이 없습니다', 'err');
+      camera(async (file) => {
+        toast('바코드 인식 중…');
+        try {
+          const { img } = await shrink(file);
+          const codes = await barcodes(img);
+          const hits = codes.filter((c) => byIsbn.has(c));
+          if (!hits.length) return toast(codes.length ? `인식된 바코드(${codes.join(', ')})가 오차 목록에 없습니다` : '바코드를 인식하지 못했습니다', 'err');
+          if (hits.length === 1) return openDetail(hits[0]);
+          const cm = modal(`<h3>🔎 찾은 항목 ${hits.length}건</h3>${hits.map((c) => `<button type="button" class="btn" data-pick="${esc(c)}" style="width:100%;justify-content:flex-start;margin-bottom:6px;height:auto;padding:8px 10px">${esc(c)} · ${esc(byIsbn.get(c).n)}</button>`).join('')}`);
+          cm.el.querySelectorAll('[data-pick]').forEach((b) => b.addEventListener('click', () => { cm.close(); openDetail(b.dataset.pick); }));
+        } catch (e) { toast(e.message || '인식 실패', 'err'); }
+      });
+    }
+
+    // ── 이벤트 ─────────────────────────────
     let t = null;
     $('#f-q').addEventListener('input', (e) => { clearTimeout(t); t = setTimeout(() => { st.q = e.target.value; render(); }, 150); });
-    $('#f-diff').addEventListener('change', (e) => { st.diff = e.target.value; e.target.classList.toggle('on', !!e.target.value); render(); });
-    $('#f-maj').addEventListener('change', (e) => { st.maj = e.target.value; e.target.classList.toggle('on', !!e.target.value); render(); });
+    const sel = (id, key) => $(id).addEventListener('change', (e) => { st[key] = e.target.value; e.target.classList.toggle('on', !!e.target.value); render(); });
+    sel('#f-diff', 'diff'); sel('#f-maj', 'maj'); sel('#f-photo', 'photo'); sel('#f-exc', 'exc');
     const dd = $('#f-field');
     $('#f-field-btn').addEventListener('click', (e) => { e.stopPropagation(); dd.classList.toggle('open'); });
     document.addEventListener('click', (e) => { if (!dd.contains(e.target)) dd.classList.remove('open'); });
@@ -135,51 +432,69 @@ tfoot td{position:sticky;bottom:0;background:var(--head);font-weight:800;border-
     $('#f-field-all').addEventListener('click', () => { fields.forEach((f) => st.fields.add(f)); dd.querySelectorAll('input').forEach((c) => { c.checked = true; }); render(); });
     $('#f-field-none').addEventListener('click', () => { st.fields.clear(); dd.querySelectorAll('input').forEach((c) => { c.checked = false; }); render(); });
     $('#f-reset').addEventListener('click', () => {
-      st.q = ''; st.fields.clear(); st.diff = ''; st.maj = ''; st.sort = { k: null, dir: 1 };
-      $('#f-q').value = ''; $('#f-diff').value = ''; $('#f-maj').value = '';
-      ['#f-diff', '#f-maj'].forEach((s) => $(s).classList.remove('on'));
+      Object.assign(st, { q: '', diff: '', maj: '', photo: '', exc: '', sort: { k: null, dir: 1 } }); st.fields.clear();
+      ['#f-q', '#f-diff', '#f-maj', '#f-photo', '#f-exc'].forEach((s) => { $(s).value = ''; $(s).classList.remove('on'); });
       dd.querySelectorAll('input').forEach((c) => { c.checked = false; });
       render();
     });
     $('#f-print').addEventListener('click', () => window.print());
+    $('#f-scan').addEventListener('click', scanFind);
+    $('#f-savefile').addEventListener('click', saveFile);
+    $('#f-zip').addEventListener('click', zipPhotos);
     document.querySelectorAll('thead th[data-k]').forEach((th) => th.addEventListener('click', () => {
       const k = th.dataset.k;
       if (st.sort.k === k) st.sort.dir = -st.sort.dir; else st.sort = { k, dir: 1 };
       render();
     }));
-    render();
+    $('#t').addEventListener('click', (e) => { const g = e.target.closest('tbody.g'); if (g) openDetail(g.dataset.i); });
+    // 틀 고정: 표 칸 높이 = 화면 − 필터 막대
+    //  (휴대폰에선 필터 막대가 여러 줄이라 붙여 두지 않는다 → 표가 화면 전체를 쓰고 머리글만 고정)
+    const fit = () => { const bar = $('.bar'); document.documentElement.style.setProperty('--barh', (getComputedStyle(bar).position === 'sticky' ? bar.offsetHeight : 0) + 'px'); };
+    window.addEventListener('resize', fit); fit();
+
+    refreshSaveBtn(); render();
+    // 브라우저 임시 저장에 더 최근 사진이 있으면(저장 버튼을 안 누르고 닫았던 경우) 불러온다
+    idbOpen().then(async (ok) => {
+      if (!ok) { $('#store-note').textContent = '이 브라우저에서는 임시 저장이 안 됩니다 — 사진을 찍은 뒤 꼭 💾 사진 포함 저장을 누르세요.'; $('#store-note').style.display = ''; return; }
+      const saved = await idbGet(META.rid);
+      if (saved && saved.photos && (saved.updatedAt || 0) > (PH.updatedAt || 0)) {
+        PH = saved; dirty = true; refreshSaveBtn(); render();
+        toast(`이 브라우저에 임시 저장된 사진 ${nPhotos()}장을 불러왔습니다 — 💾 사진 포함 저장으로 파일에 넣으세요`);
+      }
+    });
   }
 
   const escHtml = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  // 인라인 <script> 안에서 문서가 끊기지 않게
+  const safeJs = (code) => String(code || '').replace(/<\/script/gi, '<\\/script').replace(/<!--/g, '<\\!--');
+  const LS = String.fromCharCode(0x2028), PS = String.fromCharCode(0x2029);
+  const safeJson = (obj) => JSON.stringify(obj).replace(/</g, '\\u003c').split(LS).join('\\u2028').split(PS).join('\\u2029');
 
-  // meta: { branch, title, generatedAt, source }, items: [{ f, i, n, p, s, ss, sd, sh:[[code,maj,mid,min,qty],…] }]
-  function build(meta, items) {
-    const sum = (k) => items.reduce((a, x) => a + (Number(x[k]) || 0), 0);
-    const nShort = items.filter((x) => x.sd < 0).length, nOver = items.filter((x) => x.sd > 0).length;
-    const sDiff = sum('sd');
-    // </script> 로 데이터가 끊기지 않게 '<' 를 이스케이프
-    const json = JSON.stringify({ items }).replace(/</g, '\\u003c').split('\u2028').join('\\u2028').split('\u2029').join('\\u2029');
-    const fmt = (n) => Number(n || 0).toLocaleString('ko-KR');
+  // meta: { title, source, generatedAt, fileBase }, items: [{ f, i, n, p, s, ss, sd, e, sh:[[code,maj,mid,min,qty],…] }]
+  // libs: { zxing, isbn } — 바코드 인식 모듈 소스(없으면 사진만 찍을 수 있고 바코드 찾기는 꺼짐)
+  function build(meta, items, libs) {
+    const rid = 'r' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);   // 이 보고서 식별자(브라우저 임시 저장 열쇠)
+    const data = { items, meta: { ...meta, rid } };
+    const lib = libs && libs.zxing && libs.isbn ? `<script>${safeJs(libs.zxing)}</script>\n<script>${safeJs(libs.isbn)}</script>` : '';
     return `<!doctype html>
 <html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${escHtml(meta.title)}</title><style>${CSS}</style></head>
 <body><div class="wrap">
-<header><h1>📊 ${escHtml(meta.title)}</h1>
-<div class="sub">${escHtml(meta.source || '')}${meta.source ? ' · ' : ''}만든 시각 ${escHtml(meta.generatedAt)} · 북적북적 재고조사 오차체크</div></header>
-<div class="cards">
-  <div class="card"><div class="k">오차 항목</div><div class="v">${fmt(items.length)}<small> 건</small></div></div>
-  <div class="card"><div class="k">전산재고 합계</div><div class="v">${fmt(sum('s'))}</div></div>
-  <div class="card"><div class="k">스캔합계</div><div class="v">${fmt(sum('ss'))}</div></div>
-  <div class="card ${sDiff < 0 ? 'neg' : sDiff > 0 ? 'pos' : ''}"><div class="k">스캔차이 합계</div><div class="v">${sDiff > 0 ? '+' : ''}${fmt(sDiff)}</div></div>
-  <div class="card neg"><div class="k">부족 항목 (−)</div><div class="v">${fmt(nShort)}<small> 건</small></div></div>
-  <div class="card pos"><div class="k">초과 항목 (+)</div><div class="v">${fmt(nOver)}<small> 건</small></div></div>
-</div>
+<header><div class="ttl"><h1>📊 ${escHtml(meta.title)}</h1>
+<div class="sub">${escHtml(meta.source || '')}${meta.source ? ' · ' : ''}만든 시각 ${escHtml(meta.generatedAt)} · 북적북적 재고조사 오차체크</div></div>
+<button type="button" class="btn noprint" id="f-zip" title="저장한 사진을 ZIP 하나로 받습니다(ISBN.jpg + 사진목록.csv)" disabled>📦 사진 ZIP 받기</button>
+<button type="button" class="btn save noprint" id="f-savefile" title="찍은 사진을 넣어 이 보고서를 새 파일로 내려받습니다(이 파일 안에 사진 저장)">💾 사진 포함 저장</button></header>
+<div class="banner" id="store-note" style="display:none"></div>
+<div class="cards" id="cards"></div>
 <div class="bar">
-  <input type="search" id="f-q" placeholder="🔎 ISBN · 도서명 · 출판사 검색">
+  <button type="button" class="btn primary noprint" id="f-scan">📷 바코드로 찾기</button>
+  <input type="search" id="f-q" placeholder="🔎 ISBN · 도서명 · 출판사">
   <div class="dd" id="f-field"><button type="button" class="btn" id="f-field-btn">분야 <b id="f-field-lbl">전체</b> ▾</button>
     <div class="dd-panel"><div class="dd-act"><button type="button" id="f-field-all">모두</button><button type="button" id="f-field-none">해제(전체)</button></div><div id="f-field-list"></div></div></div>
   <select id="f-diff" class="btn"><option value="">스캔차이 전체</option><option value="nz">0 제외</option><option value="neg">부족만 (−)</option><option value="pos">초과만 (+)</option><option value="zero">0만</option></select>
   <select id="f-maj" class="btn"></select>
+  <select id="f-photo" class="btn"><option value="">사진 전체</option><option value="has">사진 있음</option><option value="no">사진 없음</option></select>
+  <select id="f-exc" class="btn"><option value="">예외 빼기</option><option value="all">예외 포함</option><option value="only">예외만</option></select>
   <button type="button" class="btn" id="f-reset">초기화</button>
   <button type="button" class="btn noprint" id="f-print">🖨️ 인쇄</button>
   <span class="count" id="count"></span>
@@ -192,10 +507,14 @@ tfoot td{position:sticky;bottom:0;background:var(--head);font-weight:800;border-
 </tr></thead>
 <tfoot id="tf"></tfoot></table>
 <div class="empty" id="empty" style="display:none">조건에 맞는 항목이 없습니다.</div></div>
-<p class="hint">열 제목을 누르면 정렬(한 번 더 누르면 반대로). 필터는 ISBN 단위로 걸려서 서가가 여러 줄인 항목도 함께 보이고 숨습니다. 대분류를 고르면 그 대분류의 서가 줄만 남습니다(이때 스캔수량은 남은 서가만, 스캔합계·스캔차이는 그 ISBN 전체 기준). 스캔차이 = 스캔합계 − 전산재고(모자라면 −).</p>
+<p class="hint">행을 누르면 상세 · 사진 촬영. 📷 바코드로 찾기로 책 바코드를 찍으면 그 항목이 열립니다. 사진 속에 목록의 다른 책 바코드도 있으면 그 항목들에도 함께 들어갑니다.
+찍은 사진은 <b>💾 사진 포함 저장</b>을 눌러야 파일에 들어갑니다(사진이 든 새 파일을 내려받음 — 앞으로는 그 파일을 여세요).
+열 제목을 누르면 정렬. 필터는 ISBN 단위로 걸립니다. 대분류를 고르면 그 대분류의 서가 줄만 남습니다(이때 스캔수량은 남은 서가만, 스캔합계·스캔차이는 그 ISBN 전체 기준). 스캔차이 = 스캔합계 − 전산재고(모자라면 −).</p>
 </div>
-<script type="application/json" id="sa-data">${json}</script>
-<script>(${pageMain.toString()})();</script>
+<script type="application/json" id="sa-data">${safeJson(data)}</script>
+<script type="application/json" id="sa-photos">${safeJson({ photos: {}, updatedAt: 0 })}</script>
+${lib}
+<script>(${safeJs(pageMain.toString())})();</script>
 </body></html>`;
   }
 
