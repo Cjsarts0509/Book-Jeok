@@ -2573,7 +2573,7 @@ const App = (() => {
       const j = await res.json();
       const disc = Array.isArray(j) ? j : (j.disc || j.data || []);
       if (!Array.isArray(disc) || !disc.length) return UI.toast('열 수 있는 재고조사 목록이 없습니다.', 'error');
-      stockAuditModal(false, { disc, folder: state.folder || '/' });   // 파일이 있는 현재 폴더 = 사진 저장 폴더
+      stockAuditModal(false, { disc, folder: state.folder || '/', branchName: j.branchName || '' });   // 파일이 있는 현재 폴더 = 사진 저장 폴더
     } catch (e) { UI.toast(e.message || '열기 실패', 'error'); }
   }
   async function downloadFile(id) {
@@ -2864,7 +2864,7 @@ const App = (() => {
         const msg = `${label} 완료 · ${Math.round(took / 1000)}초 걸렸습니다`;
         if (wentAway && document.visibilityState === 'hidden' && await ensureDesktopNotice()) {
           try {
-            const n = new Notification('북적북적', { body: msg, tag: 'bj-job', icon: 'assets/logo.svg?v=207' });
+            const n = new Notification('북적북적', { body: msg, tag: 'bj-job', icon: 'assets/logo.svg?v=208' });
             n.onclick = () => { window.focus(); n.close(); };
           } catch (_) { UI.toast(msg, 'success'); }
         } else UI.toast(msg, 'success');
@@ -3888,10 +3888,12 @@ const App = (() => {
           ${window.ISBN ? '<button class="btn btn-secondary btn-sm" id="sa-scan">📷 바코드로 찾기</button>' : ''}
           <button class="btn btn-secondary btn-sm" id="sa-save">💾 저장</button>
           <button class="btn btn-primary btn-sm" id="sa-dl">⬇ 엑셀 다운로드</button>
+          <button class="btn btn-secondary btn-sm" id="sa-dlhtml" title="필터·정렬이 되는 보고서 파일(HTML) — 브라우저로 열립니다">🌐 HTML 다운로드</button>
           ${isPriv() && !isOpened ? `<span class="sa-deliver-wrap"><label class="sa-foldersel">🏬 <select id="sa-branch"><option value="">영업점 선택…</option>${saBranches.map((a) => `<option value="${a.id}">${esc(a.displayName)}</option>`).join('')}</select></label><button class="btn btn-accent btn-sm" id="sa-deliver" title="선택한 영업점의 재고조사오차_&lt;년도&gt; 폴더에 재고조사 파일을 전달(영업점이 열어 사진·체크)">📤 영업점에 전달</button></span>` : ''}
         </div>
         <div class="table-wrap sa-tablewrap" id="sa-tablewrap"></div>`;
       m.q('#sa-dl')?.addEventListener('click', downloadXlsx);
+      m.q('#sa-dlhtml')?.addEventListener('click', downloadHtml);
       m.q('#sa-deliver')?.addEventListener('click', deliverToBranch);
       m.q('#sa-scan')?.addEventListener('click', scanFind);
       m.q('#sa-save')?.addEventListener('click', persist);
@@ -3973,13 +3975,19 @@ const App = (() => {
         const sh = itemShelves(d);                        // 항목 내 서가 위치 순 정렬
         const shelves = sh.length ? sh : [{ code: '', maj: '', mid: '', min: '', qty: '' }];
         const top = rows.length + 1;                      // 머리글 다음 줄부터(0=머리글)
+        // 병합 칸의 '가려진 줄'에도 같은 값을 넣는다 — 엑셀 필터는 줄마다 자기 칸 값을 보기 때문에,
+        //  비어 있으면 '0 빼기' 같은 필터에서 첫 줄만 숨고 나머지 줄은 (빈 값이라) 남았다.
+        //  숫자 칸(전산재고·스캔합계·스캔차이)의 가려진 줄은 '글자'로 넣는다: 필터 목록에선 같은 값으로 묶이고,
+        //  SUM·피벗 합계는 글자를 세지 않아 서가별로 합쳐도 두 번 세어지지 않는다.
+        const sys = d.sys, ss = scanSum(d), sd = scanDiff(d);
+        const asStr = (v) => (v === '' || v == null ? '' : String(v));
         shelves.forEach((s, k) => {
           const first = k === 0;
           rows.push([
-            first ? d.field : '', first ? d.isbn : '', first ? d.name : '', first ? d.pub : '',
+            d.field, d.isbn, d.name, d.pub,
             s.code, s.maj, s.mid, s.min,
-            first ? d.sys : '', s.qty,
-            first ? scanSum(d) : '', first ? scanDiff(d) : '',
+            first ? sys : asStr(sys), s.qty,
+            first ? ss : asStr(ss), first ? sd : asStr(sd),
           ]);
         });
         if (shelves.length > 1) for (const c of MERGE_COLS) merges.push({ s: { r: top, c }, e: { r: top + shelves.length - 1, c } });
@@ -4007,12 +4015,46 @@ const App = (() => {
       XLSX.utils.book_append_sheet(wb, ws2, '항목별(정렬용)');
       return wb;
     }
+    // 저장 이름: <영업점명>_재고조사오차_<년월일>. 영업점명은 분석에 쓴 파일의 폴더(영업점) →
+    //  전달받은 파일에 적힌 영업점 → 보고 있는 계정 이름 순으로 찾는다. 못 찾으면 영업점명 없이.
+    function saBranchLabel() {
+      return saAnalyzedBranch || (preload && preload.branchName) || state.ownerName
+        || (state.user && state.user.role === 'branch' ? state.user.displayName : '') || '';
+    }
+    function saFileBase() {
+      const dt = new Date(); const p2 = (x) => String(x).padStart(2, '0');
+      const br = String(saBranchLabel()).replace(/[\\/:*?"<>|]/g, '').trim();
+      return `${br ? br + '_' : ''}재고조사오차_${dt.getFullYear()}${p2(dt.getMonth() + 1)}${p2(dt.getDate())}`;
+    }
     async function downloadXlsx() {
       try {
         const XLSX = await ensureXLSX();
         const wb = buildDiscWorkbook(XLSX);
+        XLSX.writeFile(wb, saFileBase() + '.xlsx');
+      } catch (e) { UI.toast(e.message || '다운로드 실패', 'error'); }
+    }
+    // 혼자 열리는 HTML 보고서(필터·정렬·합계). 보고서 코드는 처음 누를 때만 불러온다.
+    async function downloadHtml() {
+      try {
+        if (!window.SAReport) {
+          await new Promise((res, rej) => { const sc = document.createElement('script'); sc.src = 'js/sa-report.js?v=208'; sc.onload = res; sc.onerror = () => rej(new Error('보고서 모듈을 불러오지 못했습니다.')); document.head.appendChild(sc); });
+        }
+        const br = saBranchLabel();
         const dt = new Date(); const p2 = (x) => String(x).padStart(2, '0');
-        XLSX.writeFile(wb, `재고오차_${dt.getFullYear()}${p2(dt.getMonth() + 1)}${p2(dt.getDate())}_${p2(dt.getHours())}${p2(dt.getMinutes())}.xlsx`);
+        const items = disc.map((d) => ({
+          f: String(d.field == null ? '' : d.field), i: String(d.isbn), n: d.name == null ? '' : String(d.name), p: d.pub == null ? '' : String(d.pub),
+          s: num(d.sys), ss: scanSum(d), sd: scanDiff(d),
+          sh: itemShelves(d).map((x) => [x.code, x.maj, x.mid, x.min, num(x.qty)]),
+        }));
+        const html = window.SAReport.build({
+          title: `${br ? br + ' ' : ''}재고조사 오차`,
+          source: [saAnalyzedYear ? `${saAnalyzedYear}년` : '', br].filter(Boolean).join(' · '),
+          generatedAt: `${dt.getFullYear()}-${p2(dt.getMonth() + 1)}-${p2(dt.getDate())} ${p2(dt.getHours())}:${p2(dt.getMinutes())}`,
+        }, items);
+        const url = URL.createObjectURL(new Blob([html], { type: 'text/html;charset=utf-8' }));
+        const a = document.createElement('a'); a.href = url; a.download = saFileBase() + '.html';
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 4000);
       } catch (e) { UI.toast(e.message || '다운로드 실패', 'error'); }
     }
     // 영업점 선택 드롭다운 채우기(목록이 늦게 도착해도 반영)
