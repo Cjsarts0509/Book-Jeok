@@ -2864,7 +2864,7 @@ const App = (() => {
         const msg = `${label} 완료 · ${Math.round(took / 1000)}초 걸렸습니다`;
         if (wentAway && document.visibilityState === 'hidden' && await ensureDesktopNotice()) {
           try {
-            const n = new Notification('북적북적', { body: msg, tag: 'bj-job', icon: 'assets/logo.svg?v=217' });
+            const n = new Notification('북적북적', { body: msg, tag: 'bj-job', icon: 'assets/logo.svg?v=218' });
             n.onclick = () => { window.focus(); n.close(); };
           } catch (_) { UI.toast(msg, 'success'); }
         } else UI.toast(msg, 'success');
@@ -4076,7 +4076,7 @@ const App = (() => {
     async function downloadHtml() {
       try {
         if (!window.SAReport) {
-          await new Promise((res, rej) => { const sc = document.createElement('script'); sc.src = 'js/sa-report.js?v=217'; sc.onload = res; sc.onerror = () => rej(new Error('보고서 모듈을 불러오지 못했습니다.')); document.head.appendChild(sc); });
+          await new Promise((res, rej) => { const sc = document.createElement('script'); sc.src = 'js/sa-report.js?v=218'; sc.onload = res; sc.onerror = () => rej(new Error('보고서 모듈을 불러오지 못했습니다.')); document.head.appendChild(sc); });
         }
         const br = saBranchLabel();
         const dt = new Date(); const p2 = (x) => String(x).padStart(2, '0');
@@ -4088,7 +4088,7 @@ const App = (() => {
         }));
         // 바코드 인식 모듈을 보고서 안에 넣는다(인터넷 없이 📷 바코드로 찾기·사진 속 바코드 인식). 못 가져오면 사진만.
         const grab = (u) => fetch(u).then((r) => (r.ok ? r.text() : '')).catch(() => '');
-        const [zxing, isbn] = await Promise.all([grab('vendor/zxing.min.js?v=217'), grab('js/isbn.js?v=217')]);
+        const [zxing, isbn] = await Promise.all([grab('vendor/zxing.min.js?v=218'), grab('js/isbn.js?v=218')]);
         // 웹하드 자동 저장 열쇠(60일): 전달할 영업점을 골라 뒀으면 그 영업점의 재고조사오차_<년도> 폴더,
         //  아니면 지금 공간의 사진 저장 폴더(앱에서 찍을 때와 같은 곳). 못 받으면 자동 저장 없이 만든다.
         let sync = null;

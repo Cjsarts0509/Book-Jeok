@@ -323,7 +323,7 @@ const item = (tab, ico, label) => `<div class="nav-item ${state.tab === tab ? 'a
     'restore-drill': { icon: '🚑', title: '백업 복원 리허설',        how: 'host', every: '매주',  desc: '최신 백업을 임시 DB에 실제로 복원해 봅니다. 운영 DB는 건드리지 않습니다.',
       cmd: './scripts/bookjeok-restore-drill.sh' },
     deps:            { icon: '📦', title: '의존성 취약점 점검',      how: 'host', every: '매주',  desc: '쓰고 있는 패키지에 새로 공개된 취약점이 있는지 확인합니다.',
-      cmd: './scripts/bookjeok-audit-deps.sh' },
+      cmd: 'cd ~/Book-Jeok && ./scripts/bookjeok-audit-deps.sh' },
     deploy:          { icon: '🚀', title: '마지막 배포',              how: 'host', every: '필요할 때', desc: '배포 결과입니다. 건강검진에 실패하면 자동으로 이전 버전으로 되돌립니다.',
       cmd: './scripts/bookjeok-deploy.sh --pull' },
   };
@@ -354,6 +354,21 @@ const item = (tab, ico, label) => `<div class="nav-item ${state.tab === tab ? 'a
     view.querySelectorAll('[data-copy]').forEach((el) => el.addEventListener('click', () => {
       navigator.clipboard.writeText(el.dataset.copy).then(() => UI.toast('명령을 복사했습니다', 'success')).catch(() => UI.toast('복사하지 못했습니다', 'error'));
     }));
+  }
+
+  // 의존성 취약점 고치는 법 — 결과 파일(deps.json)의 note 대신 여기서 그린다(옛 결과에도 새 안내가 보이게).
+  //   예전 안내는 «npm audit fix 로 고쳐지는지 확인»뿐이라, 저장소 맨 위(~/Book-Jeok)에서 돌려
+  //   «2 packages · 0 vulnerabilities»로 끝나는 일이 있었다 — 패키지는 backend/ 에 있다.
+  //   그리고 서버에서 고쳐도 배포가 저장소의 package-lock.json 대로 npm ci 해서 되돌아가고, git pull 도 충돌한다.
+  function depsFixHelp() {
+    const esc = UI.escapeHtml;
+    const preview = 'cd ~/Book-Jeok/backend && npm audit fix --dry-run --omit=dev';
+    return `<div class="muted" style="font-size:11px;margin-top:6px;line-height:1.7">
+      critical·high 는 우선 조치 대상입니다. 패키지는 <b>backend 폴더</b>에 있습니다 — 저장소 맨 위에서 돌리면 아무것도 고쳐지지 않습니다.<br>
+      <b>서버에서 직접 고치지 마세요.</b> 배포할 때 저장소의 package-lock.json 대로 다시 설치돼 되돌아가고, 다음 git pull 이 충돌합니다.
+      저장소의 backend 에서 <code>npm audit fix</code> 후 package-lock.json 을 커밋해 배포하세요.<br>
+      서버에서 무엇이 고쳐질지 미리만 보기(바꾸지 않음): <code>${esc(preview)}</code>
+      <button class="btn btn-sm btn-ghost" data-copy="${esc(preview)}" style="padding:0 6px;font-size:11px">📋</button></div>`;
   }
 
   function ckCard(key, r) {
@@ -463,7 +478,7 @@ const item = (tab, ico, label) => `<div class="nav-item ${state.tab === tab ? 'a
                 <td style="${['critical', 'high'].includes(p.severity) ? 'color:var(--danger);font-weight:700' : ''}">${esc(p.severity)}</td>
                 <td class="muted" style="font-size:11px">${esc((p.via || []).join(' · ')).slice(0, 120)}</td>
                 <td class="muted" style="font-size:11px">${esc(p.fixAvailable)}</td></tr>`).join('')}
-            </tbody></table><p class="muted" style="font-size:11px">${esc(r.note || '')}</p>`
+            </tbody></table>${depsFixHelp()}`
           : '');
     }
     return '';

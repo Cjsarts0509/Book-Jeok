@@ -7,7 +7,7 @@
 # 운영 의존성만 본다(--omit=dev) — 개발 도구의 취약점은 서비스 표면이 아니다.
 # 네트워크가 필요하다(레지스트리 조회). 나가는 연결이 막힌 환경이면 결과에 사유가 남는다.
 #
-# 사용:  ./bookjeok-audit-deps.sh
+# 사용:  cd ~/Book-Jeok && ./scripts/bookjeok-audit-deps.sh
 # 크론:  0 6 * * 1 /home/ubuntu/Book-Jeok/scripts/bookjeok-audit-deps.sh >> /var/log/bookjeok-deps.log 2>&1
 set -uo pipefail
 
@@ -60,7 +60,7 @@ let s = ""; process.stdin.on("data", (d) => (s += d)).on("end", () => {
     ok: (meta.critical || 0) + (meta.high || 0) === 0,
     vulnerabilities: meta, total,
     packages: rows.slice(0, 60),
-    note: "critical·high 가 있으면 우선 조치 대상입니다. `npm audit fix` 로 고쳐지는지 먼저 확인하세요.",
+    note: "critical·high 가 있으면 우선 조치 대상입니다. 서버에서 고치지 말고(배포 때 저장소의 lockfile 대로 되돌아감) 저장소의 backend 에서 npm audit fix → package-lock.json 커밋 → 배포. 미리 보기: cd ~/Book-Jeok/backend && npm audit fix --dry-run --omit=dev",
   }));
 });')"
 
