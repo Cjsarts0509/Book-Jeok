@@ -2864,7 +2864,7 @@ const App = (() => {
         const msg = `${label} 완료 · ${Math.round(took / 1000)}초 걸렸습니다`;
         if (wentAway && document.visibilityState === 'hidden' && await ensureDesktopNotice()) {
           try {
-            const n = new Notification('북적북적', { body: msg, tag: 'bj-job', icon: 'assets/logo.svg?v=211' });
+            const n = new Notification('북적북적', { body: msg, tag: 'bj-job', icon: 'assets/logo.svg?v=212' });
             n.onclick = () => { window.focus(); n.close(); };
           } catch (_) { UI.toast(msg, 'success'); }
         } else UI.toast(msg, 'success');
@@ -3574,11 +3574,11 @@ const App = (() => {
     //   (예외여부 Y 는 분석에서 이미 빠지고, 원본 차이 = 스캔재고 − 전산재고 = 스캔차이라 겹친다).
     //   shelf=true 는 서가 분해값(수불처코드·대/중/소분류·스캔수량)으로 disc 항목이 아닌 '행'에서 취함.
     //   calc 는 항목 값으로 계산하는 열(스캔합계·스캔차이).
-    const SA_HEADERS = ['분야', 'ISBN', '도서명', '출판사', '수불처코드', '대분류', '중분류', '소분류', '전산재고', '스캔수량', '스캔합계', '스캔차이'];
+    const SA_HEADERS = ['분야', 'ISBN', '도서명', '출판사', '수불처코드', '대분류', '중분류', '소분류', '스캔수량', '전산재고', '스캔합계', '스캔차이'];
     const SA_COLS = [
       { k: 'field', num: false }, { k: 'isbn', num: false }, { k: 'name', num: false }, { k: 'pub', num: false },
       { k: 'code', num: false, shelf: true }, { k: 'maj', num: false, shelf: true }, { k: 'mid', num: false, shelf: true }, { k: 'min', num: false, shelf: true },
-      { k: 'sys', num: true }, { k: 'qty', num: true, shelf: true },
+      { k: 'qty', num: true, shelf: true }, { k: 'sys', num: true },
       { k: 'ssum', num: true, calc: (d) => scanSum(d) }, { k: 'sdiff', num: true, calc: (d) => scanDiff(d) },
     ];
 
@@ -3669,7 +3669,7 @@ const App = (() => {
         const shelfTd = (h) => `<td class="sa-shelf">${h}</td>`;
         const shc = [stack(sh.map((x) => x.code)), stack(sh.map((x) => majLabel(x.maj))), stack(sh.map((x) => x.mid)), stack(sh.map((x) => x.min))].map(shelfTd).join('');
         const sd = scanDiff(d);
-        const tail = `<td>${esc(String(d.sys == null ? '' : d.sys))}</td>${shelfTd(stack(sh.map((x) => x.qty)))}<td>${scanSum(d)}</td><td class="${sd ? 'sa-sdiff' : ''}">${sd}</td>`;
+        const tail = `${shelfTd(stack(sh.map((x) => x.qty)))}<td>${esc(String(d.sys == null ? '' : d.sys))}</td><td>${scanSum(d)}</td><td class="${sd ? 'sa-sdiff' : ''}">${sd}</td>`;
         return `<tr data-ri="${ri}">${b4}${shc}${tail}</tr>`;
       }).join('');
       wrap.innerHTML = order.length
@@ -3990,8 +3990,8 @@ const App = (() => {
       const withExc = list.some(isExc);
       const H1 = withExc ? [...SA_HEADERS, '예외'] : SA_HEADERS;
 
-      // ① 서가별(병합) — 분야 ISBN 도서명 출판사 | 수불처코드 대 중 소 | 전산재고 | 스캔수량 | 스캔합계 스캔차이 (| 예외)
-      const MERGE_COLS = withExc ? [0, 1, 2, 3, 8, 10, 11, 12] : [0, 1, 2, 3, 8, 10, 11];
+      // ① 서가별(병합) — 분야 ISBN 도서명 출판사 | 수불처코드 대 중 소 | 스캔수량 | 전산재고 | 스캔합계 스캔차이 (| 예외)
+      const MERGE_COLS = withExc ? [0, 1, 2, 3, 9, 10, 11, 12] : [0, 1, 2, 3, 9, 10, 11];
       const rows = []; const merges = [];
       for (const d of list) {
         const sh = itemShelves(d);                        // 항목 내 서가 위치 순 정렬
@@ -4008,7 +4008,7 @@ const App = (() => {
           const row = [
             d.field, d.isbn, d.name, d.pub,
             s.code, majLabel(s.maj), s.mid, s.min,
-            first ? sys : asStr(sys), s.qty,
+            s.qty, first ? sys : asStr(sys),
             first ? ss : asStr(ss), first ? sd : asStr(sd),
           ];
           if (withExc) row.push(isExc(d) ? 'Y' : '');
@@ -4064,7 +4064,7 @@ const App = (() => {
     async function downloadHtml() {
       try {
         if (!window.SAReport) {
-          await new Promise((res, rej) => { const sc = document.createElement('script'); sc.src = 'js/sa-report.js?v=211'; sc.onload = res; sc.onerror = () => rej(new Error('보고서 모듈을 불러오지 못했습니다.')); document.head.appendChild(sc); });
+          await new Promise((res, rej) => { const sc = document.createElement('script'); sc.src = 'js/sa-report.js?v=212'; sc.onload = res; sc.onerror = () => rej(new Error('보고서 모듈을 불러오지 못했습니다.')); document.head.appendChild(sc); });
         }
         const br = saBranchLabel();
         const dt = new Date(); const p2 = (x) => String(x).padStart(2, '0');
@@ -4076,7 +4076,7 @@ const App = (() => {
         }));
         // 바코드 인식 모듈을 보고서 안에 넣는다(인터넷 없이 📷 바코드로 찾기·사진 속 바코드 인식). 못 가져오면 사진만.
         const grab = (u) => fetch(u).then((r) => (r.ok ? r.text() : '')).catch(() => '');
-        const [zxing, isbn] = await Promise.all([grab('vendor/zxing.min.js?v=211'), grab('js/isbn.js?v=211')]);
+        const [zxing, isbn] = await Promise.all([grab('vendor/zxing.min.js?v=212'), grab('js/isbn.js?v=212')]);
         const html = window.SAReport.build({
           title: `${br ? br + ' ' : ''}재고조사 오차`,
           source: [saAnalyzedYear ? `${saAnalyzedYear}년` : '', br].filter(Boolean).join(' · '),

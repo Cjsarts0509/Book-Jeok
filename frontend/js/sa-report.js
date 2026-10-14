@@ -312,7 +312,7 @@ table.m tbody.g tr:last-child td{border-bottom:1px solid var(--border);padding-b
         <div class="card"><div class="k">✅ 확인완료</div><div class="v" style="color:var(--done-text)">${fmt(base.filter((x) => isDone(x.i)).length)}<small> / ${fmt(base.length)}건 · 사진 ${fmt(withPh)}건</small></div></div>`;
     }
     // 머리글(PC: 12열 · 휴대폰: 분야·상품코드·상품명·차이)
-    const HEAD_PC = [['f', '분야'], ['i', 'ISBN'], ['n', '도서명'], ['p', '출판사'], ['loc', '수불처코드'], ['', '대분류'], ['', '중분류'], ['', '소분류'], ['s', '전산재고', 1], ['', '스캔수량', 1], ['ss', '스캔합계', 1], ['sd', '스캔차이', 1]];
+    const HEAD_PC = [['f', '분야'], ['i', 'ISBN'], ['n', '도서명'], ['p', '출판사'], ['loc', '수불처코드'], ['', '대분류'], ['', '중분류'], ['', '소분류'], ['', '스캔수량', 1], ['s', '전산재고', 1], ['ss', '스캔합계', 1], ['sd', '스캔차이', 1]];
     const HEAD_M = [['f', '분야'], ['i', '상품코드'], ['n', '상품명'], ['sd', '차이', 1]];
     const shelfTxt = (s) => `${s[0]}-${majL(s[1])}-${s[2]}-${s[3]} ×${fmt(s[4])}`;
     function render() {
@@ -343,8 +343,8 @@ table.m tbody.g tr:last-child td{border-bottom:1px solid var(--border);padding-b
             html += '<tr>';
             if (k === 0) html += `<td${rs}>${x.f ? `<span class="chip">${esc(x.f)}</span>` : ''}</td><td${rs} class="isbn">${esc(x.i)}</td><td${rs} class="name">${esc(x.n)}${tags}</td><td${rs}>${esc(x.p)}</td>`;
             html += `<td class="code">${esc(s2[0])}</td><td class="code">${esc(majL(s2[1]))}</td><td class="code">${esc(s2[2])}</td><td class="code">${esc(s2[3])}</td>`;
-            if (k === 0) html += `<td${rs} class="num">${fmt(x.s)}</td>`;
             html += `<td class="num">${s2[4] === '' ? '' : fmt(s2[4])}</td>`;
+            if (k === 0) html += `<td${rs} class="num">${fmt(x.s)}</td>`;
             if (k === 0) html += `<td${rs} class="num">${fmt(x.ss)}</td><td${rs} class="num diff ${dc}">${sgn(x.sd)}</td>`;
             html += '</tr>';
           });
@@ -358,7 +358,7 @@ table.m tbody.g tr:last-child td{border-bottom:1px solid var(--border);padding-b
       const dcls = sDiff < 0 ? 'neg' : sDiff > 0 ? 'pos' : 'zero';
       $('#tf').innerHTML = !rows.length ? '' : mobile
         ? `<tr><td colspan="3">합계 · ${fmt(rows.length)}건</td><td class="num diff ${dcls}">${sgn(sDiff)}</td></tr>`
-        : `<tr><td colspan="8">합계 · 항목 ${fmt(rows.length)}건</td><td class="num">${fmt(sSys)}</td><td class="num">${fmt(sQty)}</td><td class="num">${fmt(sSum)}</td><td class="num diff ${dcls}">${sgn(sDiff)}</td></tr>`;
+        : `<tr><td colspan="8">합계 · 항목 ${fmt(rows.length)}건</td><td class="num">${fmt(sQty)}</td><td class="num">${fmt(sSys)}</td><td class="num">${fmt(sSum)}</td><td class="num diff ${dcls}">${sgn(sDiff)}</td></tr>`;
       const total = items.filter(excOk).length;
       $('#count').textContent = rows.length === total ? `전체 ${fmt(total)}건` : `${fmt(rows.length)}건 / 전체 ${fmt(total)}건`;
       $('#f-field-btn').classList.toggle('on', st.fields.size > 0);
