@@ -316,6 +316,8 @@ table.m tbody.g tr:last-child td{border-bottom:1px solid var(--border);padding-b
     const HEAD_PC = [['f', '분야'], ['i', 'ISBN'], ['n', '도서명'], ['p', '출판사'], ['loc', '수불처코드'], ['', '대분류'], ['', '중분류'], ['', '소분류'], ['', '스캔수량', 1], ['s', '전산재고', 1], ['ss', '스캔합계', 1], ['sd', '스캔차이', 1]];
     const HEAD_M = [['f', '분야'], ['i', '상품코드'], ['n', '상품명'], ['sd', '차이', 1]];
     const shelfNo = (s) => `${s[0]}-${s[1]}-${s[2]}-${s[3]}`;
+    // 휴대폰에선 수불처코드(앞 세 자리)는 빼고 대-중-소만 — 한 영업점 안에선 늘 같아 자리만 차지한다
+    const shelfNoM = (s) => `${s[1]}-${s[2]}-${s[3]}`;
     const shelfTxt = (s) => `${shelfNo(s)} 스캔 ${fmt(s[4])}`;
     function render() {
       const rows = view(), mobile = MQ.matches;
@@ -333,8 +335,8 @@ table.m tbody.g tr:last-child td{border-bottom:1px solid var(--border);padding-b
           // 1줄: 분야 · 상품코드 · 상품명(10자 넘으면 …) · 차이 / 2~3줄: 서가 한 줄에 두 곳씩(최대 4곳, 넘치면 '외 N곳')
           //  5곳 이상이면 3곳까지 보이고 넷째 칸에 '외 N곳' — 세 줄을 넘지 않게
           const cells = sh.length > 4
-            ? [...sh.slice(0, 3).map((s2) => `<span>${esc(shelfNo(s2))} <b>스캔 ${fmt(s2[4])}</b></span>`), `<span class="mmore">외 ${sh.length - 3}곳</span>`]
-            : sh.map((s2) => `<span>${esc(shelfNo(s2))} <b>스캔 ${fmt(s2[4])}</b></span>`);
+            ? [...sh.slice(0, 3).map((s2) => `<span>${esc(shelfNoM(s2))} <b>스캔 ${fmt(s2[4])}</b></span>`), `<span class="mmore">외 ${sh.length - 3}곳</span>`]
+            : sh.map((s2) => `<span>${esc(shelfNoM(s2))} <b>스캔 ${fmt(s2[4])}</b></span>`);
           const lines = []; for (let k = 0; k < cells.length; k += 2) lines.push(cells.slice(k, k + 2));
           const rs = lines.length + 1;
           html += `<tr><td>${x.f ? `<span class="chip">${esc(cut(x.f, 6))}</span>` : ''}</td><td class="isbn">${esc(x.i)}</td><td class="mname" title="${esc(x.n)}">${esc(cut(x.n, 10))}${tags}</td><td class="num diff ${dc}" rowspan="${rs}">${sgn(x.sd)}</td></tr>`;
@@ -391,14 +393,14 @@ table.m tbody.g tr:last-child td{border-bottom:1px solid var(--border);padding-b
       const dc = x.sd < 0 ? 'neg' : x.sd > 0 ? 'pos' : '';
       // 서가: 작게, 한 줄에 두 개씩
       const chips = x.sh.length
-        ? `<div class="d-shelves">${x.sh.map((s) => `<span class="d-chip" title="${esc(shelfTxt(s))}">${esc(shelfNo(s))} <b>스캔 ${fmt(s[4])}</b></span>`).join('')}</div>`
+        ? `<div class="d-shelves">${x.sh.map((s) => `<span class="d-chip" title="${esc(shelfTxt(s))}">${esc(MQ.matches ? shelfNoM(s) : shelfNo(s))} <b>스캔 ${fmt(s[4])}</b></span>`).join('')}</div>`
         : '<div style="color:var(--muted);font-size:13px">서가 스캔 데이터 없음</div>';
       const checked = !!PH.checked[x.i];
       const m = modal(`<h3>📖 도서 상세${x.e ? ' <span class="tag ex">예외</span>' : ''}</h3>
         <div class="d-top"><div class="d-cover" id="d-cover"></div>
           <div class="d-meta"><div class="d-title">${esc(x.n || '(제목없음)')}</div><div class="d-sub">${esc(x.p)}${x.f ? ' · ' + esc(x.f) : ''}</div><div class="d-isbn">ISBN ${esc(x.i)}</div>
             <div class="d-stock"><span>전산재고<b>${fmt(x.s)}</b></span><span>스캔합계<b>${fmt(x.ss)}</b></span><span class="${dc}">스캔차이<b>${sgn(x.sd)}</b></span></div></div></div>
-        <div class="d-lbl">서가 (수불처-대-중-소 · 스캔수량)</div>${chips}
+        <div class="d-lbl">서가 (${MQ.matches ? '대-중-소' : '수불처-대-중-소'} · 스캔수량)</div>${chips}
         <div class="d-lbl">📷 사진 <span id="d-pn" style="color:var(--muted);font-weight:400"></span></div><div class="d-photos" id="d-photos"></div>
         <div id="d-stage"></div>
         <div class="acts"><button class="btn" type="button" id="d-close">닫기</button><span class="sp"></span>
