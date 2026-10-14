@@ -210,6 +210,11 @@ router.get('/uploads', (req, res) => {
   res.json(require('../uploadLog').snapshot(Math.min(300, Math.max(1, parseInt(req.query.limit, 10) || 50))));
 });
 
+// 접속 거점(Cloudflare colo) — 최근 1시간·24시간 국내 접속이 어느 거점으로 들어왔나
+router.get('/edge', (req, res) => {
+  res.json(require('../edgeColo').snapshot());
+});
+
 router.get('/db-status', wrap(async (req, res) => {
   try {
     const stats = await healthStats();

@@ -91,6 +91,7 @@ const API = (() => {
     activeNotices: () => req('GET', '/meta/notices/active'),
     serverStatus: () => req('GET', '/meta/server-status'),
     adminUploads: (limit) => req('GET', `/admin/uploads?limit=${limit || 50}`),
+    adminEdge: () => req('GET', '/admin/edge'),
     allowedExtensions: () => req('GET', '/files/allowed-extensions'),
     usage: (ownerId) => req('GET', `/files/usage/summary${ownerId ? '?ownerId=' + ownerId : ''}`),
     upload: (formData, ownerId) => req('POST', `/files/upload${ownerId ? '?ownerId=' + ownerId : ''}`, formData, true),

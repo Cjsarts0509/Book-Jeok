@@ -134,6 +134,7 @@ app.use('/api/', rateLimit({
 const metrics = require('./metrics');
 app.use('/api/', metrics.requestMetrics);
 app.use('/api/', require('./uploadLog').middleware);   // 업로드마다 접속 주소·거점·받기/검사 시간 한 줄 기록
+app.use('/api/', require('./edgeColo').middleware);    // 국내 접속이 서울(ICN) 거점으로 들어오는지 센다 — 고정 IP 경로가 틀어지면 경보
 
 // ── 요청 타임아웃 (S33) ─────────────────────────────
 // 응답이 영영 안 오는 요청은 브라우저를 무한 로딩에 빠뜨리고 DB 커넥션을 붙잡는다.
@@ -242,6 +243,7 @@ require('./settings').loadSettings(); // 허용 확장자 캐시 로드
 require('./purge').startPurgeScheduler(); // 휴지통 1년 경과분 자동 영구삭제
 require('./scheduler').start(); // 주간 리포트 자동 발송(SMTP 설정 시)
 metrics.start(); // 이벤트루프·메모리·디스크·DB풀·에러율 상시 감시 + 예기치 않은 재시작 감지
+require('./edgeColo').start();   // 접속 거점 비율 10분마다 판단(서울 비율이 떨어지면 관리자 알림)
 require('./checkup').startScheduler(); // 정합성 검사(주간) · 좀비 리소스 정리 리포트(일간)
 require('./mailQueue').start();        // 메일 재시도 큐(실패분 백오프 재발송)
 const server = app.listen(config.port, () => {

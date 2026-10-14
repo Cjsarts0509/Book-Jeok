@@ -2864,7 +2864,7 @@ const App = (() => {
         const msg = `${label} 완료 · ${Math.round(took / 1000)}초 걸렸습니다`;
         if (wentAway && document.visibilityState === 'hidden' && await ensureDesktopNotice()) {
           try {
-            const n = new Notification('북적북적', { body: msg, tag: 'bj-job', icon: 'assets/logo.svg?v=216' });
+            const n = new Notification('북적북적', { body: msg, tag: 'bj-job', icon: 'assets/logo.svg?v=217' });
             n.onclick = () => { window.focus(); n.close(); };
           } catch (_) { UI.toast(msg, 'success'); }
         } else UI.toast(msg, 'success');
@@ -3370,10 +3370,28 @@ const App = (() => {
         <div class="ss-up-wrap"><table class="ss-up"><thead><tr><th>시각</th><th>결과 · 거점</th><th>누가</th><th>파일 · 크기</th><th>걸린 시간</th></tr></thead><tbody>${rows}</tbody></table></div>
         <p class="muted" style="font-size:11px;margin-top:6px">받기가 길면 회선·경로 문제, 검사가 길면 서버 문제입니다. 거점이 ICN(서울)이 아니면 ⚠️ — 해외를 돌아온 접속입니다.</p>`;
     };
+    // 관리자만: 접속 거점 — 새 주소(hosting.kr 에 고정한 Cloudflare IP)로 국내 접속이 서울(ICN)에 들어오는지.
+    //   비율이 떨어지면 서버가 알림도 보낸다(backend/src/edgeColo.js). 대체 IP 는 KT 회선 PC 에서 진단 스크립트로 찾는다.
+    const edgeHtml = (e) => {
+      if (!e) return '';
+      const chips = (st) => st.colos.length
+        ? st.colos.map((c) => `<span class="ss-colo${c.home ? '' : ' ss-colo-far'}">${esc(c.colo)} ${c.clients}명${c.home ? '' : ' ⚠️'}</span>`).join(' ')
+        : '<span class="muted">아직 기록이 없습니다</span>';
+      const line = (label, st) => {
+        const pct = st.homePct;
+        const color = pct == null ? 'var(--text-muted)' : pct < e.thresholds.dangerPct ? 'var(--danger)' : pct < e.thresholds.warnPct ? '#f0a500' : 'var(--accent)';
+        return `<div class="ss-edge-row"><span class="ss-edge-l">${label}</span><b style="color:${color}">${pct == null ? '-' : pct + '%'}</b> <span class="muted">서울 ${st.homeClients}/${st.clients}명</span><div class="ss-edge-chips">${chips(st)}</div></div>`;
+      };
+      return `<div class="ss-sec">🌐 접속 거점 <span class="muted" style="font-weight:400;font-size:12px">· ${esc(e.hosts.join(', '))} 국내 접속 · 서버 시작 이후</span></div>
+        ${line('최근 1시간', e.hour)}${line('최근 24시간', e.day)}
+        <p class="muted" style="font-size:11px;margin-top:6px">서울(${esc(e.homeColos.join('/'))}) 비율이 ${e.thresholds.warnPct}% 아래로 내려가면 알림이 갑니다(국내 접속 ${e.thresholds.minClients}명 이상일 때만 판단).
+        해외 거점이 늘면 <a href="/tools/cf-ip-probe.ps1" download>🧭 거점 진단 스크립트</a>를 KT 회선 PC 에서 실행해 서울로 가는 IP 를 찾고, hosting.kr 의 A 레코드(bookjeok · projectmanager)를 바꾸세요.
+        실행: 받은 파일이 있는 폴더에서 <code>powershell -ExecutionPolicy Bypass -File cf-ip-probe.ps1</code></p>`;
+    };
     async function load() {
       if (!document.body.contains(m.el)) { stop(); return; } // 배경클릭·ESC 등으로 닫혔으면 폴링 종료
       try {
-        const [s, up] = await Promise.all([API.serverStatus(), isAdmin ? API.adminUploads(40).catch(() => null) : null]);
+        const [s, up, edge] = await Promise.all([API.serverStatus(), isAdmin ? API.adminUploads(40).catch(() => null) : null, isAdmin ? API.adminEdge().catch(() => null) : null]);
         m.q('#ss-time').textContent = '· ' + new Date(s.time).toLocaleTimeString('ko-KR');
         m.q('#ss-body').innerHTML =
           bar('CPU 부하', s.cpu.loadPct, `${s.cpu.loadPct}% · load ${s.cpu.load1.toFixed(2)} / ${s.cpu.cores}코어`) +
@@ -3384,7 +3402,7 @@ const App = (() => {
             <div><span class="muted">서비스 가동</span><b>${dur(s.uptime.process)}</b></div>
             <div><span class="muted">데이터베이스</span><b style="color:${s.db.connected ? 'var(--accent)' : 'var(--danger)'}">${s.db.connected ? '정상' : '끊김'}</b></div>
           </div>` +
-          procHtml(s.procs) + uploadsHtml(up);
+          procHtml(s.procs) + edgeHtml(edge) + uploadsHtml(up);
       } catch (e) { m.q('#ss-body').innerHTML = `<p class="muted" style="color:var(--danger)">${UI.escapeHtml(e.message)}</p>`; }
     }
     load();
@@ -4058,7 +4076,7 @@ const App = (() => {
     async function downloadHtml() {
       try {
         if (!window.SAReport) {
-          await new Promise((res, rej) => { const sc = document.createElement('script'); sc.src = 'js/sa-report.js?v=216'; sc.onload = res; sc.onerror = () => rej(new Error('보고서 모듈을 불러오지 못했습니다.')); document.head.appendChild(sc); });
+          await new Promise((res, rej) => { const sc = document.createElement('script'); sc.src = 'js/sa-report.js?v=217'; sc.onload = res; sc.onerror = () => rej(new Error('보고서 모듈을 불러오지 못했습니다.')); document.head.appendChild(sc); });
         }
         const br = saBranchLabel();
         const dt = new Date(); const p2 = (x) => String(x).padStart(2, '0');
@@ -4070,7 +4088,7 @@ const App = (() => {
         }));
         // 바코드 인식 모듈을 보고서 안에 넣는다(인터넷 없이 📷 바코드로 찾기·사진 속 바코드 인식). 못 가져오면 사진만.
         const grab = (u) => fetch(u).then((r) => (r.ok ? r.text() : '')).catch(() => '');
-        const [zxing, isbn] = await Promise.all([grab('vendor/zxing.min.js?v=216'), grab('js/isbn.js?v=216')]);
+        const [zxing, isbn] = await Promise.all([grab('vendor/zxing.min.js?v=217'), grab('js/isbn.js?v=217')]);
         // 웹하드 자동 저장 열쇠(60일): 전달할 영업점을 골라 뒀으면 그 영업점의 재고조사오차_<년도> 폴더,
         //  아니면 지금 공간의 사진 저장 폴더(앱에서 찍을 때와 같은 곳). 못 받으면 자동 저장 없이 만든다.
         let sync = null;

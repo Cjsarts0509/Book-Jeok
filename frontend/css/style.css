@@ -1228,6 +1228,12 @@ th { background: var(--bg); font-weight: 700; color: var(--text-muted); font-siz
 .ss-up td.ss-up-name { max-width: 200px; overflow: hidden; text-overflow: ellipsis; }
 .ss-up td.ss-up-name .muted, .ss-up td .muted { font-size: 11px; }
 .ss-up-where { font-size: 11px; font-weight: 400; color: var(--text); }
+.ss-edge-row { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; font-size: 13px; padding: 4px 0; }
+.ss-edge-l { min-width: 72px; color: var(--text-muted); font-size: 12px; }
+.ss-edge-chips { flex-basis: 100%; display: flex; flex-wrap: wrap; gap: 4px; padding-left: 80px; }
+.ss-colo { font-size: 11px; padding: 1px 7px; border-radius: 10px; background: var(--surface-2, rgba(127,127,127,.12)); }
+.ss-colo-far { background: rgba(240,165,0,.18); }
+@media (max-width: 700px) { .ss-edge-chips { padding-left: 0; } }
 .ss-up tr.ss-up-bad td { background: #FFF5F5; }
 .ss-up tr.ss-up-err td { color: var(--danger); white-space: normal; padding-top: 0; background: #FFF5F5; }
 .ss-ok { color: var(--accent); font-weight: 700; } .ss-fail { color: var(--danger); font-weight: 700; } .ss-cut { color: #d9480f; font-weight: 700; }
