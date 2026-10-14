@@ -2864,7 +2864,7 @@ const App = (() => {
         const msg = `${label} 완료 · ${Math.round(took / 1000)}초 걸렸습니다`;
         if (wentAway && document.visibilityState === 'hidden' && await ensureDesktopNotice()) {
           try {
-            const n = new Notification('북적북적', { body: msg, tag: 'bj-job', icon: 'assets/logo.svg?v=212' });
+            const n = new Notification('북적북적', { body: msg, tag: 'bj-job', icon: 'assets/logo.svg?v=213' });
             n.onclick = () => { window.focus(); n.close(); };
           } catch (_) { UI.toast(msg, 'success'); }
         } else UI.toast(msg, 'success');
@@ -3667,7 +3667,7 @@ const App = (() => {
         const b4 = [d.field, d.isbn, d.name, d.pub]
           .map((c, idx) => `<td class="${idx === 1 ? 'sa-isbn' : ''}">${esc(String(c == null ? '' : c))}</td>`).join('');
         const shelfTd = (h) => `<td class="sa-shelf">${h}</td>`;
-        const shc = [stack(sh.map((x) => x.code)), stack(sh.map((x) => majLabel(x.maj))), stack(sh.map((x) => x.mid)), stack(sh.map((x) => x.min))].map(shelfTd).join('');
+        const shc = [stack(sh.map((x) => x.code)), stack(sh.map((x) => x.maj)), stack(sh.map((x) => x.mid)), stack(sh.map((x) => x.min))].map(shelfTd).join('');
         const sd = scanDiff(d);
         const tail = `${shelfTd(stack(sh.map((x) => x.qty)))}<td>${esc(String(d.sys == null ? '' : d.sys))}</td><td>${scanSum(d)}</td><td class="${sd ? 'sa-sdiff' : ''}">${sd}</td>`;
         return `<tr data-ri="${ri}">${b4}${shc}${tail}</tr>`;
@@ -3955,12 +3955,6 @@ const App = (() => {
 
     // 서가번호(11자리) → [수불처코드(3), 대분류(2), 중분류(4), 소분류(2)]. 형식이 다르면 통째로 수불처코드 칸에.
     //   예) 001 12 3456 78  →  수불처 001 · 대분류 12 · 중분류 3456 · 소분류 78
-    // 대분류 표기: 01 → 01(A), 04 → 04(D) … 26 → 26(Z). 숫자가 아니거나 범위 밖이면 그대로.
-    function majLabel(m) {
-      const s = String(m == null ? '' : m);
-      const n = /^\d{1,2}$/.test(s) ? parseInt(s, 10) : 0;
-      return n >= 1 && n <= 26 ? `${s}(${String.fromCharCode(64 + n)})` : s;
-    }
     function splitShelf(num) {
       const s = String(num == null ? '' : num).trim();
       if (s.length >= 11) return [s.slice(0, 3), s.slice(3, 5), s.slice(5, 9), s.slice(9)];
@@ -3971,7 +3965,7 @@ const App = (() => {
     //     그 ISBN 의 행들을 세로로 '병합'해 한 번만 보인다. 값은 맨 위 칸에만 있으므로 서가번호별로 합쳐도
     //     두 번 세어지지 않는다(예전엔 행마다 반복돼 2~3배로 부풀었다).
     //     단, 엑셀은 크기가 다른 병합 칸이 섞이면 정렬을 못 한다 → 정렬은 ②에서.
-    //  ② '항목별(정렬용)' — ISBN 당 한 행, 서가는 한 칸에 '036-04-0021-01 ×1 / …' 로. 병합이 없어 어느 열로든 정렬·필터 가능.
+    //  ② '항목별(정렬용)' — ISBN 당 한 행, 서가는 한 칸에 '036-04-0021-01 스캔 1 / …' 로. 병합이 없어 어느 열로든 정렬·필터 가능.
     function buildDiscWorkbook(XLSX) {
       const enc = XLSX.utils.encode_cell;
       // 앞자리 0이 있는 코드 칸은 '텍스트' 셀로 못박는다(셀 타입 + 서식 @ — 편집·재저장해도 숫자로 안 바뀜).
@@ -4007,7 +4001,7 @@ const App = (() => {
           const first = k === 0;
           const row = [
             d.field, d.isbn, d.name, d.pub,
-            s.code, majLabel(s.maj), s.mid, s.min,
+            s.code, s.maj, s.mid, s.min,
             s.qty, first ? sys : asStr(sys),
             first ? ss : asStr(ss), first ? sd : asStr(sd),
           ];
@@ -4026,7 +4020,7 @@ const App = (() => {
       const h2 = ['분야', 'ISBN', '도서명', '출판사', '전산재고', '스캔합계', '스캔차이', '서가수', '서가 (스캔수량)', ...(withExc ? ['예외'] : [])];
       const rows2 = list.map((d) => {
         const sh = itemShelves(d);
-        const where = sh.map((s) => (s.maj ? `${s.code}-${majLabel(s.maj)}-${s.mid}-${s.min}` : s.code) + ` ×${s.qty}`).join(' / ');
+        const where = sh.map((s) => (s.maj ? `${s.code}-${s.maj}-${s.mid}-${s.min}` : s.code) + ` 스캔 ${s.qty}`).join(' / ');
         return [d.field, d.isbn, d.name, d.pub, d.sys, scanSum(d), scanDiff(d), sh.length, where, ...(withExc ? [isExc(d) ? 'Y' : ''] : [])];
       });
       const ws2 = XLSX.utils.aoa_to_sheet([h2, ...rows2]);
@@ -4064,7 +4058,7 @@ const App = (() => {
     async function downloadHtml() {
       try {
         if (!window.SAReport) {
-          await new Promise((res, rej) => { const sc = document.createElement('script'); sc.src = 'js/sa-report.js?v=212'; sc.onload = res; sc.onerror = () => rej(new Error('보고서 모듈을 불러오지 못했습니다.')); document.head.appendChild(sc); });
+          await new Promise((res, rej) => { const sc = document.createElement('script'); sc.src = 'js/sa-report.js?v=213'; sc.onload = res; sc.onerror = () => rej(new Error('보고서 모듈을 불러오지 못했습니다.')); document.head.appendChild(sc); });
         }
         const br = saBranchLabel();
         const dt = new Date(); const p2 = (x) => String(x).padStart(2, '0');
@@ -4076,7 +4070,7 @@ const App = (() => {
         }));
         // 바코드 인식 모듈을 보고서 안에 넣는다(인터넷 없이 📷 바코드로 찾기·사진 속 바코드 인식). 못 가져오면 사진만.
         const grab = (u) => fetch(u).then((r) => (r.ok ? r.text() : '')).catch(() => '');
-        const [zxing, isbn] = await Promise.all([grab('vendor/zxing.min.js?v=212'), grab('js/isbn.js?v=212')]);
+        const [zxing, isbn] = await Promise.all([grab('vendor/zxing.min.js?v=213'), grab('js/isbn.js?v=213')]);
         const html = window.SAReport.build({
           title: `${br ? br + ' ' : ''}재고조사 오차`,
           source: [saAnalyzedYear ? `${saAnalyzedYear}년` : '', br].filter(Boolean).join(' · '),

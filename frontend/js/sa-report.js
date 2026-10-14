@@ -78,10 +78,12 @@ tfoot td{position:sticky;bottom:0;background:var(--head);font-weight:800;border-
 .btn.ok{background:var(--done-text);border-color:var(--done-text);color:#fff;font-weight:800}.btn.ok.undo{background:var(--surface);color:var(--done-text)}
 /* 휴대폰 표: 분야·상품코드·상품명·차이 + 서가 두 줄 */
 table.m{table-layout:fixed;font-size:12.5px}table.m th,table.m td{padding:6px 6px;overflow:hidden;text-overflow:ellipsis}
-table.m thead th:nth-child(1){width:21%}table.m thead th:nth-child(2){width:31%}table.m thead th:nth-child(4){width:15%}
+table.m thead th:nth-child(1){width:19%}table.m thead th:nth-child(2){width:33%}table.m thead th:nth-child(4){width:14%}
 table.m .chip{font-size:11px;padding:1px 6px;max-width:100%;overflow:hidden;text-overflow:ellipsis;vertical-align:middle}
 table.m tfoot td{overflow:visible;white-space:nowrap}tbody.g{-webkit-tap-highlight-color:transparent}table.m td.isbn{font-size:12px}table.m td.mname{white-space:nowrap;font-weight:600}table.m .tag{margin-left:3px;padding:0 4px}
-table.m td.msh{padding:0 6px 3px;border-bottom:none;font-family:ui-monospace,Menlo,monospace;font-size:11.5px;color:var(--muted);white-space:nowrap}
+table.m td.msh{padding:0 6px 3px;border-bottom:none;font-family:ui-monospace,Menlo,monospace;font-size:11px;color:var(--muted);white-space:nowrap}
+table.m .mshr{display:grid;grid-template-columns:1fr 1fr;column-gap:8px}table.m .mshr span{overflow:hidden;text-overflow:ellipsis}
+table.m .mshr b{font-weight:700;color:var(--chip-text);font-family:inherit}table.m .mmore{font-weight:700;color:var(--muted)}
 table.m tbody.g tr:last-child td{border-bottom:1px solid var(--border);padding-bottom:6px}
 .toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:#1f2328;color:#fff;padding:10px 16px;border-radius:10px;z-index:200;font-size:13px;box-shadow:var(--shadow);max-width:90vw}
 .toast.err{background:#d1242f}.toast.ok{background:#0a7c42}
@@ -106,7 +108,6 @@ table.m tbody.g tr:last-child td{border-bottom:1px solid var(--border);padding-b
     const esc = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
     const fmt = (n) => Number(n || 0).toLocaleString('ko-KR');
     const sgn = (n) => (n > 0 ? '+' + fmt(n) : fmt(n));
-    const majL = (m) => { const s = String(m == null ? '' : m); const n = /^\d{1,2}$/.test(s) ? parseInt(s, 10) : 0; return n >= 1 && n <= 26 ? `${s}(${String.fromCharCode(64 + n)})` : s; };
     const byIsbn = new Map(items.map((x) => [x.i, x]));
     const st = { q: '', fields: new Set(), diff: '', maj: '', photo: '', exc: '', done: '', sort: { k: null, dir: 1 } };
     const MQ = window.matchMedia('(max-width:700px)');   // 휴대폰: 줄인 표
@@ -266,7 +267,7 @@ table.m tbody.g tr:last-child td{border-bottom:1px solid var(--border);padding-b
 
     // ── 표 ─────────────────────────────
     $('#f-field-list').innerHTML = fields.map((f) => `<label><input type="checkbox" value="${esc(f)}"> ${esc(f)} <span style="color:var(--muted);margin-left:auto">${items.filter((x) => x.f === f).length}</span></label>`).join('');
-    $('#f-maj').innerHTML = '<option value="">대분류 전체</option>' + majs.map((m) => `<option value="${esc(m)}">대분류 ${esc(majL(m))}</option>`).join('');
+    $('#f-maj').innerHTML = '<option value="">대분류 전체</option>' + majs.map((m) => `<option value="${esc(m)}">대분류 ${esc(m)}</option>`).join('');
     if (!nExc) $('#f-exc').style.display = 'none'; else $('#f-exc').options[0].textContent = `예외 빼기 (${nExc}건)`;
     if (!window.ISBN) { $('#f-scan').title = '이 파일에는 바코드 인식 모듈이 없습니다'; }
 
@@ -314,7 +315,8 @@ table.m tbody.g tr:last-child td{border-bottom:1px solid var(--border);padding-b
     // 머리글(PC: 12열 · 휴대폰: 분야·상품코드·상품명·차이)
     const HEAD_PC = [['f', '분야'], ['i', 'ISBN'], ['n', '도서명'], ['p', '출판사'], ['loc', '수불처코드'], ['', '대분류'], ['', '중분류'], ['', '소분류'], ['', '스캔수량', 1], ['s', '전산재고', 1], ['ss', '스캔합계', 1], ['sd', '스캔차이', 1]];
     const HEAD_M = [['f', '분야'], ['i', '상품코드'], ['n', '상품명'], ['sd', '차이', 1]];
-    const shelfTxt = (s) => `${s[0]}-${majL(s[1])}-${s[2]}-${s[3]} ×${fmt(s[4])}`;
+    const shelfNo = (s) => `${s[0]}-${s[1]}-${s[2]}-${s[3]}`;
+    const shelfTxt = (s) => `${shelfNo(s)} 스캔 ${fmt(s[4])}`;
     function render() {
       const rows = view(), mobile = MQ.matches;
       const head = mobile ? HEAD_M : HEAD_PC;
@@ -328,13 +330,15 @@ table.m tbody.g tr:last-child td{border-bottom:1px solid var(--border);padding-b
         sSys += x.s; sSum += x.ss; sDiff += x.sd;
         html += `<tbody class="g${done ? ' done' : ''}" data-i="${esc(x.i)}">`;
         if (mobile) {
-          // 1줄: 분야 · 상품코드 · 상품명(10자 넘으면 …) · 차이 / 2~3줄: 서가 한 줄씩(3곳 이상이면 '… 외 N곳')
-          const rs = Math.min(sh.length, 2) + 1;
+          // 1줄: 분야 · 상품코드 · 상품명(10자 넘으면 …) · 차이 / 2~3줄: 서가 한 줄에 두 곳씩(최대 4곳, 넘치면 '외 N곳')
+          //  5곳 이상이면 3곳까지 보이고 넷째 칸에 '외 N곳' — 세 줄을 넘지 않게
+          const cells = sh.length > 4
+            ? [...sh.slice(0, 3).map((s2) => `<span>${esc(shelfNo(s2))} <b>스캔 ${fmt(s2[4])}</b></span>`), `<span class="mmore">외 ${sh.length - 3}곳</span>`]
+            : sh.map((s2) => `<span>${esc(shelfNo(s2))} <b>스캔 ${fmt(s2[4])}</b></span>`);
+          const lines = []; for (let k = 0; k < cells.length; k += 2) lines.push(cells.slice(k, k + 2));
+          const rs = lines.length + 1;
           html += `<tr><td>${x.f ? `<span class="chip">${esc(cut(x.f, 6))}</span>` : ''}</td><td class="isbn">${esc(x.i)}</td><td class="mname" title="${esc(x.n)}">${esc(cut(x.n, 10))}${tags}</td><td class="num diff ${dc}" rowspan="${rs}">${sgn(x.sd)}</td></tr>`;
-          sh.slice(0, 2).forEach((s2, k) => {
-            const more = k === 1 && sh.length > 2 ? ` … 외 ${sh.length - 2}곳` : '';
-            html += `<tr><td class="msh" colspan="3">${esc(shelfTxt(s2))}${more}</td></tr>`;
-          });
+          lines.forEach((pair) => { html += `<tr><td class="msh" colspan="3"><div class="mshr">${pair.join('')}</div></td></tr>`; });
         } else {
           const shelves = sh.length ? sh : [['', '', '', '', '']];
           const n = shelves.length, rs = n > 1 ? ` rowspan="${n}"` : '';
@@ -342,7 +346,7 @@ table.m tbody.g tr:last-child td{border-bottom:1px solid var(--border);padding-b
             sQty += Number(s2[4]) || 0;
             html += '<tr>';
             if (k === 0) html += `<td${rs}>${x.f ? `<span class="chip">${esc(x.f)}</span>` : ''}</td><td${rs} class="isbn">${esc(x.i)}</td><td${rs} class="name">${esc(x.n)}${tags}</td><td${rs}>${esc(x.p)}</td>`;
-            html += `<td class="code">${esc(s2[0])}</td><td class="code">${esc(majL(s2[1]))}</td><td class="code">${esc(s2[2])}</td><td class="code">${esc(s2[3])}</td>`;
+            html += `<td class="code">${esc(s2[0])}</td><td class="code">${esc(s2[1])}</td><td class="code">${esc(s2[2])}</td><td class="code">${esc(s2[3])}</td>`;
             html += `<td class="num">${s2[4] === '' ? '' : fmt(s2[4])}</td>`;
             if (k === 0) html += `<td${rs} class="num">${fmt(x.s)}</td>`;
             if (k === 0) html += `<td${rs} class="num">${fmt(x.ss)}</td><td${rs} class="num diff ${dc}">${sgn(x.sd)}</td>`;
@@ -387,14 +391,14 @@ table.m tbody.g tr:last-child td{border-bottom:1px solid var(--border);padding-b
       const dc = x.sd < 0 ? 'neg' : x.sd > 0 ? 'pos' : '';
       // 서가: 작게, 한 줄에 두 개씩
       const chips = x.sh.length
-        ? `<div class="d-shelves">${x.sh.map((s) => `<span class="d-chip" title="${esc(shelfTxt(s))}">${esc(s[0])}-${esc(majL(s[1]))}-${esc(s[2])}-${esc(s[3])} <b>×${fmt(s[4])}</b></span>`).join('')}</div>`
+        ? `<div class="d-shelves">${x.sh.map((s) => `<span class="d-chip" title="${esc(shelfTxt(s))}">${esc(shelfNo(s))} <b>스캔 ${fmt(s[4])}</b></span>`).join('')}</div>`
         : '<div style="color:var(--muted);font-size:13px">서가 스캔 데이터 없음</div>';
       const checked = !!PH.checked[x.i];
       const m = modal(`<h3>📖 도서 상세${x.e ? ' <span class="tag ex">예외</span>' : ''}</h3>
         <div class="d-top"><div class="d-cover" id="d-cover"></div>
           <div class="d-meta"><div class="d-title">${esc(x.n || '(제목없음)')}</div><div class="d-sub">${esc(x.p)}${x.f ? ' · ' + esc(x.f) : ''}</div><div class="d-isbn">ISBN ${esc(x.i)}</div>
             <div class="d-stock"><span>전산재고<b>${fmt(x.s)}</b></span><span>스캔합계<b>${fmt(x.ss)}</b></span><span class="${dc}">스캔차이<b>${sgn(x.sd)}</b></span></div></div></div>
-        <div class="d-lbl">서가 (수불처-대-중-소 × 스캔수량)</div>${chips}
+        <div class="d-lbl">서가 (수불처-대-중-소 · 스캔수량)</div>${chips}
         <div class="d-lbl">📷 사진 <span id="d-pn" style="color:var(--muted);font-weight:400"></span></div><div class="d-photos" id="d-photos"></div>
         <div id="d-stage"></div>
         <div class="acts"><button class="btn" type="button" id="d-close">닫기</button><span class="sp"></span>
