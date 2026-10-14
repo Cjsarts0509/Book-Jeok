@@ -2864,7 +2864,7 @@ const App = (() => {
         const msg = `${label} 완료 · ${Math.round(took / 1000)}초 걸렸습니다`;
         if (wentAway && document.visibilityState === 'hidden' && await ensureDesktopNotice()) {
           try {
-            const n = new Notification('북적북적', { body: msg, tag: 'bj-job', icon: 'assets/logo.svg?v=214' });
+            const n = new Notification('북적북적', { body: msg, tag: 'bj-job', icon: 'assets/logo.svg?v=216' });
             n.onclick = () => { window.focus(); n.close(); };
           } catch (_) { UI.toast(msg, 'success'); }
         } else UI.toast(msg, 'success');
@@ -4058,7 +4058,7 @@ const App = (() => {
     async function downloadHtml() {
       try {
         if (!window.SAReport) {
-          await new Promise((res, rej) => { const sc = document.createElement('script'); sc.src = 'js/sa-report.js?v=214'; sc.onload = res; sc.onerror = () => rej(new Error('보고서 모듈을 불러오지 못했습니다.')); document.head.appendChild(sc); });
+          await new Promise((res, rej) => { const sc = document.createElement('script'); sc.src = 'js/sa-report.js?v=216'; sc.onload = res; sc.onerror = () => rej(new Error('보고서 모듈을 불러오지 못했습니다.')); document.head.appendChild(sc); });
         }
         const br = saBranchLabel();
         const dt = new Date(); const p2 = (x) => String(x).padStart(2, '0');
@@ -4070,17 +4070,30 @@ const App = (() => {
         }));
         // 바코드 인식 모듈을 보고서 안에 넣는다(인터넷 없이 📷 바코드로 찾기·사진 속 바코드 인식). 못 가져오면 사진만.
         const grab = (u) => fetch(u).then((r) => (r.ok ? r.text() : '')).catch(() => '');
-        const [zxing, isbn] = await Promise.all([grab('vendor/zxing.min.js?v=214'), grab('js/isbn.js?v=214')]);
+        const [zxing, isbn] = await Promise.all([grab('vendor/zxing.min.js?v=216'), grab('js/isbn.js?v=216')]);
+        // 웹하드 자동 저장 열쇠(60일): 전달할 영업점을 골라 뒀으면 그 영업점의 재고조사오차_<년도> 폴더,
+        //  아니면 지금 공간의 사진 저장 폴더(앱에서 찍을 때와 같은 곳). 못 받으면 자동 저장 없이 만든다.
+        let sync = null;
+        try {
+          const bid = m.q('#sa-branch') && m.q('#sa-branch').value;
+          const target = bid
+            ? { ownerId: Number(bid), folder: `/재고조사오차_${saAnalyzedYear || dt.getFullYear()}` }
+            : { ownerId: state.ownerId || undefined, folder: saCurrentFolder || '/' };
+          const k = await API.stockAuditReportKey({ ...target, label: `${br ? br + ' ' : ''}재고조사 오차` });
+          sync = { api: (window.BOOKJEOK_API || location.origin).replace(/\/$/, ''), token: k.token, expiresAt: k.expiresAt, folder: k.folder, owner: k.owner };
+        } catch (e) { UI.toast('웹하드 자동 저장 열쇠를 받지 못해, 파일 저장만 되는 보고서로 만듭니다: ' + (e.message || ''), 'info'); }
         const html = window.SAReport.build({
           title: `${br ? br + ' ' : ''}재고조사 오차`,
           source: [saAnalyzedYear ? `${saAnalyzedYear}년` : '', br].filter(Boolean).join(' · '),
           generatedAt: `${dt.getFullYear()}-${p2(dt.getMonth() + 1)}-${p2(dt.getDate())} ${p2(dt.getHours())}:${p2(dt.getMinutes())}`,
           fileBase: saFileBase(),
+          sync,
         }, items, { zxing, isbn });
         const url = URL.createObjectURL(new Blob([html], { type: 'text/html;charset=utf-8' }));
         const a = document.createElement('a'); a.href = url; a.download = saFileBase() + '.html';
         document.body.appendChild(a); a.click(); a.remove();
         setTimeout(() => URL.revokeObjectURL(url), 4000);
+        if (sync) UI.toast(`보고서에서 찍은 사진·확인은 ${sync.owner} 웹하드 ${sync.folder === '/' ? '최상위 폴더' : sync.folder}에 자동 저장됩니다(${new Date(sync.expiresAt).toLocaleDateString('ko-KR')}까지)`, 'success');
       } catch (e) { UI.toast(e.message || '다운로드 실패', 'error'); }
     }
     // 영업점 선택 드롭다운 채우기(목록이 늦게 도착해도 반영)

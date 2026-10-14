@@ -12,7 +12,7 @@
 // - 받기: 브라우저→서버로 파일이 다 들어오기까지(회선·경로 속도). 검사: 형식·YARA. 저장: DB 기록.
 //   받기가 길면 회선/경로 문제, 검사가 길면 서버 문제로 구분된다.
 // - 끊김: 다 받기 전에 연결이 닫힌 것(사용자가 취소했거나 창을 닫았거나 회선이 끊김). 받은 만큼을 남긴다.
-const UPLOAD_PATH = /^\/api\/(files\/upload(\/chunk|\/complete)?|upload-link\/[^/]+)$/;
+const UPLOAD_PATH = /^\/api\/(files\/upload(\/chunk|\/complete)?|upload-link\/[^/]+|sa-report\/[^/]+\/photo)$/;
 const KEEP = 300;
 
 const sec = (ms) => (ms / 1000).toFixed(1) + 's';
@@ -24,6 +24,7 @@ const recent = [];          // 최근 결과(최신이 앞)
 
 function who(req) {
   if (req.user) return { id: req.user.id, name: req.user.display_name || req.user.username || `#${req.user.id}` };
+  if (req.saKey) return { id: null, name: `재고조사 보고서 '${req.saKey.label || req.saKey.owner_name || ''}'`, ownerId: req.saKey.owner_id };
   if (req._uploadReq) return { id: null, name: `외부 링크 '${req._uploadReq.label || ''}'`, ownerId: req._uploadReq.owner_id };
   return { id: null, name: req.originalUrl.includes('/upload-link/') ? '외부 링크' : '(로그인 전)' };
 }

@@ -17,6 +17,7 @@ const HEAVY_MS = parseInt(process.env.HEAVY_TIMEOUT_MS || '180000', 10);        
 const RULES = [
   { re: /\/upload(\/|$)/, ms: 0 },                 // 업로드: 전송 시간이 곧 파일 크기 — 시간으로 끊지 않는다
   { re: /\/download(\/|$)/, ms: 0 },               // 다운로드: 스트리밍이라 마찬가지
+  { re: /\/sa-report\/[^/]+\/photo(\/|$)/, ms: 0 }, // 재고조사 보고서 사진(휴대폰 회선으로 올라옴·내려감)
   { re: /\/bulk\/zip/, ms: HEAVY_MS },             // 압축: 오래 걸리지만 무한은 아니어야 한다
   { re: /\/pdf(\/|$)/, ms: HEAVY_MS },             // 문서 → PDF 변환
   { re: /\/checkups\/[^/]+\/run/, ms: HEAVY_MS },  // 정합성 검사(파일이 많으면 오래)

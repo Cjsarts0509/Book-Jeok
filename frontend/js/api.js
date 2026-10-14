@@ -73,6 +73,7 @@ const API = (() => {
     stockAuditDelete: (ownerId) => req('DELETE', `/files/stock-audit${ownerId ? '?ownerId=' + ownerId : ''}`),
     stockAuditBranches: () => req('GET', '/files/stock-audit/branches'),
     stockAuditDeliver: (payload) => req('POST', '/files/stock-audit/deliver', payload),
+    stockAuditReportKey: (payload) => req('POST', '/files/stock-audit/report-key', payload),
     tree: (ownerId) => req('GET', `/files/tree${ownerId ? '?ownerId=' + ownerId : ''}`),
     // U10 잠금 · U6 이력 · U9 템플릿 · U12 도서정보
     lockFile: (id, note) => req('POST', `/files/${id}/lock`, { note: note || '' }),
@@ -155,6 +156,7 @@ const API = (() => {
     dashboard: () => req('GET', '/admin/dashboard'),
     adminShares: () => req('GET', '/admin/shares'),
     deleteAdminShare: (kind, id) => req('DELETE', `/admin/shares/${kind}/${id}`),
+    revokeSaReportKey: (id) => req('POST', `/admin/sa-report-keys/${id}/revoke`),
     branchAccountsPreview: () => req('GET', '/admin/branch-accounts/preview'),
     branchAccountsCreate: (data) => req('POST', '/admin/branch-accounts/create', data),
     usageTree: () => req('GET', '/admin/usage/tree'),

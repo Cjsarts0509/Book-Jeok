@@ -204,6 +204,33 @@ router.get('/stock-audit/branches', authenticate, wrap(async (req, res) => {
   const r = await query("SELECT id, username, display_name FROM users WHERE role='branch' AND is_active ORDER BY username");
   res.json({ branches: r.rows.map((u) => ({ id: u.id, username: u.username, displayName: u.display_name })) });
 }));
+// 재고조사 HTML 보고서 열쇠 발급: 보고서를 휴대폰에서 열어 찍은 사진·확인 표시를 이 계정·폴더 웹하드에
+// 자동 저장하게 한다(routes/saReport.js). 원문은 응답으로 한 번만 주고 DB 엔 해시만 둔다.
+// 발급 권한: 그 계정 파일을 다룰 수 있는 사람(resolveOwner 규칙) + 담당자·관리자가 '영업점' 계정에(영업점에 전달과 같은 규칙).
+const SA_REPORT_DAYS = parseInt(process.env.SA_REPORT_KEY_DAYS || '60', 10);
+router.post('/stock-audit/report-key', authenticate, wrap(async (req, res) => {
+  const requested = Number(req.body.ownerId) || req.user.id;
+  if (requested !== req.user.id && !(await canAccessOwner(req.user, requested))) {
+    const t = await query('SELECT role FROM users WHERE id=$1', [requested]);
+    const branchByStaff = ['manager', 'admin'].includes(req.user.role) && t.rowCount && t.rows[0].role === 'branch';
+    if (!branchByStaff) return res.status(403).json({ error: '해당 계정 폴더에 저장할 권한이 없습니다.' });
+  }
+  const owner = requested; req.targetOwnerId = owner;
+  const folder = normalizeFolder(req.body.folder);
+  const label = String(req.body.label || '').replace(/[\x00-\x1f]/g, ' ').slice(0, 200).trim();
+  const token = crypto.randomBytes(24).toString('base64url');
+  const hash = crypto.createHash('sha256').update(token).digest('hex');
+  const r = await query(
+    `INSERT INTO sa_report_keys (token_hash, owner_id, folder, label, created_by, expires_at)
+     VALUES ($1,$2,$3,$4,$5, now() + ($6 || ' days')::interval) RETURNING expires_at`,
+    [hash, owner, folder, label, req.user.id, String(SA_REPORT_DAYS)]
+  );
+  await ensureFolder(owner, folder);
+  const o = await query('SELECT display_name FROM users WHERE id=$1', [owner]);
+  await audit(req, 'create_upload_request', `재고조사 보고서 열쇠 · ${folder} · ${SA_REPORT_DAYS}일 · ${label}`, owner);
+  res.json({ token, expiresAt: r.rows[0].expires_at, folder, owner: o.rows[0] ? o.rows[0].display_name : '' });
+}));
+
 router.post('/stock-audit/deliver', authenticate, wrap(async (req, res) => {
   if (!['manager', 'admin'].includes(req.user.role)) return res.status(403).json({ error: '권한이 없습니다.' });
   const branchId = Number(req.body.branchId);

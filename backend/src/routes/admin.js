@@ -553,7 +553,7 @@ router.delete('/notices/:id', wrap(async (req, res) => {
 
 // ══════════ 공유 통합 관리 (전 계정) ══════════
 router.get('/shares', wrap(async (req, res) => {
-  const [fileR, folderR, reqR] = await Promise.all([
+  const [fileR, folderR, reqR, keyR] = await Promise.all([
     query(`SELECT s.id, s.token, s.expires_at, s.download_count, s.max_downloads, s.created_at, s.reason,
              (s.password_hash IS NOT NULL) AS has_pw,
              CASE WHEN s.file_id IS NOT NULL THEN 'file' ELSE 'zip' END AS kind,
@@ -574,13 +574,26 @@ router.get('/shares', wrap(async (req, res) => {
     query(`SELECT ur.id, ur.token, ur.label, ur.folder, ur.expires_at, ur.disabled, ur.uploaded_count, ur.uploaded_bytes, ur.max_files, ur.max_bytes, ur.created_at, ur.reason,
              (ur.password_hash IS NOT NULL) AS has_pw, u.username AS owner_username, u.display_name AS owner_name
            FROM upload_requests ur JOIN users u ON u.id=ur.owner_id ORDER BY ur.created_at DESC`),
+    // 재고조사 HTML 보고서 열쇠(최근 200개) — 끊긴 것·지난 것도 함께 보여 준다
+    query(`SELECT k.id, k.label, k.folder, k.created_at, k.expires_at, k.revoked_at, k.last_used_at,
+             u.username AS owner_username, u.display_name AS owner_name, cu.username AS creator
+           FROM sa_report_keys k JOIN users u ON u.id=k.owner_id LEFT JOIN users cu ON cu.id=k.created_by
+           ORDER BY k.created_at DESC LIMIT 200`),
   ]);
   const num = (v) => (v == null ? null : Number(v));
   res.json({
     fileShares: fileR.rows.map((r) => ({ id: r.id, token: r.token, kind: r.kind, name: r.name, ownerUsername: r.owner_username, ownerName: r.owner_name, creator: r.creator, hasPassword: r.has_pw, downloadCount: r.download_count, maxDownloads: r.max_downloads, expiresAt: r.expires_at, createdAt: r.created_at, reason: r.reason })),
     folderShares: folderR.rows.map((r) => ({ id: r.id, token: r.token, label: r.label, folder: r.folder, ownerUsername: r.owner_username, ownerName: r.owner_name, hasPassword: r.has_pw, disabled: r.disabled, viewCount: r.view_count, expiresAt: r.expires_at, createdAt: r.created_at, reason: r.reason })),
+    saReportKeys: keyR.rows.map((r) => ({ id: r.id, label: r.label, folder: r.folder, ownerUsername: r.owner_username, ownerName: r.owner_name, creator: r.creator, createdAt: r.created_at, expiresAt: r.expires_at, revokedAt: r.revoked_at, lastUsedAt: r.last_used_at })),
     uploadRequests: reqR.rows.map((r) => ({ id: r.id, token: r.token, label: r.label, folder: r.folder, ownerUsername: r.owner_username, ownerName: r.owner_name, hasPassword: r.has_pw, disabled: r.disabled, uploadedCount: r.uploaded_count, uploadedBytes: num(r.uploaded_bytes), maxFiles: r.max_files, maxBytes: num(r.max_bytes), expiresAt: r.expires_at, createdAt: r.created_at, reason: r.reason })),
   });
+}));
+// 재고조사 보고서 열쇠 끊기 — 그 보고서(HTML)는 더 이상 웹하드에 저장하지 못한다(이미 올린 사진은 그대로)
+router.post('/sa-report-keys/:id(\\d+)/revoke', wrap(async (req, res) => {
+  const r = await query('UPDATE sa_report_keys SET revoked_at=now() WHERE id=$1 AND revoked_at IS NULL RETURNING owner_id, folder', [req.params.id]);
+  if (r.rowCount === 0) return res.status(404).json({ error: '열쇠를 찾을 수 없거나 이미 끊겼습니다.' });
+  await audit(req, 'admin_delete_share', `재고조사 보고서 열쇠#${req.params.id} 끊음 · ${r.rows[0].folder}`, r.rows[0].owner_id);
+  res.json({ ok: true });
 }));
 const shareTables = { file: 'share_links', folder: 'folder_shares', upload: 'upload_requests' };
 router.delete('/shares/:kind(file|folder|upload)/:id(\\d+)', wrap(async (req, res) => {

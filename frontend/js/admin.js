@@ -1373,12 +1373,25 @@ const item = (tab, ico, label) => `<div class="nav-item ${state.tab === tab ? 'a
         return `<tr><td>📥 <b>${UI.escapeHtml(r.label)}</b> <span class="muted" style="font-size:11px">${UI.escapeHtml(r.folder)}</span></td><td>${owner(r)}</td><td class="muted" style="font-size:12px">${meta}${r.reason ? `<br>💬 ${UI.escapeHtml(r.reason)}` : ''}</td>
           <td style="text-align:right"><button class="btn btn-sm btn-ghost" data-copy="${UI.escapeHtml(location.origin + '/upload.html?t=' + r.token)}">📋</button><button class="btn btn-sm btn-danger" data-del="upload:${r.id}">폐기</button></td></tr>`;
       }).join('') || '<tr><td colspan="4" class="muted">업로드 요청 없음</td></tr>';
+      const now = Date.now();
+      const keyRows = (d.saReportKeys || []).map((r) => {
+        const st = r.revokedAt ? '<span class="badge off">끊김</span>' : new Date(r.expiresAt) < now ? '<span class="badge off">기간 지남</span>' : '<span class="badge user">사용 중</span>';
+        const active = !r.revokedAt && new Date(r.expiresAt) >= now;
+        const meta = [`${UI.date(r.createdAt)} 발급${r.creator ? ' · ' + UI.escapeHtml(r.creator) : ''}`, `${UI.date(r.expiresAt)}까지`, r.lastUsedAt ? `마지막 사용 ${UI.date(r.lastUsedAt)}` : '아직 안 씀'].join(' · ');
+        return `<tr><td>📊 <b>${UI.escapeHtml(r.label || '재고조사 보고서')}</b> <span class="muted" style="font-size:11px">${UI.escapeHtml(r.folder)}</span></td><td>${owner(r)}</td><td class="muted" style="font-size:12px">${st} ${meta}</td>
+          <td style="text-align:right">${active ? `<button class="btn btn-sm btn-danger" data-revoke="${r.id}">끊기</button>` : ''}</td></tr>`;
+      }).join('') || '<tr><td colspan="4" class="muted">재고조사 보고서 열쇠 없음</td></tr>';
       const sec = (title, count, rows) => `<div class="dash-h" style="margin-top:16px">${title} <span class="muted" style="font-weight:400;font-size:12px">${count}건</span></div>
         <div class="table-wrap"><table><tbody>${rows}</tbody></table></div>`;
       view.innerHTML = `<p class="muted" style="font-size:13px;margin-bottom:4px">모든 계정의 외부 공유 링크를 한 곳에서 관리·폐기합니다.</p>
         ${sec('📄 파일 · 압축 공유', d.fileShares.length, fileRows)}
         ${sec('📁 폴더 공유(읽기 전용)', d.folderShares.length, folderRows)}
-        ${sec('📥 업로드 요청(외부 업로드)', d.uploadRequests.length, reqRows)}`;
+        ${sec('📥 업로드 요청(외부 업로드)', d.uploadRequests.length, reqRows)}
+        ${sec('📊 재고조사 HTML 보고서 열쇠(웹하드 자동 저장)', (d.saReportKeys || []).length, keyRows)}`;
+      view.querySelectorAll('[data-revoke]').forEach((x) => x.addEventListener('click', async () => {
+        if (!(await UI.confirm({ title: '보고서 열쇠 끊기', message: '이 보고서(HTML)는 더 이상 웹하드에 사진·확인을 저장하지 못합니다.\n이미 올라간 사진은 그대로 남습니다.', confirmText: '끊기', danger: true }))) return;
+        try { await API.revokeSaReportKey(x.dataset.revoke); UI.toast('끊었습니다', 'success'); loadShares(); } catch (e) { UI.toast(e.message, 'error'); }
+      }));
       view.querySelectorAll('[data-copy]').forEach((x) => x.addEventListener('click', () => { navigator.clipboard?.writeText(x.dataset.copy); UI.toast('링크 복사됨', 'success'); }));
       view.querySelectorAll('[data-del]').forEach((x) => x.addEventListener('click', async () => {
         const [kind, id] = x.dataset.del.split(':');

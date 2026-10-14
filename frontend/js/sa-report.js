@@ -88,6 +88,8 @@ table.m tbody.g tr:last-child td{border-bottom:1px solid var(--border);padding-b
 .toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:#1f2328;color:#fff;padding:10px 16px;border-radius:10px;z-index:200;font-size:13px;box-shadow:var(--shadow);max-width:90vw}
 .toast.err{background:#d1242f}.toast.ok{background:#0a7c42}
 .zoom{position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:150;display:flex;align-items:center;justify-content:center;cursor:zoom-out}.zoom img{max-width:96vw;max-height:92vh;border-radius:8px}
+.sync{margin:10px 0 0;padding:8px 12px;border-radius:10px;font-size:13px;font-weight:600;border:1px solid var(--border);background:var(--surface)}
+.sync.ok{color:var(--done-text);border-color:var(--done-text)}.sync.busy{color:var(--chip-text)}.sync.warn{color:#b45309;border-color:#f0bc3c;background:var(--exc)}.sync.dead{color:var(--neg);border-color:var(--neg);background:var(--neg-soft)}
 .banner{margin:10px 0 0;padding:10px 12px;border-radius:10px;background:var(--exc);border:1px solid #f0bc3c;font-size:13px}
 @media (max-width:700px){.d-shelves{grid-template-columns:1fr 1fr}.bar{position:static}.wrap{padding:12px 10px 30px}header h1{font-size:18px}.card .v{font-size:17px}.bar input[type=search]{max-width:none}.count{width:100%;margin-left:0}
   .d-top{flex-direction:column}.d-cover{width:100%;height:220px}}
@@ -139,18 +141,112 @@ table.m tbody.g tr:last-child td{border-bottom:1px solid var(--border);padding-b
     }
     function idbGet(key) { return new Promise((res) => { try { const g = IDB.db.transaction('photos').objectStore('photos').get(key); g.onsuccess = () => res(g.result || null); g.onerror = () => res(null); } catch (_) { res(null); } }); }
     function idbPut(key, val) { try { IDB.db.transaction('photos', 'readwrite').objectStore('photos').put(val, key); } catch (_) {} }
-    function changed() {
-      PH.updatedAt = Date.now(); dirty = true;
-      if (IDB.ok) idbPut(META.rid, PH);
+    function persist() { PH.updatedAt = Date.now(); if (IDB.ok) idbPut(META.rid, PH); }
+    function changed(op) {
+      dirty = true; persist();
+      if (op && SY.on) enqueue(op);
       refreshSaveBtn(); render();
     }
     function refreshSaveBtn() {
       const b = $('#f-savefile');
-      b.classList.toggle('dirty', dirty);
-      b.innerHTML = `💾 저장 <span style="font-weight:400">(사진·확인 포함)</span>${dirty ? ' · 저장 안 됨' : ''}`;
+      const syncing = SY.on && !SY.dead;
+      // 웹하드 자동 저장이 되는 동안 '파일로 저장'은 예비용 — 강조하지 않는다
+      b.classList.toggle('dirty', dirty && !syncing);
+      b.innerHTML = syncing ? '💾 파일로도 저장' : `💾 저장 <span style="font-weight:400">(사진·확인 포함)</span>${dirty ? ' · 저장 안 됨' : ''}`;
       const z = $('#f-zip'); z.disabled = !nPhotos(); z.innerHTML = `📦 사진 ZIP 받기${nPhotos() ? ` <b>${nPhotos()}</b>` : ''}`;
     }
-    window.addEventListener('beforeunload', (e) => { if (dirty) { e.preventDefault(); e.returnValue = ''; } });
+    // 웹하드로 아직 못 보낸 것이 있거나(자동 저장), 자동 저장이 없는데 파일로 저장 안 했으면 닫을 때 경고
+    window.addEventListener('beforeunload', (e) => {
+      if ((SY.on && !SY.dead && PH.q.length) || ((!SY.on || SY.dead) && dirty)) { e.preventDefault(); e.returnValue = ''; }
+    });
+
+    // ── 웹하드 자동 저장 ─────────────────────────────
+    //  보고서를 만들 때 받은 열쇠(META.sync)로, 사진·확인 표시를 그 영업점 웹하드 폴더에 바로 저장한다.
+    //  보낼 일은 대기열(PH.q)에 쌓고 순서대로 보낸다. 끊기면 모아 두었다가 연결되면 이어서(15초마다·온라인 복귀 시).
+    //  열면 웹하드의 최신 상태(다른 휴대폰에서 찍은 것 포함)를 불러온다.
+    const SYNC = META.sync && META.sync.token ? META.sync : null;
+    const SY = { on: !!SYNC, dead: '', busy: false, last: 0, err: '', retry: null };
+    if (!Array.isArray(PH.q)) PH.q = [];
+    const apiUrl = (sub) => `${SYNC.api}/api/sa-report/${encodeURIComponent(SYNC.token)}${sub}`;
+    const photoSrc = (p) => p.d || (SYNC && p.files && p.files[0] ? apiUrl(`/photo/${p.files[0].id}`) : '');
+    const dataToBlob = (d) => { const bin = atob(d.slice(d.indexOf(',') + 1)); const u = new Uint8Array(bin.length); for (let k = 0; k < bin.length; k++) u[k] = bin.charCodeAt(k); return new Blob([u], { type: 'image/jpeg' }); };
+    const DEAD_CODES = ['bad_key', 'revoked', 'expired', 'inactive'];
+    function enqueue(op) {
+      // 같은 ISBN 확인 표시는 마지막 것만, 아직 안 보낸 사진을 지우면 보낼 일과 함께 없앤다
+      if (op.t === 'check') PH.q = PH.q.filter((o) => !(o.t === 'check' && o.isbn === op.isbn));
+      if (op.t === 'del' && PH.q.some((o) => o.t === 'photo' && o.id === op.id)) { PH.q = PH.q.filter((o) => o.id !== op.id); persist(); syncUi(); return; }
+      PH.q.push(op); persist(); flush();
+    }
+    async function flush() {
+      if (!SY.on || SY.dead || SY.busy) { syncUi(); return; }
+      if (!PH.q.length) { syncUi(); return; }
+      SY.busy = true; syncUi();
+      try {
+        while (PH.q.length) {
+          const op = PH.q[0]; let r;
+          if (op.t === 'photo') {
+            const p = PH.photos[op.id]; if (!p || !p.d) { PH.q.shift(); continue; }
+            const fd = new FormData();
+            fd.append('cid', op.id); fd.append('isbns', JSON.stringify(p.isbns)); fd.append('note', p.note || ''); fd.append('at', String(p.at));
+            fd.append('file', dataToBlob(p.d), op.id + '.jpg');
+            r = await fetch(apiUrl('/photo'), { method: 'POST', body: fd });
+            if (r.ok) { const j = await r.json(); p.files = j.photo.files; p.synced = true; }
+          } else if (op.t === 'del') {
+            r = await fetch(apiUrl('/photo/' + encodeURIComponent(op.id)), { method: 'DELETE' });
+          } else if (op.t === 'check') {
+            r = await fetch(apiUrl('/check'), { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ isbn: op.isbn, checked: op.on, at: op.at }) });
+          } else { PH.q.shift(); continue; }
+          if (!r.ok) {
+            const j = await r.json().catch(() => ({}));
+            if (DEAD_CODES.includes(j.code)) { SY.dead = j.error || '보고서 열쇠를 쓸 수 없습니다'; break; }
+            if (r.status >= 500 || r.status === 429 || r.status === 507) throw new Error(j.error || ('서버 ' + r.status));   // 나중에 다시
+            toast('웹하드 저장 실패: ' + (j.error || r.status), 'err');   // 고쳐도 소용없는 거절 → 이 일은 버린다
+          }
+          PH.q.shift(); SY.last = Date.now(); SY.err = ''; persist();
+        }
+      } catch (e) {
+        SY.err = navigator.onLine ? (e.message || '전송 실패') : '인터넷 연결 없음';
+        clearTimeout(SY.retry); SY.retry = setTimeout(flush, 15000);
+      } finally { SY.busy = false; syncUi(); refreshSaveBtn(); render(); }
+    }
+    async function pull() {
+      if (!SY.on || SY.dead || SY.busy) return;
+      try {
+        const r = await fetch(apiUrl(''));
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok) { if (DEAD_CODES.includes(j.code)) SY.dead = j.error || '보고서 열쇠를 쓸 수 없습니다'; syncUi(); refreshSaveBtn(); return; }
+        // 확인 표시: 웹하드 것 + 아직 못 보낸 내 변경
+        const checked = { ...(j.checked || {}) };
+        for (const op of PH.q) if (op.t === 'check') { if (op.on) checked[op.isbn] = op.at; else delete checked[op.isbn]; }
+        // 사진: 웹하드 목록(내가 가진 사진 데이터는 그대로 씀) + 아직 못 보낸 내 사진. 지우려고 대기 중인 건 뺀다.
+        const delQ = new Set(PH.q.filter((o) => o.t === 'del').map((o) => o.id));
+        const next = {};
+        for (const sp of (j.photos || [])) {
+          if (delQ.has(sp.cid)) continue;
+          const mine = PH.photos[sp.cid];
+          next[sp.cid] = { isbns: sp.isbns, note: sp.note, at: sp.at, files: sp.files, synced: true, d: mine && mine.d };
+        }
+        for (const [id, p] of Object.entries(PH.photos)) if (!p.synced && !next[id]) next[id] = p;
+        PH.checked = checked; PH.photos = next; SY.last = Date.now(); SY.err = '';
+        persist(); render(); refreshSaveBtn();
+      } catch (_) { SY.err = navigator.onLine ? '웹하드에 연결하지 못함' : '인터넷 연결 없음'; }
+      syncUi();
+    }
+    function syncUi() {
+      const el = $('#sync-st'); if (!el) return;
+      if (!SY.on) { el.style.display = 'none'; return; }
+      const n = PH.q.length;
+      const hm = (t) => { const d = new Date(t); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
+      let cls = 'ok', txt;
+      if (SY.dead) { cls = 'dead'; txt = `⛔ 웹하드 저장 안 됨 — ${SY.dead} (💾 파일로 저장을 쓰세요)`; }
+      else if (SY.busy) { cls = 'busy'; txt = `⏳ 웹하드로 보내는 중${n ? ` ${n}건` : ''}…`; }
+      else if (n) { cls = 'warn'; txt = `⚠️ ${SY.err || '보내기 대기'} — ${n}건 대기 · 연결되면 자동 전송`; }
+      else if (SY.err) { cls = 'warn'; txt = `⚠️ ${SY.err} — 다시 시도합니다`; }
+      else txt = `☁️ 웹하드에 자동 저장됨${SY.last ? ` · ${hm(SY.last)}` : ''}`;
+      el.className = 'sync ' + cls; el.textContent = txt; el.style.display = '';
+      el.title = `${SYNC.owner || ''} 웹하드 ${SYNC.folder === '/' ? '최상위 폴더' : SYNC.folder || ''} · ${new Date(SYNC.expiresAt).toLocaleDateString('ko-KR')}까지`;
+    }
+    window.addEventListener('online', () => { SY.err = ''; flush(); });
 
     // 사진이 든 새 HTML 파일로 내려받기 = 이 파일 안에 사진 저장
     function saveFile() {
@@ -169,7 +265,8 @@ table.m tbody.g tr:last-child td{border-bottom:1px solid var(--border);padding-b
     // 사진 ZIP 받기: 사진 한 장이 여러 항목에 들어가 있으면 항목마다 'ISBN.jpg'(같은 ISBN 이 또 있으면 'ISBN_2.jpg')로,
     //  앱이 웹하드에 올릴 때와 같은 이름. 사진 목록(ISBN·도서명·비고·시각)은 '사진목록.csv'로 함께 넣는다.
     //  JPEG 는 이미 압축된 형식이라 다시 압축하지 않고 그대로 담는다(ZIP 'stored') — 라이브러리 없이 작게.
-    function zipPhotos() {
+    async function zipPhotos() {
+      let skipped = 0;
       const list = Object.values(PH.photos).sort((a, b) => a.at - b.at);
       if (!list.length) return toast('저장된 사진이 없습니다', 'err');
       const files = []; const used = new Map();
@@ -177,8 +274,12 @@ table.m tbody.g tr:last-child td{border-bottom:1px solid var(--border);padding-b
       const when = (t) => { const d = new Date(t); return `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())} ${p2(d.getHours())}:${p2(d.getMinutes())}`; };
       const csv = [['파일', 'ISBN', '도서명', '분야', '전산재고', '스캔차이', '비고', '찍은 시각']];
       for (const p of list) {
-        const bin = atob(p.d.slice(p.d.indexOf(',') + 1)); const bytes = new Uint8Array(bin.length);
-        for (let k = 0; k < bin.length; k++) bytes[k] = bin.charCodeAt(k);
+        let bytes;
+        if (p.d) { const bin = atob(p.d.slice(p.d.indexOf(',') + 1)); bytes = new Uint8Array(bin.length); for (let k = 0; k < bin.length; k++) bytes[k] = bin.charCodeAt(k); }
+        else {   // 다른 휴대폰에서 찍어 웹하드에만 있는 사진은 받아서 넣는다
+          try { const r = await fetch(photoSrc(p)); if (!r.ok) throw new Error(); bytes = new Uint8Array(await r.arrayBuffer()); }
+          catch (_) { skipped++; continue; }
+        }
         for (const isbn of p.isbns) {
           const n = (used.get(isbn) || 0) + 1; used.set(isbn, n);
           const name = n === 1 ? `${isbn}.jpg` : `${isbn}_${n}.jpg`;
@@ -193,7 +294,7 @@ table.m tbody.g tr:last-child td{border-bottom:1px solid var(--border);padding-b
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a'); a.href = url; a.download = (META.fileBase || '재고조사오차') + '_사진.zip';
       document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 5000);
-      toast(`사진 ${files.length - 1}개 파일을 ZIP 으로 받았습니다`, 'ok');
+      toast(`사진 ${files.length - 1}개 파일을 ZIP 으로 받았습니다${skipped ? ` (웹하드에서 못 받은 ${skipped}장 제외)` : ''}`, skipped ? '' : 'ok');
     }
     // 최소 ZIP 작성기(저장 방식 · UTF-8 파일 이름)
     function makeZip(files) {
@@ -411,20 +512,26 @@ table.m tbody.g tr:last-child td{border-bottom:1px solid var(--border);padding-b
       // 확인완료: 사진을 안 찍어도 '봤다'고 표시 → 창 닫고 목록에 색 표시. 다시 열어 누르면 취소.
       m.q('#d-check').addEventListener('click', () => {
         if (PH.checked[x.i]) {
-          delete PH.checked[x.i]; changed(); m.close();
+          delete PH.checked[x.i]; changed({ t: 'check', isbn: x.i, on: false, at: Date.now() }); m.close();
           toast(photoCount(x.i) ? '확인 표시를 지웠습니다 — 사진이 있어 계속 확인완료로 보입니다' : '확인 취소');
-        } else { PH.checked[x.i] = Date.now(); changed(); m.close(); toast('✅ 확인완료 — 끝나면 💾 저장', 'ok'); }
+        } else {
+          const at = Date.now(); PH.checked[x.i] = at; changed({ t: 'check', isbn: x.i, on: true, at }); m.close();
+          toast(SY.on && !SY.dead ? '✅ 확인완료 — 웹하드에 자동 저장' : '✅ 확인완료 — 끝나면 💾 저장', 'ok');
+        }
       });
       const drawPhotos = () => {
         const list = photosOf(x.i);
         m.q('#d-pn').textContent = list.length ? `${list.length}장` : '아직 없음';
-        m.q('#d-photos').innerHTML = list.map((p) => `<div class="d-photo"><img src="${p.d}" data-z="${p.id}" alt=""><button class="del" type="button" data-del="${p.id}" title="이 사진 지우기">✕</button>
+        m.q('#d-photos').innerHTML = list.map((p) => `<div class="d-photo"><img src="${photoSrc(p)}" data-z="${p.id}" alt="" loading="lazy"><button class="del" type="button" data-del="${p.id}" title="이 사진 지우기">✕</button>
           <div class="meta">${esc(new Date(p.at).toLocaleString('ko-KR'))}${p.isbns.length > 1 ? ` · 함께 찍힌 ${p.isbns.length - 1}건` : ''}${p.note ? '<br>' + esc(p.note) : ''}</div></div>`).join('');
-        m.q('#d-photos').querySelectorAll('[data-z]').forEach((im) => im.addEventListener('click', () => zoom(PH.photos[im.dataset.z].d)));
+        m.q('#d-photos').querySelectorAll('[data-z]').forEach((im) => im.addEventListener('click', () => zoom(photoSrc(PH.photos[im.dataset.z]))));
         m.q('#d-photos').querySelectorAll('[data-del]').forEach((b) => b.addEventListener('click', () => {
           const p = PH.photos[b.dataset.del]; if (!p) return;
           if (!confirm(p.isbns.length > 1 ? `이 사진은 ${p.isbns.length}개 항목에 함께 들어가 있습니다. 모두에서 지울까요?` : '이 사진을 지울까요?')) return;
-          delete PH.photos[b.dataset.del]; changed(); drawPhotos();
+          const wasSynced = p.synced; delete PH.photos[b.dataset.del];
+          changed(wasSynced ? { t: 'del', id: b.dataset.del } : null);
+          if (!wasSynced) { PH.q = PH.q.filter((o) => o.id !== b.dataset.del); persist(); syncUi(); }
+          drawPhotos();
         }));
       };
       drawPhotos();
@@ -449,10 +556,10 @@ table.m tbody.g tr:last-child td{border-bottom:1px solid var(--border);padding-b
         m.q('#d-cancel').addEventListener('click', () => { m.q('#d-stage').innerHTML = ''; });
         m.q('#d-save').addEventListener('click', () => {
           const id = 'p' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-          PH.photos[id] = { d: data, isbns: targets, note: (m.q('#d-note').value || '').trim(), at: Date.now() };
+          PH.photos[id] = { d: data, isbns: targets, note: (m.q('#d-note').value || '').trim(), at: Date.now(), synced: false };
           m.q('#d-stage').innerHTML = '';
-          changed(); drawPhotos();
-          toast(`${targets.length}건에 사진 저장${targets.length > 1 ? ` (함께 찍힌 ${targets.length - 1}건)` : ''} — 끝나면 '💾 사진 포함 저장'`, 'ok');
+          changed({ t: 'photo', id }); drawPhotos();
+          toast(`${targets.length}건에 사진 저장${targets.length > 1 ? ` (함께 찍힌 ${targets.length - 1}건)` : ''}${SY.on && !SY.dead ? ' — 웹하드로 자동 저장' : " — 끝나면 '💾 저장'"}`, 'ok');
         });
       }
     }
@@ -508,15 +615,20 @@ table.m tbody.g tr:last-child td{border-bottom:1px solid var(--border);padding-b
     const fit = () => { const bar = $('.bar'); document.documentElement.style.setProperty('--barh', (getComputedStyle(bar).position === 'sticky' ? bar.offsetHeight : 0) + 'px'); };
     window.addEventListener('resize', fit); fit();
 
-    refreshSaveBtn(); render();
-    // 브라우저 임시 저장에 더 최근 사진이 있으면(저장 버튼을 안 누르고 닫았던 경우) 불러온다
+    refreshSaveBtn(); render(); syncUi();
+    // 브라우저 임시 저장에 더 최근 것이 있으면(닫기 전에 못 보낸 것 등) 불러온 뒤 → 웹하드 최신 상태 → 남은 것 보내기
     idbOpen().then(async (ok) => {
-      if (!ok) { $('#store-note').textContent = '이 브라우저에서는 임시 저장이 안 됩니다 — 사진을 찍은 뒤 꼭 💾 사진 포함 저장을 누르세요.'; $('#store-note').style.display = ''; return; }
-      const saved = await idbGet(META.rid);
-      if (saved && saved.photos && (saved.updatedAt || 0) > (PH.updatedAt || 0)) {
-        PH = saved; if (!PH.checked) PH.checked = {}; dirty = true; refreshSaveBtn(); render();
-        toast(`이 브라우저에 임시 저장된 사진 ${nPhotos()}장을 불러왔습니다 — 💾 사진 포함 저장으로 파일에 넣으세요`);
+      if (ok) {
+        const saved = await idbGet(META.rid);
+        if (saved && saved.photos && (saved.updatedAt || 0) > (PH.updatedAt || 0)) {
+          PH = saved; if (!PH.checked) PH.checked = {}; if (!Array.isArray(PH.q)) PH.q = []; dirty = true;
+          if (!SY.on) toast(`이 브라우저에 임시 저장된 사진 ${nPhotos()}장을 불러왔습니다 — 💾 저장으로 파일에 넣으세요`);
+        }
+      } else if (!SY.on) {
+        $('#store-note').textContent = '이 브라우저에서는 임시 저장이 안 됩니다 — 사진을 찍은 뒤 꼭 💾 저장을 누르세요.'; $('#store-note').style.display = '';
       }
+      refreshSaveBtn(); render();
+      if (SY.on) { await pull(); flush(); setInterval(() => { if (!document.hidden && !PH.q.length) pull(); }, 60000); }
     });
   }
 
@@ -540,6 +652,7 @@ table.m tbody.g tr:last-child td{border-bottom:1px solid var(--border);padding-b
 <div class="sub">${escHtml(meta.source || '')}${meta.source ? ' · ' : ''}만든 시각 ${escHtml(meta.generatedAt)} · 북적북적 재고조사 오차체크</div></div>
 <button type="button" class="btn noprint" id="f-zip" title="저장한 사진을 ZIP 하나로 받습니다(ISBN.jpg + 사진목록.csv)" disabled>📦 사진 ZIP 받기</button>
 <button type="button" class="btn save noprint" id="f-savefile" title="찍은 사진을 넣어 이 보고서를 새 파일로 내려받습니다(이 파일 안에 사진 저장)">💾 사진 포함 저장</button></header>
+<div class="sync" id="sync-st" style="display:none"></div>
 <div class="banner" id="store-note" style="display:none"></div>
 <div class="cards" id="cards"></div>
 <div class="bar">

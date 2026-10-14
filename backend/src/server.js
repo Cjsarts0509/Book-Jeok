@@ -66,7 +66,11 @@ const corsBase = {
   // (해외 거점을 거치는 회선에서는 클릭마다 체감될 만큼 느려진다). 크롬 상한인 2시간으로 둔다.
   maxAge: 7200,
 };
+// 재고조사 HTML 보고서의 자동 저장(/api/sa-report/…)은 파일로 연 HTML(출처 'null'·content://)에서 온다.
+//  로그인·쿠키 없이 보고서 안의 열쇠로만 동작하므로 어디서 와도 받되, 자격증명은 싣지 않는다.
+const SA_REPORT_PATH = /^\/api\/sa-report\//;
 app.use(cors((req, cb) => {
+  if (SA_REPORT_PATH.test(req.originalUrl || '')) return cb(null, { origin: '*', credentials: false, maxAge: 7200 });
   const origin = req.headers.origin;
   if (!origin || config.corsOrigins.includes(origin) || sameHost(origin, req)) return cb(null, { ...corsBase, origin: true });
   // status 를 붙이지 않으면 전역 핸들러가 500 으로 처리해 '서버 오류'로 보이고
@@ -140,7 +144,7 @@ app.use('/api/', require('./middleware/timeout').requestTimeout);
 // 쓰기가 성공하면 그 계정의 목록 캐시를 버린다. 개별 라우트마다 무효화를 심으면
 // 새 라우트가 생길 때마다 빠뜨리기 쉬우므로, 응답이 끝나는 지점에서 한 번에 처리한다.
 const listcache = require('./listcache');
-const MUTABLE = /^\/api\/(files|admin|upload-link|share|folder-share)\b/;
+const MUTABLE = /^\/api\/(files|admin|upload-link|share|folder-share|sa-report)\b/;
 app.use('/api/', (req, res, next) => {
   if (req.method === 'GET' || req.method === 'HEAD') return next();
   res.on('finish', () => {
@@ -169,6 +173,7 @@ app.use('/api/files', require('./routes/files'));
 app.use('/api/admin', require('./routes/admin'));
 app.use('/api/share', require('./routes/share'));
 app.use('/api/upload-link', require('./routes/uploadLink')); // 공개 업로드 요청 링크
+app.use('/api/sa-report', require('./routes/saReport').router); // 재고조사 HTML 보고서 자동 저장(열쇠)
 app.use('/api/folder-share', require('./routes/folderShare')); // 공개 폴더 공유(읽기 전용)
 app.use('/api/meta', require('./routes/meta')); // 영업점 목록·활성 공지 (로그인 사용자 공용)
 

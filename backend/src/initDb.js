@@ -347,6 +347,33 @@ const MIGRATIONS = [
     );
     CREATE INDEX IF NOT EXISTS idx_folder_templates_owner ON folder_templates(owner_id);
   ` },
+  // 재고조사 HTML 보고서 → 웹하드 자동 저장
+  { id: '0011_sa_report_sync', sql: `
+    -- 보고서(HTML) 하나에 들어가는 열쇠. 원문은 보고서에만 있고 여기엔 해시만 둔다.
+    -- 그 계정·그 폴더에만 사진을 올리고 확인 표시를 남길 수 있다. 기간이 지나거나 끊으면 못 쓴다.
+    CREATE TABLE IF NOT EXISTS sa_report_keys (
+      id           BIGSERIAL PRIMARY KEY,
+      token_hash   CHAR(64) NOT NULL UNIQUE,
+      owner_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      folder       TEXT NOT NULL DEFAULT '/',
+      label        VARCHAR(200) NOT NULL DEFAULT '',
+      created_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+      expires_at   TIMESTAMPTZ NOT NULL,
+      revoked_at   TIMESTAMPTZ,
+      last_used_at TIMESTAMPTZ
+    );
+    CREATE INDEX IF NOT EXISTS idx_sa_report_keys_owner ON sa_report_keys(owner_id);
+    -- 확인 표시·사진 목록은 '계정+폴더' 하나에 하나 — 보고서를 다시 받아도(새 열쇠) 이어진다.
+    CREATE TABLE IF NOT EXISTS sa_report_state (
+      owner_id   INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      folder     TEXT NOT NULL,
+      checked    JSONB NOT NULL DEFAULT '{}'::jsonb,
+      photos     JSONB NOT NULL DEFAULT '[]'::jsonb,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      PRIMARY KEY (owner_id, folder)
+    );
+  ` },
 ];
 
 // ── S18 · 마이그레이션 드라이런 ────────────────────────
