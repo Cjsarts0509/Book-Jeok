@@ -12,9 +12,9 @@
 
   const CSS = `
 :root{--bg:#f6f7f9;--surface:#fff;--text:#1f2328;--muted:#6b7280;--border:#e5e7eb;--head:#f1f3f5;--accent:#f5b400;--accent-soft:#fff6d6;
-  --neg:#d1242f;--neg-soft:#fff1f1;--pos:#0a7c42;--pos-soft:#ecfdf3;--chip:#eef2ff;--chip-text:#3b4cca;--group:#fafbfc;--photo:#eaf7ff;--exc:#fff4e5;--shadow:0 12px 40px rgba(0,0,0,.18)}
+  --neg:#d1242f;--neg-soft:#fff1f1;--pos:#0a7c42;--pos-soft:#ecfdf3;--chip:#eef2ff;--chip-text:#3b4cca;--group:#fafbfc;--photo:#eaf7ff;--done:#e8f7ee;--done-text:#0a7c42;--exc:#fff4e5;--shadow:0 12px 40px rgba(0,0,0,.18)}
 @media (prefers-color-scheme:dark){:root{--bg:#0f1115;--surface:#171a21;--text:#e6e8eb;--muted:#9aa3ae;--border:#2a2f3a;--head:#1d212a;--accent:#f5b400;--accent-soft:#3a2f0a;
-  --neg:#ff6b6b;--neg-soft:#3a1517;--pos:#4ade80;--pos-soft:#0f2a1a;--chip:#232a45;--chip-text:#a5b4fc;--group:#1a1e26;--photo:#10283a;--exc:#33270f;--shadow:0 12px 40px rgba(0,0,0,.6)}}
+  --neg:#ff6b6b;--neg-soft:#3a1517;--pos:#4ade80;--pos-soft:#0f2a1a;--chip:#232a45;--chip-text:#a5b4fc;--group:#1a1e26;--photo:#10283a;--done:#123221;--done-text:#4ade80;--exc:#33270f;--shadow:0 12px 40px rgba(0,0,0,.6)}}
 *{box-sizing:border-box}html,body{margin:0}
 body{background:var(--bg);color:var(--text);font:14px/1.5 "Pretendard","Apple SD Gothic Neo","Malgun Gothic",system-ui,sans-serif;-webkit-font-smoothing:antialiased}
 .wrap{max-width:1680px;margin:0 auto;padding:20px 20px 40px}
@@ -46,11 +46,11 @@ td{padding:7px 10px;border-bottom:1px solid var(--border);vertical-align:top;whi
 td.num{text-align:right;font-variant-numeric:tabular-nums}td.name{white-space:normal;min-width:200px;font-weight:600}
 td.code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;color:var(--muted)}
 td.isbn{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-weight:700}
-tbody.g{cursor:pointer}tbody.g:nth-of-type(even) td{background:var(--group)}tbody.g.ph td{background:var(--photo)}tbody.g:hover td{background:var(--accent-soft)}
+tbody.g{cursor:pointer}tbody.g:nth-of-type(even) td{background:var(--group)}tbody.g.done td{background:var(--done)}tbody.g:hover td{background:var(--accent-soft)}
 td.diff{font-weight:800}td.diff.neg{color:var(--neg);background:var(--neg-soft)!important}td.diff.pos{color:var(--pos);background:var(--pos-soft)!important}td.diff.zero{color:var(--muted)}
 .chip{display:inline-block;padding:1px 8px;border-radius:999px;background:var(--chip);color:var(--chip-text);font-size:12px;font-weight:600}
 .tag{display:inline-block;margin-left:6px;padding:0 6px;border-radius:6px;font-size:11px;font-weight:700;vertical-align:1px}
-.tag.ph{background:#1f6feb;color:#fff}.tag.ex{background:var(--exc);color:#b45309;border:1px solid #f0bc3c}
+.tag.ph{background:#1f6feb;color:#fff}.tag.ok{background:var(--done-text);color:#fff}.tag.ex{background:var(--exc);color:#b45309;border:1px solid #f0bc3c}
 tfoot td{position:sticky;bottom:0;background:var(--head);font-weight:800;border-top:2px solid var(--border);z-index:2}
 .empty{padding:40px;text-align:center;color:var(--muted)}
 .hint{color:var(--muted);font-size:12px;margin-top:10px}
@@ -64,6 +64,8 @@ tfoot td{position:sticky;bottom:0;background:var(--head);font-weight:800;border-
 .d-stock{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}.d-stock span{flex:1;min-width:76px;text-align:center;padding:8px 6px;background:var(--bg);border:1px solid var(--border);border-radius:10px;font-size:12px;color:var(--muted)}
 .d-stock b{display:block;font-size:18px;color:var(--text);margin-top:2px}.d-stock .neg b{color:var(--neg)}.d-stock .pos b{color:var(--pos)}
 .d-lbl{font-size:13px;font-weight:700;margin:14px 0 6px}.d-chips{display:flex;gap:6px;flex-wrap:wrap}
+.d-shelves{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:5px}
+.d-shelves .d-chip{font-size:11.5px;padding:3px 7px;border-radius:7px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .d-chip{font-family:ui-monospace,Menlo,monospace;font-size:12.5px;padding:4px 10px;background:var(--bg);border:1px solid var(--border);border-radius:999px}.d-chip b{color:var(--chip-text)}.d-chip.cur{border-color:var(--accent);background:var(--accent-soft)}
 .d-photos{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:8px}
 .d-photo{position:relative;border:1px solid var(--border);border-radius:10px;overflow:hidden;background:var(--bg)}
@@ -72,12 +74,20 @@ tfoot td{position:sticky;bottom:0;background:var(--head);font-weight:800;border-
 .stage{display:flex;gap:12px;flex-wrap:wrap;margin-top:12px;padding:12px;border:2px dashed var(--accent);border-radius:12px;background:var(--accent-soft)}
 .stage img{width:180px;max-width:100%;border-radius:8px}.stage .sb{flex:1;min-width:200px;display:flex;flex-direction:column;gap:8px}
 .stage input{height:36px;border:1px solid var(--border);border-radius:8px;padding:0 10px;background:var(--surface);color:var(--text);font:inherit}
-.acts{display:flex;gap:8px;align-items:center;margin-top:14px}.acts .sp{flex:1}
+.acts{display:flex;gap:8px;align-items:center;margin-top:14px;flex-wrap:wrap}.acts .sp{flex:1}
+.btn.ok{background:var(--done-text);border-color:var(--done-text);color:#fff;font-weight:800}.btn.ok.undo{background:var(--surface);color:var(--done-text)}
+/* 휴대폰 표: 분야·상품코드·상품명·차이 + 서가 두 줄 */
+table.m{table-layout:fixed;font-size:12.5px}table.m th,table.m td{padding:6px 6px;overflow:hidden;text-overflow:ellipsis}
+table.m thead th:nth-child(1){width:21%}table.m thead th:nth-child(2){width:31%}table.m thead th:nth-child(4){width:15%}
+table.m .chip{font-size:11px;padding:1px 6px;max-width:100%;overflow:hidden;text-overflow:ellipsis;vertical-align:middle}
+table.m tfoot td{overflow:visible;white-space:nowrap}tbody.g{-webkit-tap-highlight-color:transparent}table.m td.isbn{font-size:12px}table.m td.mname{white-space:nowrap;font-weight:600}table.m .tag{margin-left:3px;padding:0 4px}
+table.m td.msh{padding:0 6px 3px;border-bottom:none;font-family:ui-monospace,Menlo,monospace;font-size:11.5px;color:var(--muted);white-space:nowrap}
+table.m tbody.g tr:last-child td{border-bottom:1px solid var(--border);padding-bottom:6px}
 .toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:#1f2328;color:#fff;padding:10px 16px;border-radius:10px;z-index:200;font-size:13px;box-shadow:var(--shadow);max-width:90vw}
 .toast.err{background:#d1242f}.toast.ok{background:#0a7c42}
 .zoom{position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:150;display:flex;align-items:center;justify-content:center;cursor:zoom-out}.zoom img{max-width:96vw;max-height:92vh;border-radius:8px}
 .banner{margin:10px 0 0;padding:10px 12px;border-radius:10px;background:var(--exc);border:1px solid #f0bc3c;font-size:13px}
-@media (max-width:700px){.bar{position:static}.wrap{padding:12px 10px 30px}header h1{font-size:18px}.card .v{font-size:17px}.bar input[type=search]{max-width:none}.count{width:100%;margin-left:0}
+@media (max-width:700px){.d-shelves{grid-template-columns:1fr 1fr}.bar{position:static}.wrap{padding:12px 10px 30px}header h1{font-size:18px}.card .v{font-size:17px}.bar input[type=search]{max-width:none}.count{width:100%;margin-left:0}
   .d-top{flex-direction:column}.d-cover{width:100%;height:220px}}
 @media print{.bar,.hint,.noprint,.banner{display:none!important}body{background:#fff}.wrap{max-width:none;padding:0}.tbl-wrap{border:none;overflow:visible;max-height:none}thead th,tfoot td{position:static}
   td,th{padding:4px 6px;font-size:11px}tbody.g{break-inside:avoid}.card{padding:6px 10px}.card .v{font-size:16px}}
@@ -91,13 +101,16 @@ tfoot td{position:sticky;bottom:0;background:var(--head);font-weight:800;border-
     const items = D.items, META = D.meta || {};
     let PH = JSON.parse(document.getElementById('sa-photos').textContent || '{}');
     if (!PH.photos) PH = { photos: {}, updatedAt: 0 };
+    if (!PH.checked) PH.checked = {};   // 확인완료: { isbn: 시각 } — 사진이 없어도 '확인' 버튼으로 표시
     const $ = (s, r) => (r || document).querySelector(s);
     const esc = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
     const fmt = (n) => Number(n || 0).toLocaleString('ko-KR');
     const sgn = (n) => (n > 0 ? '+' + fmt(n) : fmt(n));
     const majL = (m) => { const s = String(m == null ? '' : m); const n = /^\d{1,2}$/.test(s) ? parseInt(s, 10) : 0; return n >= 1 && n <= 26 ? `${s}(${String.fromCharCode(64 + n)})` : s; };
     const byIsbn = new Map(items.map((x) => [x.i, x]));
-    const st = { q: '', fields: new Set(), diff: '', maj: '', photo: '', exc: '', sort: { k: null, dir: 1 } };
+    const st = { q: '', fields: new Set(), diff: '', maj: '', photo: '', exc: '', done: '', sort: { k: null, dir: 1 } };
+    const MQ = window.matchMedia('(max-width:700px)');   // 휴대폰: 줄인 표
+    const cut = (t, n) => { const a = [...String(t == null ? '' : t)]; return a.length > n ? a.slice(0, n).join('') + '…' : a.join(''); };
     const fields = [...new Set(items.map((x) => x.f).filter((x) => x !== ''))].sort((a, b) => a.localeCompare(b, 'ko'));
     const majs = [...new Set(items.flatMap((x) => x.sh.map((s) => s[1])).filter(Boolean))].sort();
     const nExc = items.filter((x) => x.e).length;
@@ -109,6 +122,8 @@ tfoot td{position:sticky;bottom:0;background:var(--head);font-weight:800;border-
     const photosOf = (isbn) => Object.entries(PH.photos).filter(([, p]) => p.isbns.includes(isbn)).map(([id, p]) => ({ id, ...p })).sort((a, b) => a.at - b.at);
     const photoCount = (isbn) => { let n = 0; for (const p of Object.values(PH.photos)) if (p.isbns.includes(isbn)) n++; return n; };
     const nPhotos = () => Object.keys(PH.photos).length;
+    // 확인완료 = 확인 버튼을 눌렀거나 사진을 찍은 항목
+    const isDone = (isbn) => !!PH.checked[isbn] || photoCount(isbn) > 0;
     // 브라우저 임시 저장(IndexedDB). 파일로 연 HTML 은 브라우저에 따라 막혀 있을 수 있다 → 그땐 조용히 포기.
     const IDB = { db: null, ok: false };
     function idbOpen() {
@@ -131,7 +146,7 @@ tfoot td{position:sticky;bottom:0;background:var(--head);font-weight:800;border-
     function refreshSaveBtn() {
       const b = $('#f-savefile');
       b.classList.toggle('dirty', dirty);
-      b.innerHTML = `💾 사진 포함 저장${nPhotos() ? ` <b>${nPhotos()}</b>` : ''}${dirty ? ' · 저장 안 됨' : ''}`;
+      b.innerHTML = `💾 저장 <span style="font-weight:400">(사진·확인 포함)</span>${dirty ? ' · 저장 안 됨' : ''}`;
       const z = $('#f-zip'); z.disabled = !nPhotos(); z.innerHTML = `📦 사진 ZIP 받기${nPhotos() ? ` <b>${nPhotos()}</b>` : ''}`;
     }
     window.addEventListener('beforeunload', (e) => { if (dirty) { e.preventDefault(); e.returnValue = ''; } });
@@ -147,7 +162,7 @@ tfoot td{position:sticky;bottom:0;background:var(--head);font-weight:800;border-
       const a = document.createElement('a'); a.href = url; a.download = (META.fileBase || '재고조사오차') + '.html';
       document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 5000);
       dirty = false; refreshSaveBtn();
-      toast(`사진 ${nPhotos()}장을 넣어 새 파일로 저장했습니다 — 앞으로는 그 파일을 여세요`, 'ok');
+      toast(`사진 ${nPhotos()}장 · 확인 ${items.filter((x) => isDone(x.i)).length}건을 넣어 새 파일로 저장했습니다 — 앞으로는 그 파일을 여세요`, 'ok');
     }
 
     // 사진 ZIP 받기: 사진 한 장이 여러 항목에 들어가 있으면 항목마다 'ISBN.jpg'(같은 ISBN 이 또 있으면 'ISBN_2.jpg')로,
@@ -269,6 +284,8 @@ tfoot td{position:sticky;bottom:0;background:var(--head);font-weight:800;border-
         if (st.diff === 'zero' && x.sd !== 0) continue;
         if (st.photo === 'has' && !photoCount(x.i)) continue;
         if (st.photo === 'no' && photoCount(x.i)) continue;
+        if (st.done === 'done' && !isDone(x.i)) continue;
+        if (st.done === 'todo' && isDone(x.i)) continue;
         let sh = x.sh;
         if (st.maj) { sh = sh.filter((s) => s[1] === st.maj); if (!sh.length) continue; }
         out.push({ x, sh });
@@ -292,38 +309,58 @@ tfoot td{position:sticky;bottom:0;background:var(--head);font-weight:800;border-
         <div class="card ${sd < 0 ? 'neg' : sd > 0 ? 'pos' : ''}"><div class="k">스캔차이 합계</div><div class="v">${sgn(sd)}</div></div>
         <div class="card neg"><div class="k">부족 항목 (−)</div><div class="v">${fmt(base.filter((x) => x.sd < 0).length)}<small> 건</small></div></div>
         <div class="card pos"><div class="k">초과 항목 (+)</div><div class="v">${fmt(base.filter((x) => x.sd > 0).length)}<small> 건</small></div></div>
-        <div class="card"><div class="k">📷 사진 있는 항목</div><div class="v">${fmt(withPh)}<small> 건 · 사진 ${fmt(nPhotos())}장</small></div></div>`;
+        <div class="card"><div class="k">✅ 확인완료</div><div class="v" style="color:var(--done-text)">${fmt(base.filter((x) => isDone(x.i)).length)}<small> / ${fmt(base.length)}건 · 사진 ${fmt(withPh)}건</small></div></div>`;
     }
+    // 머리글(PC: 12열 · 휴대폰: 분야·상품코드·상품명·차이)
+    const HEAD_PC = [['f', '분야'], ['i', 'ISBN'], ['n', '도서명'], ['p', '출판사'], ['loc', '수불처코드'], ['', '대분류'], ['', '중분류'], ['', '소분류'], ['s', '전산재고', 1], ['', '스캔수량', 1], ['ss', '스캔합계', 1], ['sd', '스캔차이', 1]];
+    const HEAD_M = [['f', '분야'], ['i', '상품코드'], ['n', '상품명'], ['sd', '차이', 1]];
+    const shelfTxt = (s) => `${s[0]}-${majL(s[1])}-${s[2]}-${s[3]} ×${fmt(s[4])}`;
     function render() {
-      const rows = view();
+      const rows = view(), mobile = MQ.matches;
+      const head = mobile ? HEAD_M : HEAD_PC;
+      $('#t').classList.toggle('m', mobile);
+      $('#th').innerHTML = '<tr>' + head.map(([k, label, num]) => `<th${k ? ` data-k="${k}"` : ''}${num ? ' class="num"' : ''}>${label}${k ? `<span class="ar">${st.sort.k === k ? (st.sort.dir > 0 ? '▲' : '▼') : ''}</span>` : ''}</th>`).join('') + '</tr>';
       let html = '', sSys = 0, sQty = 0, sSum = 0, sDiff = 0;
       for (const { x, sh } of rows) {
-        const shelves = sh.length ? sh : [['', '', '', '', '']];
-        const n = shelves.length, rs = n > 1 ? ` rowspan="${n}"` : '';
         const dc = x.sd < 0 ? 'neg' : x.sd > 0 ? 'pos' : 'zero';
-        const pc = photoCount(x.i);
+        const pc = photoCount(x.i), done = isDone(x.i);
+        const tags = `${pc ? `<span class="tag ph">📷 ${pc}</span>` : ''}${done && !pc ? '<span class="tag ok">✓</span>' : ''}${x.e ? '<span class="tag ex">예외</span>' : ''}`;
         sSys += x.s; sSum += x.ss; sDiff += x.sd;
-        html += `<tbody class="g${pc ? ' ph' : ''}" data-i="${esc(x.i)}">`;
-        shelves.forEach((s, k) => {
-          sQty += Number(s[4]) || 0;
-          html += '<tr>';
-          if (k === 0) html += `<td${rs}>${x.f ? `<span class="chip">${esc(x.f)}</span>` : ''}</td><td${rs} class="isbn">${esc(x.i)}</td><td${rs} class="name">${esc(x.n)}${pc ? `<span class="tag ph">📷 ${pc}</span>` : ''}${x.e ? '<span class="tag ex">예외</span>' : ''}</td><td${rs}>${esc(x.p)}</td>`;
-          html += `<td class="code">${esc(s[0])}</td><td class="code">${esc(majL(s[1]))}</td><td class="code">${esc(s[2])}</td><td class="code">${esc(s[3])}</td>`;
-          if (k === 0) html += `<td${rs} class="num">${fmt(x.s)}</td>`;
-          html += `<td class="num">${s[4] === '' ? '' : fmt(s[4])}</td>`;
-          if (k === 0) html += `<td${rs} class="num">${fmt(x.ss)}</td><td${rs} class="num diff ${dc}">${sgn(x.sd)}</td>`;
-          html += '</tr>';
-        });
+        html += `<tbody class="g${done ? ' done' : ''}" data-i="${esc(x.i)}">`;
+        if (mobile) {
+          // 1줄: 분야 · 상품코드 · 상품명(10자 넘으면 …) · 차이 / 2~3줄: 서가 한 줄씩(3곳 이상이면 '… 외 N곳')
+          const rs = Math.min(sh.length, 2) + 1;
+          html += `<tr><td>${x.f ? `<span class="chip">${esc(cut(x.f, 6))}</span>` : ''}</td><td class="isbn">${esc(x.i)}</td><td class="mname" title="${esc(x.n)}">${esc(cut(x.n, 10))}${tags}</td><td class="num diff ${dc}" rowspan="${rs}">${sgn(x.sd)}</td></tr>`;
+          sh.slice(0, 2).forEach((s2, k) => {
+            const more = k === 1 && sh.length > 2 ? ` … 외 ${sh.length - 2}곳` : '';
+            html += `<tr><td class="msh" colspan="3">${esc(shelfTxt(s2))}${more}</td></tr>`;
+          });
+        } else {
+          const shelves = sh.length ? sh : [['', '', '', '', '']];
+          const n = shelves.length, rs = n > 1 ? ` rowspan="${n}"` : '';
+          shelves.forEach((s2, k) => {
+            sQty += Number(s2[4]) || 0;
+            html += '<tr>';
+            if (k === 0) html += `<td${rs}>${x.f ? `<span class="chip">${esc(x.f)}</span>` : ''}</td><td${rs} class="isbn">${esc(x.i)}</td><td${rs} class="name">${esc(x.n)}${tags}</td><td${rs}>${esc(x.p)}</td>`;
+            html += `<td class="code">${esc(s2[0])}</td><td class="code">${esc(majL(s2[1]))}</td><td class="code">${esc(s2[2])}</td><td class="code">${esc(s2[3])}</td>`;
+            if (k === 0) html += `<td${rs} class="num">${fmt(x.s)}</td>`;
+            html += `<td class="num">${s2[4] === '' ? '' : fmt(s2[4])}</td>`;
+            if (k === 0) html += `<td${rs} class="num">${fmt(x.ss)}</td><td${rs} class="num diff ${dc}">${sgn(x.sd)}</td>`;
+            html += '</tr>';
+          });
+        }
         html += '</tbody>';
       }
       // 항목마다 <tbody class="g"> 하나(줄무늬·강조·클릭이 항목 단위로). 이전 묶음을 지우고 tfoot 앞에 끼운다.
       document.querySelectorAll('#t > tbody.g').forEach((g) => g.remove());
       if (rows.length) $('#tf').insertAdjacentHTML('beforebegin', html);
       $('#empty').style.display = rows.length ? 'none' : '';
-      $('#tf').innerHTML = rows.length ? `<tr><td colspan="8">합계 · 항목 ${fmt(rows.length)}건</td><td class="num">${fmt(sSys)}</td><td class="num">${fmt(sQty)}</td><td class="num">${fmt(sSum)}</td><td class="num diff ${sDiff < 0 ? 'neg' : sDiff > 0 ? 'pos' : 'zero'}">${sgn(sDiff)}</td></tr>` : '';
+      const dcls = sDiff < 0 ? 'neg' : sDiff > 0 ? 'pos' : 'zero';
+      $('#tf').innerHTML = !rows.length ? '' : mobile
+        ? `<tr><td colspan="3">합계 · ${fmt(rows.length)}건</td><td class="num diff ${dcls}">${sgn(sDiff)}</td></tr>`
+        : `<tr><td colspan="8">합계 · 항목 ${fmt(rows.length)}건</td><td class="num">${fmt(sSys)}</td><td class="num">${fmt(sQty)}</td><td class="num">${fmt(sSum)}</td><td class="num diff ${dcls}">${sgn(sDiff)}</td></tr>`;
       const total = items.filter(excOk).length;
       $('#count').textContent = rows.length === total ? `전체 ${fmt(total)}건` : `${fmt(rows.length)}건 / 전체 ${fmt(total)}건`;
-      document.querySelectorAll('thead th[data-k]').forEach((th) => { const on = st.sort.k === th.dataset.k; th.querySelector('.ar').textContent = on ? (st.sort.dir > 0 ? '▲' : '▼') : ''; });
       $('#f-field-btn').classList.toggle('on', st.fields.size > 0);
       $('#f-field-lbl').textContent = st.fields.size ? `${st.fields.size}개` : '전체';
       cards();
@@ -348,9 +385,11 @@ tfoot td{position:sticky;bottom:0;background:var(--head);font-weight:800;border-
     function openDetail(isbn) {
       const x = byIsbn.get(isbn); if (!x) return;
       const dc = x.sd < 0 ? 'neg' : x.sd > 0 ? 'pos' : '';
+      // 서가: 작게, 한 줄에 두 개씩
       const chips = x.sh.length
-        ? `<div class="d-chips">${x.sh.map((s) => `<span class="d-chip">${esc(s[0])}-${esc(majL(s[1]))}-${esc(s[2])}-${esc(s[3])} <b>×${fmt(s[4])}</b></span>`).join('')}</div>`
+        ? `<div class="d-shelves">${x.sh.map((s) => `<span class="d-chip" title="${esc(shelfTxt(s))}">${esc(s[0])}-${esc(majL(s[1]))}-${esc(s[2])}-${esc(s[3])} <b>×${fmt(s[4])}</b></span>`).join('')}</div>`
         : '<div style="color:var(--muted);font-size:13px">서가 스캔 데이터 없음</div>';
+      const checked = !!PH.checked[x.i];
       const m = modal(`<h3>📖 도서 상세${x.e ? ' <span class="tag ex">예외</span>' : ''}</h3>
         <div class="d-top"><div class="d-cover" id="d-cover"></div>
           <div class="d-meta"><div class="d-title">${esc(x.n || '(제목없음)')}</div><div class="d-sub">${esc(x.p)}${x.f ? ' · ' + esc(x.f) : ''}</div><div class="d-isbn">ISBN ${esc(x.i)}</div>
@@ -358,9 +397,18 @@ tfoot td{position:sticky;bottom:0;background:var(--head);font-weight:800;border-
         <div class="d-lbl">서가 (수불처-대-중-소 × 스캔수량)</div>${chips}
         <div class="d-lbl">📷 사진 <span id="d-pn" style="color:var(--muted);font-weight:400"></span></div><div class="d-photos" id="d-photos"></div>
         <div id="d-stage"></div>
-        <div class="acts"><button class="btn" type="button" id="d-close">닫기</button><span class="sp"></span><button class="btn primary" type="button" id="d-shoot">📷 사진 촬영</button></div>`);
+        <div class="acts"><button class="btn" type="button" id="d-close">닫기</button><span class="sp"></span>
+          <button class="btn ok${checked ? ' undo' : ''}" type="button" id="d-check">${checked ? '↩ 확인 취소' : '✅ 확인완료'}</button>
+          <button class="btn primary" type="button" id="d-shoot">📷 사진 촬영</button></div>`);
       cover(m.q('#d-cover'), x.i);
       m.q('#d-close').addEventListener('click', m.close);
+      // 확인완료: 사진을 안 찍어도 '봤다'고 표시 → 창 닫고 목록에 색 표시. 다시 열어 누르면 취소.
+      m.q('#d-check').addEventListener('click', () => {
+        if (PH.checked[x.i]) {
+          delete PH.checked[x.i]; changed(); m.close();
+          toast(photoCount(x.i) ? '확인 표시를 지웠습니다 — 사진이 있어 계속 확인완료로 보입니다' : '확인 취소');
+        } else { PH.checked[x.i] = Date.now(); changed(); m.close(); toast('✅ 확인완료 — 끝나면 💾 저장', 'ok'); }
+      });
       const drawPhotos = () => {
         const list = photosOf(x.i);
         m.q('#d-pn').textContent = list.length ? `${list.length}장` : '아직 없음';
@@ -424,7 +472,7 @@ tfoot td{position:sticky;bottom:0;background:var(--head);font-weight:800;border-
     let t = null;
     $('#f-q').addEventListener('input', (e) => { clearTimeout(t); t = setTimeout(() => { st.q = e.target.value; render(); }, 150); });
     const sel = (id, key) => $(id).addEventListener('change', (e) => { st[key] = e.target.value; e.target.classList.toggle('on', !!e.target.value); render(); });
-    sel('#f-diff', 'diff'); sel('#f-maj', 'maj'); sel('#f-photo', 'photo'); sel('#f-exc', 'exc');
+    sel('#f-diff', 'diff'); sel('#f-maj', 'maj'); sel('#f-photo', 'photo'); sel('#f-exc', 'exc'); sel('#f-done', 'done');
     const dd = $('#f-field');
     $('#f-field-btn').addEventListener('click', (e) => { e.stopPropagation(); dd.classList.toggle('open'); });
     document.addEventListener('click', (e) => { if (!dd.contains(e.target)) dd.classList.remove('open'); });
@@ -432,8 +480,8 @@ tfoot td{position:sticky;bottom:0;background:var(--head);font-weight:800;border-
     $('#f-field-all').addEventListener('click', () => { fields.forEach((f) => st.fields.add(f)); dd.querySelectorAll('input').forEach((c) => { c.checked = true; }); render(); });
     $('#f-field-none').addEventListener('click', () => { st.fields.clear(); dd.querySelectorAll('input').forEach((c) => { c.checked = false; }); render(); });
     $('#f-reset').addEventListener('click', () => {
-      Object.assign(st, { q: '', diff: '', maj: '', photo: '', exc: '', sort: { k: null, dir: 1 } }); st.fields.clear();
-      ['#f-q', '#f-diff', '#f-maj', '#f-photo', '#f-exc'].forEach((s) => { $(s).value = ''; $(s).classList.remove('on'); });
+      Object.assign(st, { q: '', diff: '', maj: '', photo: '', exc: '', done: '', sort: { k: null, dir: 1 } }); st.fields.clear();
+      ['#f-q', '#f-diff', '#f-maj', '#f-photo', '#f-exc', '#f-done'].forEach((s) => { $(s).value = ''; $(s).classList.remove('on'); });
       dd.querySelectorAll('input').forEach((c) => { c.checked = false; });
       render();
     });
@@ -441,11 +489,13 @@ tfoot td{position:sticky;bottom:0;background:var(--head);font-weight:800;border-
     $('#f-scan').addEventListener('click', scanFind);
     $('#f-savefile').addEventListener('click', saveFile);
     $('#f-zip').addEventListener('click', zipPhotos);
-    document.querySelectorAll('thead th[data-k]').forEach((th) => th.addEventListener('click', () => {
+    $('#th').addEventListener('click', (e) => {
+      const th = e.target.closest('th[data-k]'); if (!th) return;
       const k = th.dataset.k;
       if (st.sort.k === k) st.sort.dir = -st.sort.dir; else st.sort = { k, dir: 1 };
       render();
-    }));
+    });
+    MQ.addEventListener ? MQ.addEventListener('change', render) : MQ.addListener(render);   // 화면 돌리면 표 모양 바꿈
     $('#t').addEventListener('click', (e) => { const g = e.target.closest('tbody.g'); if (g) openDetail(g.dataset.i); });
     // 틀 고정: 표 칸 높이 = 화면 − 필터 막대
     //  (휴대폰에선 필터 막대가 여러 줄이라 붙여 두지 않는다 → 표가 화면 전체를 쓰고 머리글만 고정)
@@ -458,7 +508,7 @@ tfoot td{position:sticky;bottom:0;background:var(--head);font-weight:800;border-
       if (!ok) { $('#store-note').textContent = '이 브라우저에서는 임시 저장이 안 됩니다 — 사진을 찍은 뒤 꼭 💾 사진 포함 저장을 누르세요.'; $('#store-note').style.display = ''; return; }
       const saved = await idbGet(META.rid);
       if (saved && saved.photos && (saved.updatedAt || 0) > (PH.updatedAt || 0)) {
-        PH = saved; dirty = true; refreshSaveBtn(); render();
+        PH = saved; if (!PH.checked) PH.checked = {}; dirty = true; refreshSaveBtn(); render();
         toast(`이 브라우저에 임시 저장된 사진 ${nPhotos()}장을 불러왔습니다 — 💾 사진 포함 저장으로 파일에 넣으세요`);
       }
     });
@@ -493,6 +543,7 @@ tfoot td{position:sticky;bottom:0;background:var(--head);font-weight:800;border-
     <div class="dd-panel"><div class="dd-act"><button type="button" id="f-field-all">모두</button><button type="button" id="f-field-none">해제(전체)</button></div><div id="f-field-list"></div></div></div>
   <select id="f-diff" class="btn"><option value="">스캔차이 전체</option><option value="nz">0 제외</option><option value="neg">부족만 (−)</option><option value="pos">초과만 (+)</option><option value="zero">0만</option></select>
   <select id="f-maj" class="btn"></select>
+  <select id="f-done" class="btn"><option value="">확인 전체</option><option value="done">✅ 확인완료</option><option value="todo">미확인</option></select>
   <select id="f-photo" class="btn"><option value="">사진 전체</option><option value="has">사진 있음</option><option value="no">사진 없음</option></select>
   <select id="f-exc" class="btn"><option value="">예외 빼기</option><option value="all">예외 포함</option><option value="only">예외만</option></select>
   <button type="button" class="btn" id="f-reset">초기화</button>
@@ -500,16 +551,10 @@ tfoot td{position:sticky;bottom:0;background:var(--head);font-weight:800;border-
   <span class="count" id="count"></span>
 </div>
 <div class="tbl-wrap"><table id="t">
-<thead><tr>
-  <th data-k="f">분야<span class="ar"></span></th><th data-k="i">ISBN<span class="ar"></span></th><th data-k="n">도서명<span class="ar"></span></th><th data-k="p">출판사<span class="ar"></span></th>
-  <th data-k="loc">수불처코드<span class="ar"></span></th><th>대분류</th><th>중분류</th><th>소분류</th>
-  <th data-k="s" class="num">전산재고<span class="ar"></span></th><th class="num">스캔수량</th><th data-k="ss" class="num">스캔합계<span class="ar"></span></th><th data-k="sd" class="num">스캔차이<span class="ar"></span></th>
-</tr></thead>
+<thead id="th"></thead>
 <tfoot id="tf"></tfoot></table>
 <div class="empty" id="empty" style="display:none">조건에 맞는 항목이 없습니다.</div></div>
-<p class="hint">행을 누르면 상세 · 사진 촬영. 📷 바코드로 찾기로 책 바코드를 찍으면 그 항목이 열립니다. 사진 속에 목록의 다른 책 바코드도 있으면 그 항목들에도 함께 들어갑니다.
-찍은 사진은 <b>💾 사진 포함 저장</b>을 눌러야 파일에 들어갑니다(사진이 든 새 파일을 내려받음 — 앞으로는 그 파일을 여세요).
-열 제목을 누르면 정렬. 필터는 ISBN 단위로 걸립니다. 대분류를 고르면 그 대분류의 서가 줄만 남습니다(이때 스캔수량은 남은 서가만, 스캔합계·스캔차이는 그 ISBN 전체 기준). 스캔차이 = 스캔합계 − 전산재고(모자라면 −).</p>
+
 </div>
 <script type="application/json" id="sa-data">${safeJson(data)}</script>
 <script type="application/json" id="sa-photos">${safeJson({ photos: {}, updatedAt: 0 })}</script>
