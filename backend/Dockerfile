@@ -31,4 +31,7 @@ RUN chown -R node:node /app
 USER node
 
 # 컨테이너 시작 시 스키마 보장 후 서버 실행
-CMD ["sh", "-c", "node src/initDb.js && node src/seedAdmin.js && node src/server.js"]
+# 마지막 단계는 exec 로 node 가 셸을 대신하게 한다(PID 1). 셸이 남아 있으면 배포 때 docker 가 보내는
+# 종료 신호(SIGTERM)가 node 에 닿지 않아 정상 종료 표시를 못 남기고 10초 뒤 강제 종료된다 →
+# 다음 기동에서 '예기치 않은 재시작' 경고가 떴다.
+CMD ["sh", "-c", "node src/initDb.js && node src/seedAdmin.js && exec node src/server.js"]

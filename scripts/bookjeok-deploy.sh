@@ -59,6 +59,9 @@ if [ "$DO_PULL" = true ]; then
   git pull --ff-only || { say "[실패] git pull"; report false "git pull 실패 — 로컬 변경이 있는지 확인하세요"; exit 1; }
 fi
 NEW_SHA="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
+# 컨테이너에 지금 판을 알려 준다(docker-compose.yml 의 BOOKJEOK_REV) — 기동 때 직전 판과 다르면
+# '기능 업데이트로 서버가 재시작되었습니다' 알림(예기치 않은 재시작 경고 대신).
+export BOOKJEOK_REV="$NEW_SHA"
 
 # ── 2) 새 이미지 빌드 (아직 바꾸지 않는다) ─────────────
 STAGE="빌드"
@@ -151,15 +154,15 @@ if [ -z "$OLD_IMAGE" ]; then
 fi
 
 say "이전 이미지로 되돌리는 중 … (${OLD_IMAGE:0:19})"
+# compose 가 쓰는 이미지 이름표를 이전 이미지에 다시 붙이고, compose 로 그대로 다시 띄운다
+#  → 볼륨·포트·환경변수·네트워크가 평소와 똑같다. (예전엔 컨테이너를 지운 '뒤에' 그 설정을 읽어
+#  빈 설정으로 떴고, 환경변수 값에 공백이 있으면 깨지는 방식이었다.) 판 표시는 이전 판으로.
+IMG_NAME="$(docker inspect --format '{{.Config.Image}}' "$API_CONTAINER" 2>/dev/null || echo '')"
 docker compose stop "$API_SERVICE" >/dev/null 2>&1 || true
 docker compose rm -f "$API_SERVICE" >/dev/null 2>&1 || true
-# compose 설정은 그대로 두고 이미지만 이전 것으로 바꿔 띄운다
-if docker run -d --name "$API_CONTAINER" $(docker inspect --format '
-  {{- range .HostConfig.Binds}}-v {{.}} {{end}}
-  {{- range $p, $c := .NetworkSettings.Ports}}{{range $c}}-p {{.HostPort}}:{{$p}} {{end}}{{end}}
-  {{- range .Config.Env}}-e {{.}} {{end}}
-  {{- range $n, $v := .NetworkSettings.Networks}}--network {{$n}} {{end}}
-  --restart unless-stopped' "$API_CONTAINER" 2>/dev/null) "$OLD_IMAGE" >/dev/null 2>&1; then
+export BOOKJEOK_REV="$OLD_SHA"
+if [ -n "$IMG_NAME" ] && docker tag "$OLD_IMAGE" "$IMG_NAME" >/dev/null 2>&1 \
+   && docker compose up -d --no-build "$API_SERVICE" >/dev/null 2>&1; then
   say "이전 이미지로 재기동했습니다."
 else
   say "[주의] 이전 이미지 재기동 명령이 실패했습니다 — docker compose up -d $API_SERVICE 로 확인하세요."

@@ -57,6 +57,8 @@ services:
     environment:
       NODE_ENV: production
       PORT: 4000
+      # 배포 스크립트가 넣는 지금 판(커밋). 기동 때 직전 판과 다르면 '기능 업데이트로 재시작' 알림.
+      BOOKJEOK_REV: ${BOOKJEOK_REV:-}
       SERVE_FRONTEND: ${SERVE_FRONTEND:-1}
       DB_HOST: db
       DB_PORT: 5432

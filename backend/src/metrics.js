@@ -265,7 +265,17 @@ async function checkRestart() {
     unexpected: !!(prev && prev.cleanShutdown === false),
     previous: prev ? { bootAt: prev.bootAt, lastSeen: prev.lastSeen, cleanShutdown: prev.cleanShutdown } : null,
   };
-  await writeState({ boots, bootAt: new Date(bootAt).toISOString(), lastSeen: new Date().toISOString(), cleanShutdown: false, pid: process.pid });
+  const rev = String(process.env.BOOKJEOK_REV || '').trim();
+  await writeState({ boots, bootAt: new Date(bootAt).toISOString(), lastSeen: new Date().toISOString(), cleanShutdown: false, pid: process.pid, rev: rev || (prev && prev.rev) || '' });
+  // 배포(판이 바뀐 재시작)는 '예기치 않은' 것이 아니다 — 정상 종료 표시가 없어도 업데이트로 알린다.
+  //  판은 배포 스크립트가 BOOKJEOK_REV 로 넣는다. 같은 판인데 정상 종료 표시가 없으면 그때만 경고.
+  if (prev && rev && rev !== (prev.rev || '')) {
+    restartInfo.unexpected = false;
+    restartInfo.update = { from: prev.rev || '', to: rev };
+    alerts.event('restart', 'info', '기능 업데이트로 서버가 재시작되었습니다',
+      `${prev.rev ? `${prev.rev} → ${rev}` : `새 판 ${rev}`} 적용. 재시작하는 동안(보통 수십 초) 잠깐 접속이 끊겼을 수 있습니다.`);
+    return;
+  }
   if (restartInfo.unexpected && prev) {
     const lived = prev.bootAt && prev.lastSeen ? Math.round((new Date(prev.lastSeen) - new Date(prev.bootAt)) / 60000) : null;
     alerts.event('restart', 'warn', '서버가 예기치 않게 재시작되었습니다',
