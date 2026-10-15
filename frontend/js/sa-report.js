@@ -477,15 +477,30 @@ table.m tbody.g tr:last-child td{border-bottom:1px solid var(--border);padding-b
     function cover(el, isbn) {
       const i = String(isbn || '').replace(/[^0-9Xx]/g, '');
       if (i.length < 10) { el.textContent = '표지 없음'; return; }
-      const urls = [`https://contents.kyobobook.co.kr/sih/fit-in/400x0/pdt/${i}.jpg`];
-      for (let n = 1; n <= 6; n++) urls.push(`https://contents.kyobobook.co.kr/sih/fit-in/400x0/pdt/addt/${i}_${String(n).padStart(2, '0')}.jpg`);
+      const main = `https://contents.kyobobook.co.kr/sih/fit-in/400x0/pdt/${i}.jpg`;
+      const addt = (n) => `https://contents.kyobobook.co.kr/sih/fit-in/400x0/pdt/addt/${i}_${String(n).padStart(2, '0')}.jpg`;
       const ok = []; let view = 0;
       const img = document.createElement('img'); img.alt = '표지';
       img.onerror = () => { if (!ok.length) { img.remove(); el.textContent = navigator.onLine ? '표지 없음' : '표지(인터넷 필요)'; } };
-      img.onload = () => { if (!ok.length) { ok.push(urls[0]); probe(); } };
-      img.src = urls[0]; el.appendChild(img);
-      // 추가 이미지가 있으면 표지를 누를 때마다 넘긴다
-      function probe() { urls.slice(1).forEach((u) => { const t = new Image(); t.onload = () => { ok.push(u); badge(); }; t.src = u; }); }
+      img.onload = () => { if (!ok.length) { ok.push(main); start(); } };
+      img.src = main; el.appendChild(img);
+      // 추가 이미지가 있으면 표지를 누를 때마다 넘긴다(마지막 다음은 처음으로).
+      // 교보는 없는 번호에도 '이미지 준비중' 기본 그림을 200 으로 준다 — 예전엔 _01~_06 을 다 넣어 없는 것까지 7장이 됐다.
+      // 앱(app.js attachCover)과 같이: 있을 수 없는 _97 의 크기를 '없음' 기준으로 잡고, _01 부터 차례로 보다가
+      // 오류이거나 기준과 같은 크기가 나오면 멈춘다(교보는 번호를 빼먹지 않고 이어 붙인다).
+      let none = null;
+      function start() {
+        const ref = new Image();
+        ref.onload = () => { none = ref.naturalWidth > 1 ? ref.naturalWidth + 'x' + ref.naturalHeight : null; probe(1); };
+        ref.onerror = () => { none = null; probe(1); };
+        ref.src = addt(97);
+      }
+      function probe(n) {
+        if (n > 20) return;
+        const t = new Image();
+        t.onload = () => { if (t.naturalWidth > 1 && t.naturalWidth + 'x' + t.naturalHeight !== none) { ok.push(addt(n)); badge(); probe(n + 1); } };
+        t.src = addt(n);
+      }
       function badge() { let b = $('.more', el); if (!b) { b = document.createElement('span'); b.className = 'more'; el.appendChild(b); } b.textContent = `⇄ ${view + 1}/${ok.length}`; }
       el.addEventListener('click', () => { if (ok.length < 2) return; view = (view + 1) % ok.length; img.src = ok[view]; badge(); });
     }
