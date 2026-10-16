@@ -7,6 +7,10 @@ const API = (() => {
     token = t;
     if (t) localStorage.setItem('bj_token', t);
     else localStorage.removeItem('bj_token');
+    // 토큰이 바뀌면 미리 받아 둔 응답은 '다른 사람(또는 만료된 토큰)'의 것이다 — 버린다.
+    // 예전엔 만료된 토큰으로 열면 미리 받기 9개가 전부 401('인증에 실패했습니다')로 보관됐다가,
+    // 15초 안에 로그인하면 첫 화면이 그 실패를 그대로 받아 메인에 오류가 떴다(다른 곳을 누르면 새로 받아 정상).
+    prefetched.clear();
   }
 
   // 첫 화면 미리 받기: 로그인 확인(/auth/me)을 기다리는 동안 첫 화면에 필요한 목록 요청도 같이 보내 둔다.
@@ -22,7 +26,12 @@ const API = (() => {
       if (hit) { prefetched.delete(path); if (Date.now() - hit.at < PREFETCH_TTL_MS) return hit.pr; }
     }
     const pr = send(method, path, body, isForm);
-    if (capturing && method === 'GET') { pr.catch(() => {}); prefetched.set(path, { pr, at: Date.now() }); }
+    if (capturing && method === 'GET') {
+      const entry = { pr, at: Date.now() };
+      // 실패한 미리 받기는 보관하지 않는다 — 실제로 부를 때 새로 요청하게(같은 자리에 새 것이 들어왔으면 건드리지 않음)
+      pr.catch(() => { if (prefetched.get(path) === entry) prefetched.delete(path); });
+      prefetched.set(path, entry);
+    }
     return pr;
   }
   function prefetch(fn) { capturing = true; try { fn(); } catch (_) { /* 미리 받기 실패는 무시 */ } finally { capturing = false; } }
