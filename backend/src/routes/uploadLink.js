@@ -159,7 +159,7 @@ router.post('/:token', uploadLimiter, attemptLimiter, wrap(gate), wrap(diskGate)
     const mal = await yara.scanFile(f.path);
     if (!mal.ok) { await fsp.unlink(f.path).catch(() => {}); rejected.push({ name: originalName, reason: `악성 패턴 감지(${mal.rule})` }); continue; }
     const name = await uniqueFileName(owner, u.folder, originalName);
-    await query('INSERT INTO files (owner_id, folder, original_name, stored_name, size_bytes, mime_type, note, note_updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7,now())', [owner, u.folder, name, path.basename(f.path), f.size, f.mimetype, note]);
+    await query('INSERT INTO files (owner_id, folder, original_name, stored_name, size_bytes, mime_type, note, note_updated_at, upload_via) VALUES ($1,$2,$3,$4,$5,$6,$7,now(),$8)', [owner, u.folder, name, path.basename(f.path), f.size, f.mimetype, note, `외부 링크 '${String(u.label || '').slice(0, 150)}'`]);
     saved++; savedBytes += f.size;
   }
   if (saved) await query('UPDATE upload_requests SET uploaded_count = uploaded_count + $2, uploaded_bytes = uploaded_bytes + $3 WHERE id=$1', [u.id, saved, savedBytes]);

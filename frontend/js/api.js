@@ -84,6 +84,7 @@ const API = (() => {
     stockAuditDeliver: (payload) => req('POST', '/files/stock-audit/deliver', payload),
     stockAuditReportKey: (payload) => req('POST', '/files/stock-audit/report-key', payload),
     tree: (ownerId) => req('GET', `/files/tree${ownerId ? '?ownerId=' + ownerId : ''}`),
+    recentUploads: (days, ownerId) => req('GET', `/files/recent?days=${days}${ownerId ? '&ownerId=' + ownerId : ''}`),
     // U10 잠금 · U6 이력 · U9 템플릿 · U12 도서정보
     lockFile: (id, note) => req('POST', `/files/${id}/lock`, { note: note || '' }),
     unlockFile: (id) => req('POST', `/files/${id}/unlock`),

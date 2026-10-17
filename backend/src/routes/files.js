@@ -121,6 +121,7 @@ const fileRow = (r) => ({
   mime: r.mime_type, note: r.note || '', createdAt: r.created_at, updatedAt: r.updated_at, noteUpdatedAt: r.note_updated_at,
   // U10 · 잠금. lockedBy 가 있으면 지우기·이름변경·이동·덮어쓰기가 막힌다.
   lockedBy: r.locked_by || null, lockedAt: r.locked_at || null, lockNote: r.lock_note || '',
+  uploadedBy: r.uploaded_by || null, uploadVia: r.upload_via || '', uploaderName: r.uploader_name || null,
   fav: false, tags: [],
 });
 
@@ -253,9 +254,9 @@ router.post('/stock-audit/deliver', authenticate, wrap(async (req, res) => {
   const storedName = crypto.randomUUID();
   await fsp.writeFile(path.join(dir, storedName), payload, 'utf8');
   const row = await query(
-    `INSERT INTO files (owner_id, folder, original_name, stored_name, size_bytes, mime_type)
-     VALUES ($1,$2,$3,$4,$5,'application/x-bookjeok-stockaudit') RETURNING id`,
-    [branchId, folder, name, storedName, Buffer.byteLength(payload)]
+    `INSERT INTO files (owner_id, folder, original_name, stored_name, size_bytes, mime_type, uploaded_by, upload_via)
+     VALUES ($1,$2,$3,$4,$5,'application/x-bookjeok-stockaudit',$6,'재고조사 전달') RETURNING id`,
+    [branchId, folder, name, storedName, Buffer.byteLength(payload), req.user.id]
   );
   await audit(req, 'stock_audit_deliver', `items=${data.length} file=${name}`, branchId);
   notify.push({ userId: branchId, type: 'stockaudit', title: '재고조사 오차 파일이 도착했습니다', body: `${folder} 폴더의 '${name}'를 열어 사진·체크를 진행하세요.` }).catch(() => {});
@@ -600,9 +601,9 @@ router.post('/upload', authenticate, wrap(resolveOwner), wrap(diskGate), upload.
           name = await uniqueFileName(req.targetOwnerId, folder, originalName, client.query.bind(client));
         }
         const row = await client.query(
-          `INSERT INTO files (owner_id, folder, original_name, stored_name, size_bytes, mime_type, note, note_updated_at)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,${note ? 'now()' : 'NULL'}) RETURNING id`,
-          [req.targetOwnerId, folder, name, path.basename(f.path), f.size, f.mimetype, note]
+          `INSERT INTO files (owner_id, folder, original_name, stored_name, size_bytes, mime_type, note, note_updated_at, uploaded_by)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,${note ? 'now()' : 'NULL'},$8) RETURNING id`,
+          [req.targetOwnerId, folder, name, path.basename(f.path), f.size, f.mimetype, note, req.user.id]
         );
         saved.push({ id: row.rows[0].id, name, size: f.size, folder });
       }
@@ -745,9 +746,9 @@ router.post('/upload/complete', authenticate, wrap(resolveOwner), wrap(diskGate)
   else { name = await uniqueFileName(owner, folder, originalName); }
   const mime = String(req.body.mime || '').slice(0, 100) || 'application/octet-stream';
   const row = await query(
-    `INSERT INTO files (owner_id, folder, original_name, stored_name, size_bytes, mime_type, note, note_updated_at)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,${note ? 'now()' : 'NULL'}) RETURNING id`,
-    [owner, folder, name, storedName, size, mime, note]
+    `INSERT INTO files (owner_id, folder, original_name, stored_name, size_bytes, mime_type, note, note_updated_at, uploaded_by)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,${note ? 'now()' : 'NULL'},$8) RETURNING id`,
+    [owner, folder, name, storedName, size, mime, note, req.user.id]
   );
   await audit(req, 'upload', `${folder} · ${originalName} · file=${row.rows[0].id}`);
   if (Number(req.user.id) !== Number(owner)) {
@@ -1054,9 +1055,9 @@ router.post('/bulk/copy', authenticate, wrap(async (req, res) => {
     catch { continue; } // 원본 실물이 없으면 건너뜀
     const name = await uniqueFileName(f.owner_id, folder, f.original_name);
     await query(
-      `INSERT INTO files (owner_id, folder, original_name, stored_name, size_bytes, mime_type, note)
-       VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-      [f.owner_id, folder, name, newStored, f.size_bytes, f.mime_type, f.note || null]
+      `INSERT INTO files (owner_id, folder, original_name, stored_name, size_bytes, mime_type, note, uploaded_by, upload_via)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'복사')`,
+      [f.owner_id, folder, name, newStored, f.size_bytes, f.mime_type, f.note || null, req.user.id]
     );
     copied++;
   }
@@ -1202,6 +1203,30 @@ router.post('/bundle/:id(\\d+)/share', authenticate, wrap(async (req, res) => {
 }));
 
 // ── 검색 고도화 (이름 + 유형·기간·크기·태그·즐겨찾기 필터) ──────────
+// ── 최근 업로드 (모든 폴더 · 최신순) ──────────
+// 폴더 나무로만 보면 '어제 누가 뭘 올렸지'를 폴더마다 열어 봐야 했다. 이 계정(웹하드)의 모든 폴더에서
+// 기간 안에 올라온 파일을 최신순으로 — 누가(또는 외부 링크 · 보고서 등 어떤 경로로) 올렸는지와 함께.
+//   days: 0 = 오늘(한국 시각 0시부터) · 7 · 30 · 90 (그 밖의 값은 7). 최대 500건(많으면 truncated).
+const RECENT_DAYS = [0, 7, 30, 90];
+const RECENT_LIMIT = 500;
+router.get('/recent', authenticate, wrap(resolveOwner), wrap(async (req, res) => {
+  const owner = req.targetOwnerId;
+  const d = parseInt(req.query.days, 10);
+  const days = RECENT_DAYS.includes(d) ? d : 7;
+  const since = days === 0
+    ? "(date_trunc('day', now() AT TIME ZONE 'Asia/Seoul') AT TIME ZONE 'Asia/Seoul')"
+    : `now() - interval '${days} days'`;
+  const r = await query(
+    `SELECT f.*, COALESCE(NULLIF(u.display_name, ''), u.username) AS uploader_name
+       FROM files f LEFT JOIN users u ON u.id = f.uploaded_by
+      WHERE f.owner_id = $1 AND f.deleted_at IS NULL AND f.created_at >= ${since}
+      ORDER BY f.created_at DESC LIMIT ${RECENT_LIMIT + 1}`, [owner]);
+  const truncated = r.rows.length > RECENT_LIMIT;
+  const fileList = r.rows.slice(0, RECENT_LIMIT).map(fileRow);
+  await attachMeta(req.user.id, owner, fileList, []);
+  res.json({ days, truncated, files: fileList });
+}));
+
 router.get('/search', authenticate, wrap(resolveOwner), wrap(async (req, res) => {
   const owner = req.targetOwnerId;
   const q = String(req.query.q || '').trim();

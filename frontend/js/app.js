@@ -305,9 +305,10 @@ const App = (() => {
     return UI.confirm({ title: '업로드가 진행 중입니다', danger: true, confirmText: '그래도 이동',
       message: `아직 ${n}건을 올리는 중이에요.\n지금 ${what} 진행 중인 업로드가 취소됩니다.` });
   }
-  async function switchTo(fn) {
+  async function switchTo(fn, fromHistory = false) {
     if (!(await confirmLeaveWhileUploading('이동하면'))) return false;
     resetViewState(); fn();
+    if (!fromHistory) histPush();   // 계정을 옮긴 것도 뒤로가기 한 칸(되돌리면 원래 계정 · 폴더로)
     await loadAll();
     const v = document.getElementById('view'); if (v) v.scrollTop = 0;
     return true;
@@ -461,7 +462,7 @@ const App = (() => {
   async function loadTags() { try { state.tags = (await API.tags(state.ownerId)).tags || []; } catch { state.tags = []; } }
   async function loadTree() { try { const t = await API.tree(state.ownerId); state.treeFolders = t.folders; state.treeStyles = t.styles || {}; renderTree(); } catch {} }
   async function loadFiles(silent) {
-    if (!silent) { state.search.on = false; const view = document.getElementById('view'); view.innerHTML = '<div class="empty"><div class="big">⏳</div>불러오는 중…</div>'; }
+    if (!silent) { if (state.search.on) leaveSearchState(); const view = document.getElementById('view'); view.innerHTML = '<div class="empty"><div class="big">⏳</div>불러오는 중…</div>'; }
     const view = document.getElementById('view');
     try {
       const [list, usage] = await Promise.all([API.listFiles(state.folder, state.ownerId), API.usage(state.ownerId)]);
@@ -551,6 +552,7 @@ const App = (() => {
           <button class="btn btn-secondary btn-sm" id="new-folder">📂 <span class="label">새 폴더</span></button>
           <button class="btn btn-secondary btn-sm" id="tpl-btn" title="폴더 템플릿 — 자주 쓰는 구조를 한 번에 만들기">📐 <span class="label">템플릿</span></button>
           <button class="btn btn-secondary btn-sm" id="refresh-btn" title="목록 새로고침">🔄 <span class="label">새로고침</span></button>
+          <button class="btn btn-secondary btn-sm${state.search.recent ? ' on' : ''}" id="recent-btn" title="모든 폴더에서 최근 올라온 파일을 최신순으로">🕒 <span class="label">최근 업로드</span></button>
           <input type="file" id="file-input" multiple hidden accept="${state.allowedExt.map((e) => '.' + e).join(',')}">
           <input type="file" id="cam-input" accept="image/*" capture="environment" multiple hidden>
           <div class="tools-break"></div>
@@ -569,7 +571,7 @@ const App = (() => {
         </div>
       </div>
       ${state.degraded ? `<div class="degraded-banner">⚠️ <b>지금 서버에 문제가 있어 마지막으로 확인된 목록</b>을 보여주고 있습니다${state.degradedAt ? ` (${UI.escapeHtml(new Date(state.degradedAt).toLocaleString('ko-KR'))} 기준)` : ''}.<br><span class="muted">이 상태에서는 업로드·삭제 같은 변경이 되지 않습니다. 잠시 뒤 🔄 새로고침으로 다시 시도해 주세요.</span></div>` : ''}
-      ${state.search.on ? `<div class="search-banner">🔎 <b>${UI.escapeHtml(state.search.q)}</b> 검색 결과 · ${state.folders.length + state.files.length}건<div style="flex:1"></div><button class="btn btn-sm btn-ghost" id="search-exit">✕ 검색 나가기</button></div>` : ''}
+      ${state.search.recent ? recentBannerHTML() : state.search.on ? `<div class="search-banner">🔎 <b>${UI.escapeHtml(state.search.q)}</b> 검색 결과 · ${state.folders.length + state.files.length}건<div style="flex:1"></div><button class="btn btn-sm btn-ghost" id="search-exit">✕ 검색 나가기</button></div>` : ''}
       <div id="acct-shortcuts"></div>
       <div id="selbar" class="selbar empty"></div>
       <div id="size-glance"></div>
@@ -667,6 +669,7 @@ const App = (() => {
   const sgOpen = () => localStorage.getItem(SG_KEY) !== '0';
   function renderSizeGlance() {
     const box = document.getElementById('size-glance'); if (!box) return;
+    if (state.search.recent) { box.innerHTML = ''; return; }   // 여러 폴더에 걸친 목록이라 '이 폴더 용량'이 아님
     const items = [
       ...filteredFolders().map((f) => ({ name: f.name, size: Number(f.size) || 0, folder: true, key: `folder:${f.path}` })),
       ...filteredFiles().map((f) => ({ name: f.name, size: Number(f.size) || 0, folder: false, key: `file:${f.id}` })),
@@ -738,7 +741,7 @@ const App = (() => {
         </div>
       </div>`;
     }).join('');
-    const files = sortItems(filteredFiles(), false).map((f) => {
+    const files = withDayHeads(sortItems(filteredFiles(), false), (f) => {
       const key = `file:${f.id}`;
       return `<div class="mcard fade-in${isSel(key) ? ' sel' : ''}" data-file="${f.id}" data-row-key="${esc(key)}">
         <div class="mcard-head">
@@ -746,6 +749,7 @@ const App = (() => {
           <div class="mcard-main">
             <div class="mcard-name"><span class="ic">${UI.fileIcon(f.name)}</span> ${esc(f.name)}${lockBadge(f)}${updateBadge(f, false)}</div>
             <div class="mcard-sub">${UI.bytes(f.size)} · ${UI.date(f.createdAt)}</div>
+            ${state.search.recent ? `<div class="mcard-sub">${uploaderLabel(f)}</div>` : ''}
             ${state.search.on ? `<div class="mcard-sub mcard-path" data-goto="${esc(f.folder || '/')}">📁 ${esc(prettyPath(f.folder))}</div>` : ''}
             ${tagChips(f.tags)}
           </div>
@@ -767,7 +771,7 @@ const App = (() => {
           </div>
         </div>
       </div>`;
-    }).join('');
+    }, (label, n) => `<div class="day-head">${label} <span class="muted">· ${n}건</span></div>`);
     return `<div class="mlist fade-in">${folders}${files}</div>`;
   }
 
@@ -789,7 +793,7 @@ const App = (() => {
         <div class="file-meta num">${UI.bytes(f.size)} · ${f.createdAt ? UI.date(f.createdAt) : '폴더'}</div>
         ${f.note ? `<div class="file-note" title="${UI.escapeHtml(f.note)}">📝 ${UI.escapeHtml(f.note)}</div>` : ''}
       </div>`).join('');
-    const files = sortItems(filteredFiles(), false).map((f) => `
+    const files = withDayHeads(sortItems(filteredFiles(), false), (f) => `
       <div class="file-card fade-in${state.selected.has(`file:${f.id}`) ? ' sel' : ''}" data-file="${f.id}" data-row-key="file:${f.id}" draggable="true">
         <div class="file-actions">
           ${canPreview(f.name) ? `<button class="icon-btn" data-preview="${f.id}" title="미리보기">👁️</button>` : ''}
@@ -804,9 +808,10 @@ const App = (() => {
         <div class="file-ico${isImage(f.name) ? ' thumb' : ''}"${isImage(f.name) ? ` data-thumb="${f.id}"` : ''}>${isImage(f.name) ? '🖼️' : UI.fileIcon(f.name)}</div>
         <div class="file-name">${UI.escapeHtml(f.name)}${lockBadge(f)}${updateBadge(f, false)}</div>
         <div class="file-meta num">${UI.bytes(f.size)} · ${UI.date(f.createdAt)}</div>
+        ${state.search.recent ? `<div class="file-meta up-by-g">${uploaderLabel(f)}</div>` : ''}
         ${tagChips(f.tags)}
         ${f.note ? `<div class="file-note" title="${UI.escapeHtml(f.note)}">📝 ${UI.escapeHtml(f.note)}</div>` : ''}
-      </div>`).join('');
+      </div>`, (label, n) => `<div class="day-head">${label} <span class="muted">· ${n}건</span></div>`);
     return `<div class="file-grid">${folders}${files}</div>`;
   }
 
@@ -933,11 +938,11 @@ const App = (() => {
         <td class="row-actions"><button class="icon-btn" data-fshare="${UI.escapeHtml(f.path)}" title="폴더 공유(읽기전용)">🔗</button><button class="icon-btn" data-freq="${UI.escapeHtml(f.path)}" title="업로드 요청 링크">📥</button><button class="icon-btn" data-fedit="${UI.escapeHtml(f.path)}" title="폴더 설정">⚙️</button></td>
       </tr>`;
     }).join('');
-    const files = sortItems(filteredFiles(), false).map((f) => {
+    const files = withDayHeads(sortItems(filteredFiles(), false), (f) => {
       const key = `file:${f.id}`;
       return `<tr data-file="${f.id}" data-row-key="${UI.escapeHtml(key)}" draggable="true" class="${isSel(key) ? 'sel' : ''}">
         <td><input type="checkbox" class="rowcheck" data-sel-file="${f.id}" data-name="${UI.escapeHtml(f.name)}" ${isSel(key) ? 'checked' : ''}></td>
-        <td class="name-cell">${favBtn(false, f.id, f.fav)}<span class="ic">${UI.fileIcon(f.name)}</span> ${UI.escapeHtml(f.name)}${lockBadge(f)}${updateBadge(f, false)}${tagChips(f.tags)}</td>
+        <td class="name-cell">${favBtn(false, f.id, f.fav)}<span class="ic">${UI.fileIcon(f.name)}</span> ${UI.escapeHtml(f.name)}${lockBadge(f)}${updateBadge(f, false)}${tagChips(f.tags)}${upBy(f)}</td>
         <td class="path-cell" data-goto="${UI.escapeHtml(f.folder || '/')}" title="${UI.escapeHtml(f.folder || '/')}">${UI.escapeHtml(prettyPath(f.folder))}</td>
         <td class="num muted size-cell" data-label="크기">${UI.bytes(f.size)}${sizeBar(f.size)}</td>
         <td class="num muted" data-label="등록">${sdt(f.createdAt)}</td>
@@ -945,7 +950,7 @@ const App = (() => {
         <td class="note-cell" data-note="${f.id}" title="클릭하여 비고 편집">${f.note ? UI.escapeHtml(f.note) : '<span class="muted">+ 비고</span>'}</td>
         <td class="row-actions">${canPreview(f.name) ? `<button class="icon-btn" data-preview="${f.id}" title="미리보기">👁️</button>` : ''}<button class="icon-btn" data-share="${f.id}" title="공유">🔗</button><button class="icon-btn" data-tags="${f.id}" title="태그">🏷️</button><button class="icon-btn" data-dl="${f.id}" title="다운로드">⬇️</button></td>
       </tr>`;
-    }).join('');
+    }, (label, n) => `<tr class="day-row"><td colspan="8">${label} <span class="muted">· ${n}건</span></td></tr>`);
     const th = (key, label, style = '') => `<th class="sortable${state.sort.key === key ? ' sorted' : ''}" data-sort="${key}"${style ? ` style="${style}"` : ''}>${label}${sortArrow(key)}</th>`;
     const vf = filteredFiles(); const vfo = filteredFolders();
     const total = vfo.length + vf.length;
@@ -969,7 +974,7 @@ const App = (() => {
     document.getElementById('tpl-btn')?.addEventListener('click', templateModal);
     document.getElementById('refresh-btn')?.addEventListener('click', async (e) => {
       const b = e.currentTarget; b.disabled = true; b.classList.add('spinning');
-      try { await loadAll(); scrollListTop(); UI.toast('목록을 새로고침했습니다', 'success'); }
+      try { if (state.search.recent) await openRecent(state.search.recent.days); else await loadAll(); scrollListTop(); UI.toast('목록을 새로고침했습니다', 'success'); }
       catch { UI.toast('새로고침 실패', 'error'); }
       finally { b.disabled = false; b.classList.remove('spinning'); }
     });
@@ -978,9 +983,14 @@ const App = (() => {
     document.getElementById('nav-up').addEventListener('click', navUp);
     document.getElementById('usage-report').addEventListener('click', usageReportModal);
     const sf = document.getElementById('searchform'), si = document.getElementById('search-input');
-    si.value = state.search.q;
+    si.value = state.search.recent ? '' : state.search.q;   // 최근 업로드는 검색어가 아님
     sf.addEventListener('submit', (e) => { e.preventDefault(); doSearch(si.value); });
     document.getElementById('search-exit')?.addEventListener('click', clearSearch);
+    document.getElementById('recent-btn')?.addEventListener('click', () => (state.search.recent ? clearSearch() : openRecent(state.recentDays || 7)));
+    document.querySelectorAll('[data-rdays]').forEach((b) => b.addEventListener('click', () => openRecent(Number(b.dataset.rdays))));
+    document.querySelectorAll('[data-rby]').forEach((b) => b.addEventListener('click', () => {
+      state.search.recent.by = b.dataset.rby; state.selected.clear(); state.anchor = null; renderContent();
+    }));
     // 확장자 필터
     const efb = document.getElementById('extfilter-btn'), panel = document.getElementById('extfilter-panel');
     efb.addEventListener('click', (e) => { e.stopPropagation(); if (panel.classList.contains('hidden')) buildExtFilterPanel(); panel.classList.toggle('hidden'); });
@@ -995,6 +1005,7 @@ const App = (() => {
     if (state.extFilter.size) out = out.filter((f) => state.extFilter.has(extOf(f.name)));
     if (state.favOnly) out = out.filter((f) => f.fav);
     if (state.tagFilter) out = out.filter((f) => (f.tags || []).some((t) => String(t.id) === String(state.tagFilter)));
+    if (state.search.recent && state.search.recent.by) out = out.filter((f) => uploaderKey(f) === state.search.recent.by);
     return out;
   }
   // 폴더도 즐겨찾기 필터 반영(태그는 파일 전용)
@@ -1045,12 +1056,77 @@ const App = (() => {
     q = (q || '').trim();
     if (!q) { if (state.search.on) clearSearch(); return; }
     API.search(q, state.ownerId).then((r) => {
+      if (!state.search.on) histPush('search');   // 뒤로가기 → 검색 나가기
       state.search = { on: true, q };
       state.folders = r.folders || []; state.files = r.files || [];
       state.selected.clear(); state.anchor = null; renderContent();
     }).catch((e) => UI.toast(e.message, 'error'));
   }
-  function clearSearch() { state.search = { on: false, q: '' }; loadFiles(); }
+  function leaveSearchState() {
+    if (state.search.recent && state.search.recent.prevSort) state.sort = state.search.recent.prevSort;   // 최근 업로드가 바꾼 정렬 되돌리기
+    state.search = { on: false, q: '' };
+  }
+  function clearSearch() { leaveSearchState(); loadFiles(); }
+
+  // ── 최근 업로드 (이 웹하드의 모든 폴더 · 최신순) ──────────
+  // 폴더 나무로만 보면 '최근에 뭐가 올라왔지'를 폴더마다 열어 봐야 했다. 검색 결과 화면을 그대로 쓰고
+  // (경로를 누르면 그 폴더로) 날짜별로 묶어, 누가 · 어떤 경로로 올렸는지와 함께 보여 준다.
+  const RECENT_DAYS = [[0, '오늘'], [7, '7일'], [30, '30일'], [90, '90일']];
+  // 올린 사람 — 계정이면 이름, 아니면 경로(외부 링크 · 재고조사 보고서 …), 둘 다 없으면 기록 없음(이 기능 전 · 외부 업로드)
+  const NO_UPLOADER = '__none';   // '전체'(빈 값)와 겹치지 않게
+  const uploaderKey = (f) => f.uploaderName || f.uploadVia || NO_UPLOADER;
+  function uploaderLabel(f) {
+    if (f.uploaderName) return `👤 ${UI.escapeHtml(f.uploaderName)}${f.uploadVia ? ` · ${UI.escapeHtml(f.uploadVia)}` : ''}`;
+    if (f.uploadVia) return `🔗 ${UI.escapeHtml(f.uploadVia)}`;
+    return '<span class="muted">👤 기록 없음</span>';
+  }
+  const upBy = (f) => (state.search.recent ? `<span class="up-by">${uploaderLabel(f)}</span>` : '');
+  async function openRecent(days) {
+    const d = RECENT_DAYS.some(([v]) => v === days) ? days : 7;
+    let r;
+    try { r = await API.recentUploads(d, state.ownerId); }
+    catch (e) { UI.toast(e.message, 'error'); return; }
+    if (!state.search.on) histPush('recent');                       // 뒤로가기 → 최근 업로드 나가기
+    const prev = state.search.recent ? state.search.recent.prevSort : (state.search.on ? null : { ...state.sort });
+    const by = state.search.recent && state.search.recent.days === d ? state.search.recent.by : '';
+    state.recentDays = d;
+    state.search = { on: true, q: '최근 업로드', recent: { days: d, by, prevSort: prev || { key: 'name', dir: 'asc' }, truncated: !!r.truncated } };
+    state.sort = { key: 'createdAt', dir: 'desc' };
+    state.folders = []; state.files = r.files || [];
+    if (by && !state.files.some((f) => uploaderKey(f) === by)) state.search.recent.by = '';
+    state.selected.clear(); state.anchor = null; renderContent(); scrollListTop();
+  }
+  function recentBannerHTML() {
+    const rc = state.search.recent, esc = UI.escapeHtml;
+    const counts = new Map();
+    for (const f of state.files) { const k = uploaderKey(f); counts.set(k, (counts.get(k) || 0) + 1); }
+    const who = [...counts.entries()].sort((a, b) => b[1] - a[1]);
+    const shown = filteredFiles().length;
+    const chip = (k, label, n) => `<button type="button" class="rc-chip${rc.by === k ? ' on' : ''}" data-rby="${esc(k)}">${label} <span class="num">${n}</span></button>`;
+    return `<div class="search-banner recent-banner">
+      <div class="rb-top">🕒 <b>최근 업로드</b>
+        <span class="rb-days">${RECENT_DAYS.map(([v, l]) => `<button type="button" class="rc-chip${rc.days === v ? ' on' : ''}" data-rdays="${v}">${l}</button>`).join('')}</span>
+        <span class="muted">${rc.by ? `${shown}건 / ` : ''}${state.files.length}건${rc.truncated ? ' · 최근 500건까지만' : ''}</span>
+        <div style="flex:1"></div><button class="btn btn-sm btn-ghost" id="search-exit">✕ 나가기</button></div>
+      ${who.length > 1 ? `<div class="rb-who"><span class="muted">올린 사람</span>${chip('', '전체', state.files.length)}${who.map(([k, n]) => chip(k, k === NO_UPLOADER ? '기록 없음' : esc(k), n)).join('')}</div>` : ''}
+    </div>`;
+  }
+  // 날짜 묶음 머리 — 최근 업로드에서 등록일 내림차순일 때만
+  const dayKey = (iso) => { const d = new Date(iso); return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`; };
+  function dayLabel(iso) {
+    const d = new Date(iso), t = new Date(), y = new Date(Date.now() - 86400000);
+    const md = `${d.getMonth() + 1}월 ${d.getDate()}일 (${'일월화수목금토'[d.getDay()]})`;
+    return dayKey(iso) === dayKey(t) ? `오늘 · ${md}` : dayKey(iso) === dayKey(y) ? `어제 · ${md}` : md;
+  }
+  // files(정렬된 것)에서 날짜가 바뀌는 자리마다 head(라벨, 건수)를 끼워 HTML 을 만든다
+  function withDayHeads(files, row, head) {
+    const grouping = state.search.recent && state.sort.key === 'createdAt';
+    if (!grouping) return files.map(row).join('');
+    const counts = new Map(); for (const f of files) { const k = dayKey(f.createdAt); counts.set(k, (counts.get(k) || 0) + 1); }
+    let last = null, out = '';
+    for (const f of files) { const k = dayKey(f.createdAt); if (k !== last) { out += head(dayLabel(f.createdAt), counts.get(k)); last = k; } out += row(f); }
+    return out;
+  }
 
   // ── 폴더 이동(히스토리 · 트리 동기화) ──────────────
   function normFolder(p) { if (!p || p === '/') return '/'; return '/' + String(p).split('/').filter(Boolean).join('/'); }
@@ -1060,49 +1136,94 @@ const App = (() => {
   function scrollListTop() { window.scrollTo(0, 0); const v = document.getElementById('view'); if (v) v.scrollTop = 0; }
   function goTo(path, record = true) {
     path = normFolder(path);
-    if (record) { const n = state.nav; if (n.stack[n.idx] !== path) { n.stack = n.stack.slice(0, n.idx + 1); n.stack.push(path); n.idx = n.stack.length - 1; } }
+    if (record) { const n = state.nav; if (n.stack[n.idx] !== path) { n.stack = n.stack.slice(0, n.idx + 1); n.stack.push(path); n.idx = n.stack.length - 1; histPush(); } }
     if (state.folder === path) { syncTreeToFolder(); renderTree(); scrollListTop(); return; }
     // 다른 폴더로 가면 이전 폴더에서 내려가 있던 위치가 아니라 맨 위부터 보여 준다.
     //  목록이 그려진 뒤에 한 번 더 올린다(새 목록이 짧다가 길어지는 사이 브라우저가 위치를 붙잡는 경우).
     state.folder = path; syncTreeToFolder(); scrollListTop(); Promise.resolve(loadFiles()).then(scrollListTop, () => {}); renderTree();
     if (window.innerWidth <= 768 && document.getElementById('tree-sidebar')?.classList.contains('open')) toggleTree();
   }
-  function navBack() { const n = state.nav; if (n.idx > 0) { n.idx--; goTo(n.stack[n.idx], false); } }
-  function navForward() { const n = state.nav; if (n.idx < n.stack.length - 1) { n.idx++; goTo(n.stack[n.idx], false); } }
+  // ◀ · Backspace · 브라우저 뒤로가 같은 길로 간다: 폴더마다 브라우저 기록이 하나씩 있으니 기록을 한 칸 되돌리고,
+  // 실제 이동은 popstate 가 한다(아래 setupBackTrap). 기록이 우리 것이 아니면(예전 탭 등) 앱 안에서만 이동.
+  function navBack() {
+    const n = state.nav; if (n.idx <= 0) return;
+    if (history.state && history.state.bj) { history.back(); return; }
+    n.idx--; goTo(n.stack[n.idx], false); histReplace();
+  }
+  function navForward() {
+    const n = state.nav; if (n.idx >= n.stack.length - 1) return;
+    n.idx++; goTo(n.stack[n.idx], false); histPush();   // ▶ 는 클릭이라 새 기록을 쌓는다(앞쪽 기록은 모달 항목이 섞일 수 있어 믿지 않음)
+  }
   function navUp() { if (state.folder === '/') return; goTo(state.folder.slice(0, state.folder.lastIndexOf('/')) || '/'); }
   function resetNav() { state.nav = { stack: [state.folder || '/'], idx: 0 }; }
   function openFolder(path) { goTo(path); }
 
-  // ── 브라우저 뒤로가기 가로채기 ──────────
-  // 모바일 웹에서 실수로 뒤로가기를 눌러 사이트를 벗어나는 걸 막고,
-  // 대신 앱 내 뒤로(모달 닫기 → 선택 해제 → 검색 종료 → 상위/이전 폴더)로 동작시킨다.
-  // 홈에서 되돌릴 게 없으면 "한 번 더 누르면 나가기"로 실수 이탈만 방지.
+  // ── 브라우저 뒤로/앞으로 = 웹하드 안에서 이동 ──────────
+  // 폴더를 옮길 때마다(검색 · 최근 업로드 · 계정 전환 포함) 브라우저 기록을 하나씩 쌓는다 → 뒤로가기가 백스페이스와 같이
+  // 이전 폴더로 가고, 앞으로가기도 된다. 맨 아래에는 '바닥' 기록을 하나 두어, 홈에서 뒤로가기는 "한 번 더 누르면 나갑니다".
+  //
+  // 예전엔 가드 기록 하나를 popstate 안에서 다시 쌓았다. 크롬(PC 포함)은 사용자 동작 없이 쌓은 기록을 뒤로가기에서
+  // 건너뛰므로(history manipulation intervention) 두 번째 뒤로가기가 그 기록과 함께 사이트 밖(이전에 보던 다른 사이트)으로 나갔다.
+  // 지금은 기록을 '클릭한 그 순간'에 쌓고, popstate 에서는 쌓지 않는다.
+  //   기록 모양: { bj: 1, i: 폴더 기록 순번, f: 폴더, o: 보고 있는 계정(내 것이면 null), q?: 'search' | 'recent' }
+  function histEntry(q) { const n = state.nav; return { bj: 1, i: n.idx, f: n.stack[n.idx] || state.folder || '/', o: state.ownerId ? String(state.ownerId) : null, ...(q ? { q } : {}) }; }
+  function histPush(q) { if (!backHooked) return; try { history.pushState(histEntry(q), ''); } catch (_) {} }
+  function histReplace(q) { if (!backHooked) return; try { history.replaceState(histEntry(q), ''); } catch (_) {} }
   function setupBackTrap() {
     if (backHooked) return; backHooked = true;
-    const rearm = () => { try { history.pushState({ bjGuard: 1 }, ''); } catch (_) {} };
-    // 가드가 없으면 심는다. 단 '사용자 제스처' 문맥에서 최초로 심어야, 크롬(안드로이드)의
-    // history-manipulation 개입(제스처 없이 넣은 히스토리 항목을 뒤로가기에서 건너뛰어 사이트를
-    // 바로 나가버림)을 피할 수 있다. 그래서 로드 직후가 아니라 첫 터치/클릭에 가드를 심는다.
-    // (카메라/앱전환 후 복귀 때도 가드가 없으면 다음 제스처·visible 시 다시 세운다. 모달 열림 중엔 제외.)
-    const ensureGuard = () => { if (state.user && !document.querySelector('.modal-backdrop') && !(history.state && history.state.bjGuard)) rearm(); };
-    ['pointerdown', 'touchstart', 'keydown', 'click'].forEach((ev) => window.addEventListener(ev, ensureGuard, { capture: true, passive: true }));
-    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') ensureGuard(); });
-    window.addEventListener('pageshow', ensureGuard);
+    // 지금 기록을 '바닥'으로 바꾸고, 첫 사용자 동작 때 지금 화면의 기록을 그 위에 쌓는다.
+    // (로드 직후 바로 쌓으면 사용자 동작이 없어 크롬이 뒤로가기에서 건너뛴다)
+    try { history.replaceState({ bjBase: 1 }, ''); } catch (_) {}
+    const ensureEntry = () => {
+      if (!state.user || document.querySelector('.modal-backdrop')) return;
+      const h = history.state;
+      if (h && h.bj) return;
+      if (h && h.bjModal) histReplace();          // 닫힌 모달이 남긴 항목 위에 서 있으면 그 자리를 우리 것으로
+      else { if (!h || !h.bjBase) { try { history.replaceState({ bjBase: 1 }, ''); } catch (_) {} } histPush(); }
+    };
+    ['pointerdown', 'touchstart', 'keydown', 'click'].forEach((ev) => window.addEventListener(ev, ensureEntry, { capture: true, passive: true }));
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') ensureEntry(); });
+    window.addEventListener('pageshow', ensureEntry);
     let exitArmed = false, exitTimer = null;
-    window.addEventListener('popstate', () => {
+    window.addEventListener('popstate', (e) => {
       if (window.__bjModalHandledPop) return; // 모달은 common.js 가 처리(자체 히스토리 항목)
       if (!state.user) return; // 로그아웃 상태면 그냥 통과
-      if (document.querySelector('.modal-backdrop')) { rearm(); return; } // 안전망: 모달이 남아있으면 이탈 방지만
-      if (state.selected && state.selected.size) { state.selected.clear(); applySelectionClasses(); rearm(); return; }
-      if (state.search.on) { clearSearch(); rearm(); return; }
-      if (state.nav && state.nav.idx > 0) { navBack(); rearm(); return; }
-      if (state.folder && state.folder !== '/') { navUp(); rearm(); return; }
-      // 홈 + 되돌릴 것 없음 → 두 번 눌러야 이탈
-      if (exitArmed) { history.back(); return; } // 재무장하지 않음 → 실제로 나감
-      exitArmed = true; UI.toast('뒤로가기를 한 번 더 누르면 나갑니다', 'info');
-      clearTimeout(exitTimer); exitTimer = setTimeout(() => { exitArmed = false; }, 2000);
-      rearm();
+      if (document.querySelector('.modal-backdrop')) return; // 안전망: 모달이 남아있으면 아무것도 안 함
+      const h = e.state;
+      if (h && h.bj) {
+        exitArmed = false;
+        const o = h.o || null, cur = state.ownerId ? String(state.ownerId) : null;
+        if (o !== cur) { histGoOwner(o, h.f); return; }           // 다른 계정을 보던 기록 → 그 계정으로
+        const n = state.nav;
+        if (n.stack[h.i] === h.f) n.idx = h.i; else { n.stack = [h.f]; n.idx = 0; }
+        if (state.selected && state.selected.size) { state.selected.clear(); }
+        if (state.search.on && normFolder(h.f) === state.folder) { clearSearch(); return; }   // 검색 · 최근 업로드에서 뒤로 → 그 폴더로
+        goTo(h.f, false);
+        return;
+      }
+      if (h && h.bjBase) {
+        // 바닥까지 내려옴 = 홈에서 더 갈 데가 없음. 한 번 더 누르면 실제로 나간다.
+        // 그 사이 화면을 누르면(ensureEntry) 지금 화면의 기록이 다시 쌓여 다시 안전해진다.
+        if (state.search.on) clearSearch();
+        if (state.folder !== '/') goTo('/', false);
+        if (!exitArmed) { exitArmed = true; UI.toast('뒤로가기를 한 번 더 누르면 나갑니다', 'info'); clearTimeout(exitTimer); exitTimer = setTimeout(() => { exitArmed = false; }, 2000); }
+        return;
+      }
+      // 닫힌 모달이 남긴 항목 등 우리 것이 아닌 기록 → 지금 화면 그대로, 그 자리를 우리 것으로
+      histReplace();
     });
+  }
+  // 다른 계정을 보던 기록으로 돌아감 — 기록을 새로 쌓지 않고 그 계정 · 그 폴더로
+  async function histGoOwner(o, folder) {
+    const a = o ? (state.accounts || []).find((x) => String(x.id) === o) : null;
+    if (o && !a) { histReplace(); return; }                       // 이제 볼 수 없는 계정이면 지금 화면 그대로
+    const ok = await switchTo(() => {
+      state.ownerId = a ? a.id : null; state.ownerName = a ? a.displayName : null;
+      const sw = document.getElementById('account-switcher'); if (sw) sw.value = a ? String(a.id) : '';
+    }, true);
+    if (!ok) { syncSwitcher(); histReplace(); return; }
+    if (normFolder(folder) !== '/') goTo(folder, false);
+    histReplace();
   }
 
   // ── 전역: 화면 어디든 드롭 업로드 · 백스페이스=폴더 뒤로 ──
@@ -2864,7 +2985,7 @@ const App = (() => {
         const msg = `${label} 완료 · ${Math.round(took / 1000)}초 걸렸습니다`;
         if (wentAway && document.visibilityState === 'hidden' && await ensureDesktopNotice()) {
           try {
-            const n = new Notification('북적북적', { body: msg, tag: 'bj-job', icon: 'assets/logo.svg?v=220' });
+            const n = new Notification('북적북적', { body: msg, tag: 'bj-job', icon: 'assets/logo.svg?v=221' });
             n.onclick = () => { window.focus(); n.close(); };
           } catch (_) { UI.toast(msg, 'success'); }
         } else UI.toast(msg, 'success');
@@ -3267,6 +3388,7 @@ const App = (() => {
   }
   function runAdvancedSearch(params) {
     API.searchAdvanced(params, state.ownerId).then((r) => {
+      if (!state.search.on) histPush('search');
       state.search = { on: true, q: params.q || '고급검색' };
       state.folders = r.folders || []; state.files = r.files || [];
       state.selected.clear(); state.anchor = null; renderContent();
@@ -4076,7 +4198,7 @@ const App = (() => {
     async function downloadHtml() {
       try {
         if (!window.SAReport) {
-          await new Promise((res, rej) => { const sc = document.createElement('script'); sc.src = 'js/sa-report.js?v=220'; sc.onload = res; sc.onerror = () => rej(new Error('보고서 모듈을 불러오지 못했습니다.')); document.head.appendChild(sc); });
+          await new Promise((res, rej) => { const sc = document.createElement('script'); sc.src = 'js/sa-report.js?v=221'; sc.onload = res; sc.onerror = () => rej(new Error('보고서 모듈을 불러오지 못했습니다.')); document.head.appendChild(sc); });
         }
         const br = saBranchLabel();
         const dt = new Date(); const p2 = (x) => String(x).padStart(2, '0');
@@ -4088,7 +4210,7 @@ const App = (() => {
         }));
         // 바코드 인식 모듈을 보고서 안에 넣는다(인터넷 없이 📷 바코드로 찾기·사진 속 바코드 인식). 못 가져오면 사진만.
         const grab = (u) => fetch(u).then((r) => (r.ok ? r.text() : '')).catch(() => '');
-        const [zxing, isbn] = await Promise.all([grab('vendor/zxing.min.js?v=220'), grab('js/isbn.js?v=220')]);
+        const [zxing, isbn] = await Promise.all([grab('vendor/zxing.min.js?v=221'), grab('js/isbn.js?v=221')]);
         // 웹하드 자동 저장 열쇠(60일): 전달할 영업점을 골라 뒀으면 그 영업점의 재고조사오차_<년도> 폴더,
         //  아니면 지금 공간의 사진 저장 폴더(앱에서 찍을 때와 같은 곳). 못 받으면 자동 저장 없이 만든다.
         let sync = null;

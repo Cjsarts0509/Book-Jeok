@@ -374,6 +374,19 @@ const MIGRATIONS = [
       PRIMARY KEY (owner_id, folder)
     );
   ` },
+  // 최근 업로드 보기 — 누가(또는 어떤 경로로) 올렸는지. 예전엔 감사 기록에만 있어 목록에 못 보였다.
+  { id: '0012_files_uploader', sql: `
+    ALTER TABLE files ADD COLUMN IF NOT EXISTS uploaded_by INTEGER REFERENCES users(id) ON DELETE SET NULL;
+    ALTER TABLE files ADD COLUMN IF NOT EXISTS upload_via VARCHAR(200) NOT NULL DEFAULT '';
+    CREATE INDEX IF NOT EXISTS idx_files_owner_recent ON files(owner_id, created_at DESC) WHERE deleted_at IS NULL;
+    -- 이미 있는 파일: 업로드 감사 기록의 file=번호로 올린 사람을 채운다(외부 링크 업로드는 기록에 번호가 없어 비워 둔다)
+    UPDATE files f SET uploaded_by = a.user_id
+      FROM (SELECT DISTINCT ON (fid) fid, user_id
+              FROM (SELECT (regexp_matches(detail, 'file=(\\d+)', 'g'))[1]::bigint AS fid, user_id, created_at
+                      FROM audit_log WHERE action = 'upload' AND user_id IS NOT NULL) x
+             ORDER BY fid, created_at) a
+     WHERE f.id = a.fid AND f.uploaded_by IS NULL;
+  ` },
 ];
 
 // ── S18 · 마이그레이션 드라이런 ────────────────────────

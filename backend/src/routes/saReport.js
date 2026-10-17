@@ -144,9 +144,9 @@ router.post('/:token/photo', wrap(gate), wrap(diskGate), photoUpload, wrap(async
       for (let i = 0; i < isbns.length; i++) {
         const name = await uniqueFileName(qc, k.owner_id, k.folder, `${isbns[i]}.jpg`);
         const row = await qc(
-          `INSERT INTO files (owner_id, folder, original_name, stored_name, size_bytes, mime_type, note, note_updated_at)
-           VALUES ($1,$2,$3,$4,$5,'image/jpeg',$6,now()) RETURNING id`,
-          [k.owner_id, k.folder, name, stored[i], f.size, fileNote]
+          `INSERT INTO files (owner_id, folder, original_name, stored_name, size_bytes, mime_type, note, note_updated_at, upload_via)
+           VALUES ($1,$2,$3,$4,$5,'image/jpeg',$6,now(),$7) RETURNING id`,
+          [k.owner_id, k.folder, name, stored[i], f.size, fileNote, '재고조사 보고서']
         );
         files.push({ isbn: isbns[i], id: Number(row.rows[0].id), name });
       }
