@@ -50,7 +50,7 @@ tbody.g{cursor:pointer}tbody.g:nth-of-type(even) td{background:var(--group)}tbod
 td.diff{font-weight:800}td.diff.neg{color:var(--neg);background:var(--neg-soft)!important}td.diff.pos{color:var(--pos);background:var(--pos-soft)!important}td.diff.zero{color:var(--muted)}
 .chip{display:inline-block;padding:1px 8px;border-radius:999px;background:var(--chip);color:var(--chip-text);font-size:12px;font-weight:600}
 .tag{display:inline-block;margin-left:6px;padding:0 6px;border-radius:6px;font-size:11px;font-weight:700;vertical-align:1px}
-.tag.ph{background:#1f6feb;color:#fff}.tag.ok{background:var(--done-text);color:#fff}.tag.ex{background:var(--exc);color:#b45309;border:1px solid #f0bc3c}
+.tag.xs{background:#fde7ef;color:#b4235a;border:1px solid #f4a3c0}.tag.ph{background:#1f6feb;color:#fff}.tag.ok{background:var(--done-text);color:#fff}.tag.ex{background:var(--exc);color:#b45309;border:1px solid #f0bc3c}
 tfoot td{position:sticky;bottom:0;background:var(--head);font-weight:800;border-top:2px solid var(--border);z-index:2}
 .empty{padding:40px;text-align:center;color:var(--muted)}
 .hint{color:var(--muted);font-size:12px;margin-top:10px}
@@ -64,6 +64,7 @@ tfoot td{position:sticky;bottom:0;background:var(--head);font-weight:800;border-
 .d-stock{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}.d-stock span{flex:1;min-width:76px;text-align:center;padding:8px 6px;background:var(--bg);border:1px solid var(--border);border-radius:10px;font-size:12px;color:var(--muted)}
 .d-stock b{display:block;font-size:18px;color:var(--text);margin-top:2px}.d-stock .neg b{color:var(--neg)}.d-stock .pos b{color:var(--pos)}
 .d-lbl{font-size:13px;font-weight:700;margin:14px 0 6px}.d-chips{display:flex;gap:6px;flex-wrap:wrap}
+.d-cross{margin:10px 0 4px;padding:9px 10px;border:1px solid #f4a3c0;background:#fff6f9;border-radius:10px;font-size:12.5px}.d-cross .x{display:flex;width:100%;gap:8px;align-items:center;text-align:left;margin-top:6px;padding:7px 9px;border:1px solid var(--border);border-radius:8px;background:#fff;cursor:pointer;font:inherit}.d-cross .x small{display:block;color:var(--muted);font-size:11px}.d-cross .g{font-weight:700;color:#b4235a;white-space:nowrap}.d-cross .n{flex:1;min-width:0}.d-cross .dv{font-weight:700;white-space:nowrap}
 .d-shelves{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:5px}
 .d-shelves .d-chip{font-size:11.5px;padding:3px 7px;border-radius:7px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .d-chip{font-family:ui-monospace,Menlo,monospace;font-size:12.5px;padding:4px 10px;background:var(--bg);border:1px solid var(--border);border-radius:999px}.d-chip b{color:var(--chip-text)}.d-chip.cur{border-color:var(--accent);background:var(--accent-soft)}
@@ -111,7 +112,9 @@ table.m tbody.g tr:last-child td{border-bottom:1px solid var(--border);padding-b
     const fmt = (n) => Number(n || 0).toLocaleString('ko-KR');
     const sgn = (n) => (n > 0 ? '+' + fmt(n) : fmt(n));
     const byIsbn = new Map(items.map((x) => [x.i, x]));
-    const st = { q: '', fields: new Set(), diff: '', maj: '', photo: '', exc: '', done: '', sort: { k: null, dir: 1 } };
+    const st = { q: '', fields: new Set(), diff: '', maj: '', photo: '', exc: '', done: '', cross: '', sort: { k: null, dir: 1 } };
+    // 교차 스캔 의심(앱이 계산해 넣음): x = [[짝 ISBN, 판단 3·2·1, '강함', '근거'], …], xg = 짝 묶음 번호
+    const nCross = items.filter((x) => x.x).length;
     const MQ = window.matchMedia('(max-width:700px)');   // 휴대폰: 줄인 표
     const cut = (t, n) => { const a = [...String(t == null ? '' : t)]; return a.length > n ? a.slice(0, n).join('') + '…' : a.join(''); };
     const fields = [...new Set(items.map((x) => x.f).filter((x) => x !== ''))].sort((a, b) => a.localeCompare(b, 'ko'));
@@ -369,6 +372,7 @@ table.m tbody.g tr:last-child td{border-bottom:1px solid var(--border);padding-b
     // ── 표 ─────────────────────────────
     $('#f-field-list').innerHTML = fields.map((f) => `<label><input type="checkbox" value="${esc(f)}"> ${esc(f)} <span style="color:var(--muted);margin-left:auto">${items.filter((x) => x.f === f).length}</span></label>`).join('');
     $('#f-maj').innerHTML = '<option value="">대분류 전체</option>' + majs.map((m) => `<option value="${esc(m)}">대분류 ${esc(m)}</option>`).join('');
+    if (!nCross) $('#f-cross').style.display = 'none';
     if (!nExc) $('#f-exc').style.display = 'none'; else $('#f-exc').options[0].textContent = `예외 빼기 (${nExc}건)`;
     if (!window.ISBN) { $('#f-scan').title = '이 파일에는 바코드 인식 모듈이 없습니다'; }
 
@@ -388,10 +392,13 @@ table.m tbody.g tr:last-child td{border-bottom:1px solid var(--border);padding-b
         if (st.photo === 'no' && photoCount(x.i)) continue;
         if (st.done === 'done' && !isDone(x.i)) continue;
         if (st.done === 'todo' && isDone(x.i)) continue;
+        if (st.cross === 'only' && !x.x) continue;
         let sh = x.sh;
         if (st.maj) { sh = sh.filter((s) => s[1] === st.maj); if (!sh.length) continue; }
         out.push({ x, sh });
       }
+      // 교차 의심만: 짝끼리 붙여서(의심이 큰 묶음부터), 묶음 안에서는 더 찍힌 책(+) 먼저
+      if (st.cross === 'only' && !st.sort.k) out.sort((a, b) => ((a.x.xg || 0) - (b.x.xg || 0)) || (b.x.sd - a.x.sd));
       if (st.sort.k) {
         const k = st.sort.k, d = st.sort.dir;
         const val = (r) => (k === 'loc' ? loc(r.x) : r.x[k]);
@@ -429,7 +436,8 @@ table.m tbody.g tr:last-child td{border-bottom:1px solid var(--border);padding-b
       for (const { x, sh } of rows) {
         const dc = x.sd < 0 ? 'neg' : x.sd > 0 ? 'pos' : 'zero';
         const pc = photoCount(x.i), done = isDone(x.i);
-        const tags = `${pc ? `<span class="tag ph">📷 ${pc}</span>` : ''}${done && !pc ? '<span class="tag ok">✓</span>' : ''}${x.e ? '<span class="tag ex">예외</span>' : ''}`;
+        const xtip = x.x ? x.x.map((c) => { const o = byIsbn.get(c[0]); return `${o ? o.n : c[0]} ${o ? sgn(o.sd) : ''} (${c[2]})`; }).join('\n') : '';
+        const tags = `${x.x ? `<span class="tag xs" title="교차 스캔 의심 — 같이 확인할 책\n${esc(xtip)}">🔀</span>` : ''}${pc ? `<span class="tag ph">📷 ${pc}</span>` : ''}${done && !pc ? '<span class="tag ok">✓</span>' : ''}${x.e ? '<span class="tag ex">예외</span>' : ''}`;
         sSys += x.s; sSum += x.ss; sDiff += x.sd;
         html += `<tbody class="g${done ? ' done' : ''}" data-i="${esc(x.i)}">`;
         if (mobile) {
@@ -517,6 +525,7 @@ table.m tbody.g tr:last-child td{border-bottom:1px solid var(--border);padding-b
           <div class="d-meta"><div class="d-title">${esc(x.n || '(제목없음)')}</div><div class="d-sub">${esc(x.p)}${x.f ? ' · ' + esc(x.f) : ''}</div><div class="d-isbn">ISBN ${esc(x.i)}</div>
             <div class="d-stock"><span>전산재고<b>${fmt(x.s)}</b></span><span>스캔합계<b>${fmt(x.ss)}</b></span><span class="${dc}">스캔차이<b>${sgn(x.sd)}</b></span></div></div></div>
         <div class="d-lbl">서가 (${MQ.matches ? '대-중-소' : '수불처-대-중-소'} · 스캔수량)</div>${chips}
+        ${x.x ? `<div class="d-cross">🔀 <b>교차 스캔 의심</b> — 이 책이 <b>${x.sd > 0 ? '더' : '덜'} 찍혔고</b> 비슷한 아래 책은 <b>${x.sd > 0 ? '덜' : '더'} 찍혔어요</b>. 같은 자리에서 바꿔 찍었는지 확인하세요.${x.x.map((c) => { const o = byIsbn.get(c[0]); return o ? `<button type="button" class="x" data-xo="${esc(o.i)}"><span class="g">${esc(c[2])}</span><span class="n">${esc(o.n)}<small>${esc(o.i)} · ${esc(c[3])}</small></span><span class="dv diff ${o.sd < 0 ? 'neg' : 'pos'}">${sgn(o.sd)}</span></button>` : ''; }).join('')}</div>` : ''}
         <div class="d-lbl">📷 사진 <span id="d-pn" style="color:var(--muted);font-weight:400"></span></div><div class="d-photos" id="d-photos"></div>
         <div id="d-stage"></div>
         <div class="acts"><button class="btn" type="button" id="d-close">닫기</button><span class="sp"></span>
@@ -524,6 +533,7 @@ table.m tbody.g tr:last-child td{border-bottom:1px solid var(--border);padding-b
           <button class="btn primary" type="button" id="d-shoot">📷 사진 촬영</button></div>`);
       cover(m.q('#d-cover'), x.i);
       m.q('#d-close').addEventListener('click', m.close);
+      m.el.querySelectorAll('[data-xo]').forEach((b) => b.addEventListener('click', () => { const o = b.dataset.xo; m.close(); openDetail(o); }));
       // 확인완료: 사진을 안 찍어도 '봤다'고 표시 → 창 닫고 목록에 색 표시. 다시 열어 누르면 취소.
       m.q('#d-check').addEventListener('click', () => {
         if (PH.checked[x.i]) {
@@ -600,7 +610,7 @@ table.m tbody.g tr:last-child td{border-bottom:1px solid var(--border);padding-b
     let t = null;
     $('#f-q').addEventListener('input', (e) => { clearTimeout(t); t = setTimeout(() => { st.q = e.target.value; render(); }, 150); });
     const sel = (id, key) => $(id).addEventListener('change', (e) => { st[key] = e.target.value; e.target.classList.toggle('on', !!e.target.value); render(); });
-    sel('#f-diff', 'diff'); sel('#f-maj', 'maj'); sel('#f-photo', 'photo'); sel('#f-exc', 'exc'); sel('#f-done', 'done');
+    sel('#f-diff', 'diff'); sel('#f-maj', 'maj'); sel('#f-photo', 'photo'); sel('#f-exc', 'exc'); sel('#f-done', 'done'); sel('#f-cross', 'cross');
     const dd = $('#f-field');
     $('#f-field-btn').addEventListener('click', (e) => { e.stopPropagation(); dd.classList.toggle('open'); });
     document.addEventListener('click', (e) => { if (!dd.contains(e.target)) dd.classList.remove('open'); });
@@ -608,8 +618,8 @@ table.m tbody.g tr:last-child td{border-bottom:1px solid var(--border);padding-b
     $('#f-field-all').addEventListener('click', () => { fields.forEach((f) => st.fields.add(f)); dd.querySelectorAll('input').forEach((c) => { c.checked = true; }); render(); });
     $('#f-field-none').addEventListener('click', () => { st.fields.clear(); dd.querySelectorAll('input').forEach((c) => { c.checked = false; }); render(); });
     $('#f-reset').addEventListener('click', () => {
-      Object.assign(st, { q: '', diff: '', maj: '', photo: '', exc: '', done: '', sort: { k: null, dir: 1 } }); st.fields.clear();
-      ['#f-q', '#f-diff', '#f-maj', '#f-photo', '#f-exc', '#f-done'].forEach((s) => { $(s).value = ''; $(s).classList.remove('on'); });
+      Object.assign(st, { q: '', diff: '', maj: '', photo: '', exc: '', done: '', cross: '', sort: { k: null, dir: 1 } }); st.fields.clear();
+      ['#f-q', '#f-diff', '#f-maj', '#f-photo', '#f-exc', '#f-done', '#f-cross'].forEach((s) => { $(s).value = ''; $(s).classList.remove('on'); });
       dd.querySelectorAll('input').forEach((c) => { c.checked = false; });
       render();
     });
@@ -680,6 +690,7 @@ table.m tbody.g tr:last-child td{border-bottom:1px solid var(--border);padding-b
   <select id="f-done" class="btn"><option value="">확인 전체</option><option value="done">✅ 확인완료</option><option value="todo">미확인</option></select>
   <select id="f-photo" class="btn"><option value="">사진 전체</option><option value="has">사진 있음</option><option value="no">사진 없음</option></select>
   <select id="f-exc" class="btn"><option value="">예외 빼기</option><option value="all">예외 포함</option><option value="only">예외만</option></select>
+  <select id="f-cross" class="btn" title="비슷한 책(1권·2권, 1-1·1-2, 판 차이…)이 한쪽은 더, 한쪽은 덜 찍힌 짝"><option value="">교차 전체</option><option value="only">🔀 교차 스캔 의심만</option></select>
   <button type="button" class="btn" id="f-reset">초기화</button>
   <button type="button" class="btn noprint" id="f-print">🖨️ 인쇄</button>
   <span class="count" id="count"></span>

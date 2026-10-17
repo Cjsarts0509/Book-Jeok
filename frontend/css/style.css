@@ -1259,3 +1259,22 @@ th { background: var(--bg); font-weight: 700; color: var(--text-muted); font-siz
 .compact-table td.wide-cell { white-space: normal; width: 100%; min-width: 260px; overflow-wrap: anywhere; }
 .dash-2col-wide { grid-template-columns: minmax(320px, 2fr) 3fr; }
 @media (max-width: 768px) { .dash-2col-wide { grid-template-columns: 1fr; } }
+
+/* 재고조사 · 교차 스캔 의심(비슷한 책을 바꿔 찍은 짝) */
+.sa-xb { display: inline-block; margin-left: 4px; padding: 0 6px; border-radius: 6px; font-size: 11px; font-weight: 700; white-space: nowrap; vertical-align: 1px; background: #fde7ef; color: #b4235a; border: 1px solid #f4a3c0; cursor: help; }
+.sa-xb.g1 { background: #f6f0f2; color: #8a5a6b; border-color: #e3c9d3; }
+.sa-xsum { border: 1px solid #f4a3c0; background: #fff6f9; color: #b4235a; border-radius: 999px; padding: 1px 10px; font-size: 12.5px; cursor: pointer; }
+.sa-xsum:hover { background: #fde7ef; }
+.sa-table tr.sa-xgrp td { background: #fffafc; }
+.sa-table tr.sa-xgrp.odd td { background: #fdf0f5; }
+.sad-cross { margin: 10px 0; padding: 10px 12px; border: 1px solid #f4a3c0; background: #fff6f9; border-radius: 10px; font-size: 13px; }
+.sad-cross .lbl { margin-bottom: 6px; line-height: 1.5; }
+.sad-xrow { display: flex; width: 100%; gap: 10px; align-items: center; text-align: left; margin-top: 6px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: #fff; cursor: pointer; font: inherit; color: var(--text); }
+.sad-xrow:hover { border-color: #f4a3c0; }
+.sad-xgrade { font-weight: 700; color: #b4235a; white-space: nowrap; }
+.sad-xrow.g1 .sad-xgrade { color: #8a5a6b; }
+.sad-xname { flex: 1; min-width: 0; }
+.sad-xname small { display: block; color: var(--text-muted); font-size: 11.5px; margin-top: 2px; word-break: break-all; }
+.sad-xdiff { font-weight: 700; white-space: nowrap; }
+.sad-xdiff.neg { color: var(--danger); }
+.sad-xdiff.pos { color: #1f6feb; }

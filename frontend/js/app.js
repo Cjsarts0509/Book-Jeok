@@ -2985,7 +2985,7 @@ const App = (() => {
         const msg = `${label} 완료 · ${Math.round(took / 1000)}초 걸렸습니다`;
         if (wentAway && document.visibilityState === 'hidden' && await ensureDesktopNotice()) {
           try {
-            const n = new Notification('북적북적', { body: msg, tag: 'bj-job', icon: 'assets/logo.svg?v=221' });
+            const n = new Notification('북적북적', { body: msg, tag: 'bj-job', icon: 'assets/logo.svg?v=222' });
             n.onclick = () => { window.focus(); n.close(); };
           } catch (_) { UI.toast(msg, 'success'); }
         } else UI.toast(msg, 'success');
@@ -3708,6 +3708,23 @@ const App = (() => {
     // 예외(결과확인리스트 예외여부 Y) 필터: '' 예외 빼기(기본) · 'all' 예외 포함 · 'only' 예외만.
     //  예전엔 분석에서 아예 버렸는데, 볼지 말지를 고를 수 있게 목록에는 남기고 여기서 거른다.
     let saFilterExc = '';
+    // 교차 스캔 의심(비슷한 책을 바꿔 찍은 짝 — js/crossscan.js). 목록이 바뀔 때마다 renderResult 에서 다시 센다.
+    let saFilterCross = '';          // '' 전체 · 'only' 의심만(짝끼리 붙여서)
+    let saCross = { pairs: [], byKey: new Map(), groupOf: new Map() };
+    function computeCross() {
+      saCross = window.CrossScan
+        ? window.CrossScan.find(disc.filter((d) => !isExc(d)).map((d) => ({ key: d.isbn, name: d.name, pub: d.pub, diff: scanDiff(d), shelves: (d.shelves || []).map((x) => x[0]) })))
+        : { pairs: [], byKey: new Map(), groupOf: new Map() };
+    }
+    const discByIsbn = () => new Map(disc.map((d) => [d.isbn, d]));
+    const sgn = (v) => (v > 0 ? `+${v}` : String(v));
+    // 표 · 상세에 붙는 표시: 가장 의심이 큰 짝의 판단 + 마우스를 올리면 짝 목록
+    function crossBadge(d, by) {
+      const list = saCross.byKey.get(d.isbn); if (!list || !list.length) return '';
+      const best = Math.max(...list.map((x) => x.grade));
+      const tip = list.map((x) => { const o = by.get(x.other); return `${o ? o.name : x.other} ${o ? sgn(scanDiff(o)) : ''} (${x.label}: ${x.why.join(' · ')})`; }).join('\n');
+      return ` <span class="sa-xb g${best}" title="교차 스캔 의심 — 같이 확인할 책\n${esc(tip)}">🔀 ${window.CrossScan.GRADE[best]}</span>`;
+    }
     const isExc = (d) => String(d.exc == null ? '' : d.exc).trim().toUpperCase() === 'Y';
     const excOk = (d) => (saFilterExc === 'all' ? true : saFilterExc === 'only' ? isExc(d) : !isExc(d));
     // 표·엑셀 열(12열). 실재고·누락재고·예외여부·스캔재고·차이는 쓰지 않는다
@@ -3781,8 +3798,13 @@ const App = (() => {
         if (!excOk(d)) return false;
         if (saFilterPhoto === 'has' && !saPhotoStems.has(d.isbn)) return false;
         if (saFilterPhoto === 'no' && saPhotoStems.has(d.isbn)) return false;
+        if (saFilterCross === 'only' && !saCross.byKey.has(d.isbn)) return false;
         return true;
       });
+      // 교차 의심만: 짝끼리 붙여서(의심이 큰 묶음부터), 묶음 안에서는 더 찍힌 책(+) 먼저
+      if (saFilterCross === 'only' && saSort.col == null) {
+        idx.sort((a, b) => (saCross.groupOf.get(disc[a].isbn) - saCross.groupOf.get(disc[b].isbn)) || (scanDiff(disc[b]) - scanDiff(disc[a])));
+      }
       if (saSort.col != null) {
         const c = SA_COLS[saSort.col];
         const keyOf = (i) => { if (c.calc) return c.calc(disc[i]); if (!c.shelf) return disc[i][c.k]; const sh = itemShelves(disc[i]); return sh.length ? sh[0][c.k] : ''; };
@@ -3800,17 +3822,19 @@ const App = (() => {
       const order = buildOrder();
       const arrow = (i) => (saSort.col === i ? (saSort.dir > 0 ? ' ▲' : ' ▼') : '');
       const thead = `<thead><tr>${SA_HEADERS.map((h, i) => `<th class="sa-sortable" data-col="${i}">${esc(h)}${arrow(i)}</th>`).join('')}</tr></thead>`;
+      const by = discByIsbn();
       const tbody = order.map((ri) => {
         const d = disc[ri];
         const sh = itemShelves(d);
         const stack = (arr) => (arr.length ? arr.map((v) => esc(String(v == null ? '' : v))).join('<br>') : '');
         const b4 = [d.field, d.isbn, d.name, d.pub]
-          .map((c, idx) => `<td class="${idx === 1 ? 'sa-isbn' : ''}">${esc(String(c == null ? '' : c))}</td>`).join('');
+          .map((c, idx) => `<td class="${idx === 1 ? 'sa-isbn' : ''}">${esc(String(c == null ? '' : c))}${idx === 2 ? crossBadge(d, by) : ''}</td>`).join('');
         const shelfTd = (h) => `<td class="sa-shelf">${h}</td>`;
         const shc = [stack(sh.map((x) => x.code)), stack(sh.map((x) => x.maj)), stack(sh.map((x) => x.mid)), stack(sh.map((x) => x.min))].map(shelfTd).join('');
         const sd = scanDiff(d);
         const tail = `${shelfTd(stack(sh.map((x) => x.qty)))}<td>${esc(String(d.sys == null ? '' : d.sys))}</td><td>${scanSum(d)}</td><td class="${sd ? 'sa-sdiff' : ''}">${sd}</td>`;
-        return `<tr data-ri="${ri}">${b4}${shc}${tail}</tr>`;
+        const grp = saFilterCross === 'only' ? saCross.groupOf.get(d.isbn) : 0;
+        return `<tr data-ri="${ri}"${grp ? ` class="sa-xgrp${grp % 2 ? ' odd' : ''}"` : ''}>${b4}${shc}${tail}</tr>`;
       }).join('');
       wrap.innerHTML = order.length
         ? `<table class="sa-table">${thead}<tbody>${tbody}</tbody></table>`
@@ -3910,6 +3934,22 @@ const App = (() => {
     }
 
     // ── 오차 항목 상세(모바일): 표지 + 재고 + 서가 + 폴더지정 + 촬영저장 ──
+    // 상세의 '교차 스캔 의심' 칸 — 짝 책을 누르면 그 책 상세가 위에 열린다
+    function crossDetailHTML(d) {
+      const list = saCross.byKey.get(d.isbn); if (!list || !list.length) return '';
+      const by = discByIsbn();
+      const mine = scanDiff(d);
+      const rows = list.map((x) => {
+        const o = by.get(x.other); if (!o) return '';
+        const od = scanDiff(o);
+        const where = (o.shelves || []).slice(0, 3).map((s) => esc(String(s[0]))).join(', ');
+        return `<button type="button" class="sad-xrow g${x.grade}" data-xopen="${esc(o.isbn)}">
+          <span class="sad-xgrade">${esc(x.label)}</span>
+          <span class="sad-xname">${esc(String(o.name == null ? '' : o.name))}<small>${esc(o.isbn)}${where ? ' · 서가 ' + where : ''} · ${esc(x.why.join(' · '))}</small></span>
+          <span class="sad-xdiff ${od < 0 ? 'neg' : 'pos'}">${sgn(od)}</span></button>`;
+      }).join('');
+      return `<div class="sad-cross"><div class="lbl">🔀 교차 스캔 의심 — 이 책이 <b>${mine > 0 ? '더' : '덜'} 찍혔고</b>, 비슷한 아래 책은 <b>${mine > 0 ? '덜' : '더'} 찍혔어요</b>. 같은 자리에서 바꿔 찍었는지 확인하세요.</div>${rows}</div>`;
+    }
     function openDetail(d) {
       saSessionSave({ at: Date.now(), lastIsbn: d.isbn });   // 활동 중 → 창 갱신 + 열려있던 항목 기억(촬영 중 재로딩 대비)
       const shelfChips = (d.shelves && d.shelves.length)
@@ -3926,6 +3966,7 @@ const App = (() => {
           </div>
         </div>
         <div class="sad-shelves"><div class="lbl">서가번호 (실사수량)</div>${shelfChips}</div>
+        ${crossDetailHTML(d)}
         <div class="sad-folder"><span>저장 폴더</span><b class="sad-foldercur">${esc(saCurrentFolder === '/' ? '🏠 (최상위)' : saCurrentFolder)}</b><span class="muted" style="font-size:11px">· 목록에서 변경</span></div>
         <div id="sad-stage"></div>
         <div class="modal-actions"><button class="btn btn-ghost" id="sad-close">닫기</button><span style="flex:1"></span><button class="btn btn-primary" id="sad-shoot">📷 사진 촬영</button></div>
@@ -3934,6 +3975,7 @@ const App = (() => {
       dm.el.querySelector('.modal').classList.add('modal-wide');
       attachCover(dm.q('#sad-cover'), d.isbn);
       dm.q('#sad-close').addEventListener('click', dm.close);
+      dm.el.querySelectorAll('[data-xopen]').forEach((b) => b.addEventListener('click', () => { const o = disc.find((x) => x.isbn === b.dataset.xopen); if (o) openDetail(o); }));
 
       let stageUrl = null;   // 미리보기 objectURL (저장/취소/닫기 시 해제)
       const cam = document.createElement('input');
@@ -4024,17 +4066,20 @@ const App = (() => {
     function renderResult() {
       if (!disc.length) { m.q('#sa-result').innerHTML = '<p class="muted" style="padding:14px">오차 항목이 없습니다.</p>'; return; }
       // 필터 상태 초기화(새 목록/이어서 보기 시)
-      saSort = { col: null, dir: 1 }; saFilterFields = new Set(); saFilterPhoto = ''; saFilterExc = '';
+      saSort = { col: null, dir: 1 }; saFilterFields = new Set(); saFilterPhoto = ''; saFilterExc = ''; saFilterCross = '';
+      computeCross();
+      const nCross = saCross.pairs.length;
       const nExc = disc.filter(isExc).length;
       const matched = disc.filter((d) => d.shelves && d.shelves.length).length;
       const fields = [...new Set(disc.map((d) => String(d.field == null ? '' : d.field)).filter((x) => x !== ''))].sort((a, b) => a.localeCompare(b, 'ko'));
       m.q('#sa-result').innerHTML = `
         <div class="sa-resulthead">
-          <div class="sa-summary">오차 항목 <b>${(disc.length - nExc).toLocaleString()}건</b>${nExc ? ` <span class="muted" style="font-size:12px">(+ 예외 ${nExc}건)</span>` : ''} · 서가 매칭 <b>${matched.toLocaleString()}건</b><span id="sa-photocount" class="muted" style="font-size:12px"></span><span id="sa-shown" class="muted" style="font-size:12px"></span> <span class="muted" style="font-size:12px">· 열 제목으로 정렬 · 행을 누르면 상세</span></div>
+          <div class="sa-summary">오차 항목 <b>${(disc.length - nExc).toLocaleString()}건</b>${nExc ? ` <span class="muted" style="font-size:12px">(+ 예외 ${nExc}건)</span>` : ''} · 서가 매칭 <b>${matched.toLocaleString()}건</b><span id="sa-photocount" class="muted" style="font-size:12px"></span><span id="sa-shown" class="muted" style="font-size:12px"></span>${nCross ? ` · <button type="button" class="sa-xsum" id="sa-xsum" title="비슷한 책(1권·2권, 1-1·1-2, 판 차이…)이 한쪽은 더, 한쪽은 덜 찍힌 짝 — 바꿔 찍었을 수 있어요">🔀 교차 스캔 의심 <b>${nCross}쌍</b></button>` : ''} <span class="muted" style="font-size:12px">· 열 제목으로 정렬 · 행을 누르면 상세</span></div>
           <label class="sa-foldersel">📁 <select id="sa-folder">${folderOptions(saCurrentFolder)}</select></label>
           <button type="button" class="sa-fieldbtn" id="sa-ffield-btn">분야 <span id="sa-ffield-lbl">전체</span> <span class="sa-caret">▾</span></button>
           <label class="sa-foldersel">사진 <select id="sa-fphoto"><option value="">전체</option><option value="has">있음</option><option value="no">없음</option></select></label>
           ${nExc ? `<label class="sa-foldersel" title="결과확인리스트의 예외여부 Y — 엑셀·HTML 다운로드도 이 선택을 따릅니다">예외 <select id="sa-fexc"><option value="">빼기 (${nExc}건)</option><option value="all">포함</option><option value="only">예외만</option></select></label>` : ''}
+          ${nCross ? `<label class="sa-foldersel" title="비슷한 책을 바꿔 찍은 것으로 보이는 짝">교차 <select id="sa-fcross"><option value="">전체</option><option value="only">의심만 (${nCross}쌍)</option></select></label>` : ''}
           ${window.ISBN ? '<button class="btn btn-secondary btn-sm" id="sa-scan">📷 바코드로 찾기</button>' : ''}
           <button class="btn btn-secondary btn-sm" id="sa-save">💾 저장</button>
           <button class="btn btn-primary btn-sm" id="sa-dl">⬇ 엑셀 다운로드</button>
@@ -4050,6 +4095,8 @@ const App = (() => {
       m.q('#sa-folder')?.addEventListener('change', (e) => setFolder(e.target.value));
       m.q('#sa-fphoto')?.addEventListener('change', (e) => { saFilterPhoto = e.target.value; renderTable(); });
       m.q('#sa-fexc')?.addEventListener('change', (e) => { saFilterExc = e.target.value; renderTable(); });
+      m.q('#sa-fcross')?.addEventListener('change', (e) => { saFilterCross = e.target.value; renderTable(); });
+      m.q('#sa-xsum')?.addEventListener('click', () => { const sel = m.q('#sa-fcross'); saFilterCross = saFilterCross === 'only' ? '' : 'only'; if (sel) sel.value = saFilterCross; renderTable(); });
       // 정렬 헤더·행 클릭을 wrap 에 위임 1회 등록(renderTable 마다 1000+ 개별 바인딩 안 함)
       m.q('#sa-tablewrap')?.addEventListener('click', (e) => {
         const th = e.target.closest('.sa-sortable');
@@ -4171,6 +4218,24 @@ const App = (() => {
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, '서가별');
       XLSX.utils.book_append_sheet(wb, ws2, '항목별(정렬용)');
+      // 교차 스캔 의심 — 짝마다 두 줄(더 찍힘 · 덜 찍힘). 예외 선택과 상관없이 예외가 아닌 항목끼리의 짝.
+      if (saCross.pairs.length) {
+        const by = discByIsbn();
+        const h3 = ['짝', '판단', '근거', '구분', '분야', 'ISBN', '도서명', '출판사', '전산재고', '스캔합계', '스캔차이', '서가 (스캔수량)'];
+        const rows3 = [];
+        saCross.pairs.forEach((p, i) => {
+          for (const [k, tag] of [[p.plus, '더 찍힘(+)'], [p.minus, '덜 찍힘(−)']]) {
+            const d = by.get(k); if (!d) continue;
+            const where = itemShelves(d).map((x) => (x.maj ? `${x.code}-${x.maj}-${x.mid}-${x.min}` : x.code) + ` 스캔 ${x.qty}`).join(' / ');
+            rows3.push([i + 1, p.label, p.why.join(' · '), tag, d.field, d.isbn, d.name, d.pub, d.sys, scanSum(d), scanDiff(d), where]);
+          }
+        });
+        const ws3 = XLSX.utils.aoa_to_sheet([h3, ...rows3]);
+        asText(ws3, rows3.length, [5]);
+        ws3['!cols'] = widths([5, 6, 34, 10, 12, 15, 40, 14, 8, 8, 8, 50]);
+        filterAll(ws3, rows3.length, h3.length);
+        XLSX.utils.book_append_sheet(wb, ws3, '교차스캔의심');
+      }
       return wb;
     }
     // 저장 이름: <영업점명>_재고조사오차_<년월일>. '영업점'만 쓴다 — 사용자(계정) 이름은 쓰지 않는다.
@@ -4198,7 +4263,7 @@ const App = (() => {
     async function downloadHtml() {
       try {
         if (!window.SAReport) {
-          await new Promise((res, rej) => { const sc = document.createElement('script'); sc.src = 'js/sa-report.js?v=221'; sc.onload = res; sc.onerror = () => rej(new Error('보고서 모듈을 불러오지 못했습니다.')); document.head.appendChild(sc); });
+          await new Promise((res, rej) => { const sc = document.createElement('script'); sc.src = 'js/sa-report.js?v=222'; sc.onload = res; sc.onerror = () => rej(new Error('보고서 모듈을 불러오지 못했습니다.')); document.head.appendChild(sc); });
         }
         const br = saBranchLabel();
         const dt = new Date(); const p2 = (x) => String(x).padStart(2, '0');
@@ -4207,10 +4272,11 @@ const App = (() => {
           f: String(d.field == null ? '' : d.field), i: String(d.isbn), n: d.name == null ? '' : String(d.name), p: d.pub == null ? '' : String(d.pub),
           s: num(d.sys), ss: scanSum(d), sd: scanDiff(d), e: isExc(d),
           sh: itemShelves(d).map((x) => [x.code, x.maj, x.mid, x.min, num(x.qty)]),
+          ...(saCross.byKey.has(d.isbn) ? { x: saCross.byKey.get(d.isbn).map((c) => [c.other, c.grade, c.label, c.why.join(' · ')]), xg: saCross.groupOf.get(d.isbn) } : {}),
         }));
         // 바코드 인식 모듈을 보고서 안에 넣는다(인터넷 없이 📷 바코드로 찾기·사진 속 바코드 인식). 못 가져오면 사진만.
         const grab = (u) => fetch(u).then((r) => (r.ok ? r.text() : '')).catch(() => '');
-        const [zxing, isbn] = await Promise.all([grab('vendor/zxing.min.js?v=221'), grab('js/isbn.js?v=221')]);
+        const [zxing, isbn] = await Promise.all([grab('vendor/zxing.min.js?v=222'), grab('js/isbn.js?v=222')]);
         // 웹하드 자동 저장 열쇠(60일): 전달할 영업점을 골라 뒀으면 그 영업점의 재고조사오차_<년도> 폴더,
         //  아니면 지금 공간의 사진 저장 폴더(앱에서 찍을 때와 같은 곳). 못 받으면 자동 저장 없이 만든다.
         let sync = null;
