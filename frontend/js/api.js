@@ -99,6 +99,7 @@ const API = (() => {
     accounts: () => req('GET', '/files/accounts'),
     branches: () => req('GET', '/meta/branches'),
     activeNotices: () => req('GET', '/meta/notices/active'),
+    dismissNotice: (id) => req('POST', `/meta/notices/${id}/dismiss`),
     serverStatus: () => req('GET', '/meta/server-status'),
     adminUploads: (limit) => req('GET', `/admin/uploads?limit=${limit || 50}`),
     adminEdge: () => req('GET', '/admin/edge'),

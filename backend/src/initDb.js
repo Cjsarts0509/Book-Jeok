@@ -387,6 +387,15 @@ const MIGRATIONS = [
              ORDER BY fid, created_at) a
      WHERE f.id = a.fid AND f.uploaded_by IS NULL;
   ` },
+  // 공지 '그만 보기' — 계정별로 서버에 남겨 PC 에서 누르면 휴대폰에서도 안 뜬다(예전엔 브라우저에 7일)
+  { id: '0013_notice_dismiss', sql: `
+    CREATE TABLE IF NOT EXISTS notice_dismissals (
+      user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      notice_id  BIGINT NOT NULL REFERENCES notices(id) ON DELETE CASCADE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      PRIMARY KEY (user_id, notice_id)
+    );
+  ` },
 ];
 
 // ── S18 · 마이그레이션 드라이런 ────────────────────────

@@ -256,30 +256,32 @@ const App = (() => {
   }
 
   // ── 공지사항 팝업 (로그인 후) ──────────
+  // '그만 보기'를 누를 때까지 열 때마다 뜬다. 누른 것은 서버가 계정별로 기억해 목록에서 빼 준다(다른 기기에서도 안 뜸).
+  // 여러 개면 닫을 때마다 다음 것을 이어서 — 예전엔 한 번에 하나만 띄우고 나머지는 다음 접속까지 기다렸다.
   async function showNotices() {
     try {
       const { notices } = await API.activeNotices();
-      for (const n of notices) {
-        const key = 'bj_notice_hide_' + n.id;
-        const until = parseInt(localStorage.getItem(key) || '0', 10);
-        if (until && until > Date.now()) continue; // 일주일간 보지 않기 유효
-        noticePopup(n);
-        break; // 한 번에 하나씩
-      }
+      const queue = notices.slice();
+      const next = () => { const n = queue.shift(); if (n) noticePopup(n, next); };
+      next();
     } catch {}
   }
-  function noticePopup(n) {
+  function noticePopup(n, onDone) {
     const period = (n.start_at || n.end_at)
       ? `<p class="muted" style="font-size:12px;margin-bottom:10px">${n.start_at ? new Date(n.start_at).toLocaleDateString('ko-KR') : ''} ~ ${n.end_at ? new Date(n.end_at).toLocaleDateString('ko-KR') : ''}</p>` : '';
     const m = UI.modal(`<h3>📢 ${UI.escapeHtml(n.title)}</h3>${period}
       <div class="notice-body">${UI.sanitizeHtml(n.body || '')}</div>
       <div class="modal-actions" style="align-items:center">
-        <label class="autosort" style="margin-right:auto"><input type="checkbox" id="hide7"> 일주일간 보지 않기</label>
+        <button class="btn btn-ghost" id="stop" title="이 공지를 이 계정에서 다시 띄우지 않습니다(다른 기기 포함)" style="margin-right:auto">🔕 그만 보기</button>
         <button class="btn btn-primary" id="close">닫기</button>
-      </div>`);
+      </div>`, { onClose: () => { if (onDone) setTimeout(onDone, 250); } });   // X · 닫기 · 그만 보기 어느 것으로 닫혀도 다음 공지
     m.el.querySelector('.modal').classList.add('modal-wide');
-    const done = () => { if (m.q('#hide7').checked) localStorage.setItem('bj_notice_hide_' + n.id, String(Date.now() + 7 * 86400000)); m.close(); };
-    m.q('#close').addEventListener('click', done);
+    m.q('#close').addEventListener('click', m.close);   // 닫기 = 다음에 열면 또 뜸
+    m.q('#stop').addEventListener('click', async (e) => {
+      e.currentTarget.disabled = true;
+      try { await API.dismissNotice(n.id); } catch (_) { UI.toast('저장하지 못했습니다 — 다음에 또 뜰 수 있어요', 'error'); }
+      m.close();
+    });
   }
 
   function toggleTree() { document.getElementById('tree-sidebar').classList.toggle('open'); document.getElementById('tree-backdrop').classList.toggle('show'); }
@@ -2985,7 +2987,7 @@ const App = (() => {
         const msg = `${label} 완료 · ${Math.round(took / 1000)}초 걸렸습니다`;
         if (wentAway && document.visibilityState === 'hidden' && await ensureDesktopNotice()) {
           try {
-            const n = new Notification('북적북적', { body: msg, tag: 'bj-job', icon: 'assets/logo.svg?v=222' });
+            const n = new Notification('북적북적', { body: msg, tag: 'bj-job', icon: 'assets/logo.svg?v=223' });
             n.onclick = () => { window.focus(); n.close(); };
           } catch (_) { UI.toast(msg, 'success'); }
         } else UI.toast(msg, 'success');
@@ -4263,7 +4265,7 @@ const App = (() => {
     async function downloadHtml() {
       try {
         if (!window.SAReport) {
-          await new Promise((res, rej) => { const sc = document.createElement('script'); sc.src = 'js/sa-report.js?v=222'; sc.onload = res; sc.onerror = () => rej(new Error('보고서 모듈을 불러오지 못했습니다.')); document.head.appendChild(sc); });
+          await new Promise((res, rej) => { const sc = document.createElement('script'); sc.src = 'js/sa-report.js?v=223'; sc.onload = res; sc.onerror = () => rej(new Error('보고서 모듈을 불러오지 못했습니다.')); document.head.appendChild(sc); });
         }
         const br = saBranchLabel();
         const dt = new Date(); const p2 = (x) => String(x).padStart(2, '0');
@@ -4276,7 +4278,7 @@ const App = (() => {
         }));
         // 바코드 인식 모듈을 보고서 안에 넣는다(인터넷 없이 📷 바코드로 찾기·사진 속 바코드 인식). 못 가져오면 사진만.
         const grab = (u) => fetch(u).then((r) => (r.ok ? r.text() : '')).catch(() => '');
-        const [zxing, isbn] = await Promise.all([grab('vendor/zxing.min.js?v=222'), grab('js/isbn.js?v=222')]);
+        const [zxing, isbn] = await Promise.all([grab('vendor/zxing.min.js?v=223'), grab('js/isbn.js?v=223')]);
         // 웹하드 자동 저장 열쇠(60일): 전달할 영업점을 골라 뒀으면 그 영업점의 재고조사오차_<년도> 폴더,
         //  아니면 지금 공간의 사진 저장 폴더(앱에서 찍을 때와 같은 곳). 못 받으면 자동 저장 없이 만든다.
         let sync = null;

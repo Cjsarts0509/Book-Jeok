@@ -1001,7 +1001,7 @@ const item = (tab, ico, label) => `<div class="nav-item ${state.tab === tab ? 'a
           <td class="row-actions" style="text-align:right"><button class="btn btn-sm btn-ghost" data-en="${n.id}">✏️ 수정</button><button class="btn btn-sm btn-danger" data-dn="${n.id}">🗑️ 삭제</button></td></tr>`;
       }).join('');
       view.innerHTML = `
-        <div class="toolbar"><span class="muted">노출 기간에 해당하면 사용자 로그인 시 팝업으로 표시됩니다.</span><div style="flex:1"></div><button class="btn btn-primary" id="add-notice">＋ 공지 작성</button></div>
+        <div class="toolbar"><span class="muted">노출 기간 동안 대상 사용자가 웹하드를 열 때마다 팝업으로 뜹니다 — 사용자가 <b>🔕 그만 보기</b>를 누르면 그 계정에서는(어느 기기든) 다시 뜨지 않습니다.</span><div style="flex:1"></div><button class="btn btn-primary" id="add-notice">＋ 공지 작성</button></div>
         <div class="table-wrap fade-in"><table><thead><tr><th>제목 / 기간</th><th>상태</th><th></th></tr></thead><tbody>${rows || '<tr><td colspan=3 class="muted">공지가 없습니다.</td></tr>'}</tbody></table></div>`;
       document.getElementById('add-notice').addEventListener('click', () => noticeModal());
       view.querySelectorAll('[data-en]').forEach((el) => el.addEventListener('click', () => noticeModal(notices.find((x) => String(x.id) === el.dataset.en))));

@@ -67,16 +67,24 @@ router.get('/branches', wrap(async (req, res) => {
   res.json({ branches: r.rows });
 }));
 
-// 현재 노출 기간 + 내 권한이 대상인 공지사항
+// 현재 노출 기간 + 내 권한이 대상인 공지사항 — '그만 보기'를 누른 것은 뺀다(누를 때까지 열 때마다 뜬다)
 router.get('/notices/active', wrap(async (req, res) => {
   const r = await query(
-    `SELECT id, title, body, start_at, end_at, created_at FROM notices
-     WHERE (start_at IS NULL OR start_at <= now()) AND (end_at IS NULL OR end_at >= now())
-       AND (target_roles IS NULL OR $1 = ANY(target_roles))
-     ORDER BY created_at DESC`,
-    [req.user.role]
+    `SELECT n.id, n.title, n.body, n.start_at, n.end_at, n.created_at FROM notices n
+     WHERE (n.start_at IS NULL OR n.start_at <= now()) AND (n.end_at IS NULL OR n.end_at >= now())
+       AND (n.target_roles IS NULL OR $1 = ANY(n.target_roles))
+       AND NOT EXISTS (SELECT 1 FROM notice_dismissals d WHERE d.notice_id = n.id AND d.user_id = $2)
+     ORDER BY n.created_at DESC`,
+    [req.user.role, req.user.id]
   );
   res.json({ notices: r.rows });
+}));
+// 공지 '그만 보기' — 이 계정에서는 다시 안 뜬다(어느 기기든)
+router.post('/notices/:id(\\d+)/dismiss', wrap(async (req, res) => {
+  const r = await query(
+    `INSERT INTO notice_dismissals (user_id, notice_id) SELECT $1, id FROM notices WHERE id = $2
+     ON CONFLICT DO NOTHING RETURNING notice_id`, [req.user.id, req.params.id]);
+  res.json({ ok: true, saved: r.rowCount > 0 });
 }));
 
 module.exports = router;
