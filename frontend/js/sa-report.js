@@ -64,7 +64,18 @@ tfoot td{position:sticky;bottom:0;background:var(--head);font-weight:800;border-
 .d-stock{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}.d-stock span{flex:1;min-width:76px;text-align:center;padding:8px 6px;background:var(--bg);border:1px solid var(--border);border-radius:10px;font-size:12px;color:var(--muted)}
 .d-stock b{display:block;font-size:18px;color:var(--text);margin-top:2px}.d-stock .neg b{color:var(--neg)}.d-stock .pos b{color:var(--pos)}
 .d-lbl{font-size:13px;font-weight:700;margin:14px 0 6px}.d-chips{display:flex;gap:6px;flex-wrap:wrap}
-.d-cross{margin:10px 0 4px;padding:9px 10px;border:1px solid #f4a3c0;background:#fff6f9;border-radius:10px;font-size:12.5px}.d-cross .x{display:flex;width:100%;gap:8px;align-items:center;text-align:left;margin-top:6px;padding:7px 9px;border:1px solid var(--border);border-radius:8px;background:#fff;cursor:pointer;font:inherit}.d-cross .x small{display:block;color:var(--muted);font-size:11px}.d-cross .g{font-weight:700;color:#b4235a;white-space:nowrap}.d-cross .n{flex:1;min-width:0}.d-cross .dv{font-weight:700;white-space:nowrap}
+.d-cross{margin:10px 0 4px;padding:9px 10px;border:1px solid #f4a3c0;background:#fff6f9;border-radius:10px;font-size:12.5px}.d-cross .xr{display:flex;width:100%;gap:8px;align-items:center;text-align:left;margin-top:6px;padding:7px 9px;border:1px solid var(--border);border-radius:8px;background:#fff;cursor:pointer;font:inherit}.d-cross .xr small{display:block;color:var(--muted);font-size:11px}.d-cross .g{font-weight:700;color:#b4235a;white-space:nowrap}.d-cross .n{flex:1;min-width:0}.d-cross .dv{font-weight:700;white-space:nowrap}
+table.pairs{table-layout:fixed}table.pairs td{vertical-align:middle}table.pairs thead th{cursor:default}
+table.pairs th.pg,table.pairs td.pg{width:62px;text-align:center}table.pairs th.pm,table.pairs td.pm{width:34px;text-align:center;font-size:18px;color:#b4235a;padding:0}
+table.pairs th.pw{width:24%}table.pairs tbody.g{cursor:default}
+.pside{cursor:pointer;border-radius:8px;padding:6px 8px;display:flex;gap:10px;align-items:center}.pside:hover{background:var(--accent-soft,#eef6fb)}
+.pside .pn{flex:1;min-width:0}.pside .pn b{display:block;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pside .pn small{display:block;color:var(--muted);font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pside .pq{text-align:right;white-space:nowrap;font-size:11.5px;color:var(--muted)}.pside .pq .diff{display:block;font-size:16px;font-weight:800}
+.pgrade{display:inline-block;font-weight:800;font-size:12px;color:#b4235a;background:#fde7ef;border:1px solid #f4a3c0;border-radius:6px;padding:1px 6px}.pgrade.g1{color:#8a5a6b;background:#f6f0f2;border-color:#e3c9d3}
+td.pwhy{font-size:11.5px;color:var(--muted)}
+table.pairs.m thead th:nth-child(n){width:auto}table.pairs.m thead th.pg,table.pairs.m td.pg{width:40px;padding-left:4px;padding-right:2px}table.pairs.m thead th.pm,table.pairs.m td.pm{width:20px;font-size:14px}table.pairs.m td{padding-left:4px;padding-right:4px}table.pairs.m .pgrade{font-size:11px;padding:1px 3px}table.pairs.m .pside{padding:4px 2px;gap:4px;flex-direction:column;align-items:stretch}table.pairs.m .pside .pq{text-align:left;white-space:normal;font-size:11px}table.pairs.m .pside .pq .diff{display:inline;font-size:14px;margin-right:4px}
+table.pairs.m td.pwhy{padding-top:0}
 .d-shelves{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:5px}
 .d-shelves .d-chip{font-size:11.5px;padding:3px 7px;border-radius:7px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .d-chip{font-family:ui-monospace,Menlo,monospace;font-size:12.5px;padding:4px 10px;background:var(--bg);border:1px solid var(--border);border-radius:999px}.d-chip b{color:var(--chip-text)}.d-chip.cur{border-color:var(--accent);background:var(--accent-soft)}
@@ -427,8 +438,51 @@ table.m tbody.g tr:last-child td{border-bottom:1px solid var(--border);padding-b
     // 휴대폰에선 수불처코드(앞 세 자리)는 빼고 대-중-소만 — 한 영업점 안에선 늘 같아 자리만 차지한다
     const shelfNoM = (s) => `${s[1]}-${s[2]}-${s[3]}`;
     const shelfTxt = (s) => `${shelfNo(s)} 스캔 ${fmt(s[4])}`;
+    // 교차 의심만: 항목 표 대신 '더 찍힌 책 ↔ 덜 찍힌 책'을 한 줄에 — 짝을 나란히 놓고 보게.
+    //  다른 필터(검색 · 분야 · 확인 …)는 그대로 — 둘 중 하나라도 남아 있으면 그 짝을 보인다. 양쪽 책을 누르면 그 책 상세.
+    function pairList(rows) {
+      const shown = new Set(rows.map((r) => r.x.i));
+      const out = [], seen = new Set();
+      for (const P of items) {
+        if (!P.x || !(P.sd > 0)) continue;
+        for (const c of P.x) {
+          const M = byIsbn.get(c[0]); if (!M || !(M.sd < 0)) continue;
+          const k = P.i + '|' + M.i; if (seen.has(k)) continue; seen.add(k);
+          if (!shown.has(P.i) && !shown.has(M.i)) continue;
+          out.push({ P, M, grade: c[1], label: c[2], why: c[3] });
+        }
+      }
+      return out.sort((a, b) => (b.grade - a.grade) || ((a.P.xg || 0) - (b.P.xg || 0)));
+    }
+    function renderPairs(rows, mobile) {
+      const list = pairList(rows);
+      $('#t').classList.add('pairs'); $('#t').classList.toggle('m', mobile);
+      $('#th').innerHTML = mobile
+        ? '<tr><th class="pg">판단</th><th>더 찍힘 (+)</th><th class="pm">↔</th><th>덜 찍힘 (−)</th></tr>'
+        : '<tr><th class="pg">판단</th><th>더 찍힌 책 (+)</th><th class="pm">↔</th><th>덜 찍힌 책 (−)</th><th class="pw">근거</th></tr>';
+      const side = (o) => {
+        const pc = photoCount(o.i), done = isDone(o.i);
+        const where = (o.sh || []).slice(0, 2).map((s2) => (MQ.matches ? shelfNoM(s2) : shelfNo(s2))).join(', ') + ((o.sh || []).length > 2 ? ` 외 ${o.sh.length - 2}` : '');
+        return `<div class="pside" data-oi="${esc(o.i)}" title="${esc(o.n)}"><div class="pn"><b>${esc(mobile ? cut(o.n, 18) : o.n)}${pc ? ` <span class="tag ph">📷 ${pc}</span>` : ''}${done && !pc ? ' <span class="tag ok">✓</span>' : ''}</b><small>${esc(o.i)}${where ? ' · ' + esc(where) : ' · 서가 없음'}</small></div>
+          <div class="pq"><span class="diff ${o.sd < 0 ? 'neg' : 'pos'}">${sgn(o.sd)}</span>전산 ${fmt(o.s)} · 스캔 ${fmt(o.ss)}</div></div>`;
+      };
+      const html = list.map((p) => `<tbody class="g${isDone(p.P.i) && isDone(p.M.i) ? ' done' : ''}" data-i="${esc(p.P.i)}"><tr>
+          <td class="pg"><span class="pgrade g${p.grade}">${esc(p.label)}</span></td><td>${side(p.P)}</td><td class="pm">↔</td><td>${side(p.M)}</td>${mobile ? '' : `<td class="pwhy">${esc(p.why)}</td>`}</tr>
+          ${mobile ? `<tr><td></td><td class="pwhy" colspan="3">${esc(p.why)}</td></tr>` : ''}</tbody>`).join('');
+      document.querySelectorAll('#t > tbody.g').forEach((g) => g.remove());
+      if (list.length) $('#tf').insertAdjacentHTML('beforebegin', html);
+      $('#empty').style.display = list.length ? 'none' : '';
+      $('#tf').innerHTML = list.length ? `<tr><td colspan="${mobile ? 4 : 5}">교차 스캔 의심 · ${fmt(list.length)}쌍 — 책을 누르면 상세</td></tr>` : '';
+      const total = items.filter(excOk).length;
+      $('#count').textContent = `${fmt(list.length)}쌍 · 항목 ${fmt(rows.length)}건 / 전체 ${fmt(total)}건`;
+      $('#f-field-btn').classList.toggle('on', st.fields.size > 0);
+      $('#f-field-lbl').textContent = st.fields.size ? `${st.fields.size}개` : '전체';
+      cards();
+    }
     function render() {
       const rows = view(), mobile = MQ.matches;
+      if (st.cross === 'only') return renderPairs(rows, mobile);
+      $('#t').classList.remove('pairs');
       const head = mobile ? HEAD_M : HEAD_PC;
       $('#t').classList.toggle('m', mobile);
       $('#th').innerHTML = '<tr>' + head.map(([k, label, num]) => `<th${k ? ` data-k="${k}"` : ''}${num ? ' class="num"' : ''}>${label}${k ? `<span class="ar">${st.sort.k === k ? (st.sort.dir > 0 ? '▲' : '▼') : ''}</span>` : ''}</th>`).join('') + '</tr>';
@@ -525,7 +579,7 @@ table.m tbody.g tr:last-child td{border-bottom:1px solid var(--border);padding-b
           <div class="d-meta"><div class="d-title">${esc(x.n || '(제목없음)')}</div><div class="d-sub">${esc(x.p)}${x.f ? ' · ' + esc(x.f) : ''}</div><div class="d-isbn">ISBN ${esc(x.i)}</div>
             <div class="d-stock"><span>전산재고<b>${fmt(x.s)}</b></span><span>스캔합계<b>${fmt(x.ss)}</b></span><span class="${dc}">스캔차이<b>${sgn(x.sd)}</b></span></div></div></div>
         <div class="d-lbl">서가 (${MQ.matches ? '대-중-소' : '수불처-대-중-소'} · 스캔수량)</div>${chips}
-        ${x.x ? `<div class="d-cross">🔀 <b>교차 스캔 의심</b> — 이 책이 <b>${x.sd > 0 ? '더' : '덜'} 찍혔고</b> 비슷한 아래 책은 <b>${x.sd > 0 ? '덜' : '더'} 찍혔어요</b>. 같은 자리에서 바꿔 찍었는지 확인하세요.${x.x.map((c) => { const o = byIsbn.get(c[0]); return o ? `<button type="button" class="x" data-xo="${esc(o.i)}"><span class="g">${esc(c[2])}</span><span class="n">${esc(o.n)}<small>${esc(o.i)} · ${esc(c[3])}</small></span><span class="dv diff ${o.sd < 0 ? 'neg' : 'pos'}">${sgn(o.sd)}</span></button>` : ''; }).join('')}</div>` : ''}
+        ${x.x ? `<div class="d-cross">🔀 <b>교차 스캔 의심</b> — 이 책이 <b>${x.sd > 0 ? '더' : '덜'} 찍혔고</b> 비슷한 아래 책은 <b>${x.sd > 0 ? '덜' : '더'} 찍혔어요</b>. 같은 자리에서 바꿔 찍었는지 확인하세요.${x.x.map((c) => { const o = byIsbn.get(c[0]); return o ? `<button type="button" class="xr" data-xo="${esc(o.i)}"><span class="g">${esc(c[2])}</span><span class="n">${esc(o.n)}<small>${esc(o.i)} · ${esc(c[3])}</small></span><span class="dv diff ${o.sd < 0 ? 'neg' : 'pos'}">${sgn(o.sd)}</span></button>` : ''; }).join('')}</div>` : ''}
         <div class="d-lbl">📷 사진 <span id="d-pn" style="color:var(--muted);font-weight:400"></span></div><div class="d-photos" id="d-photos"></div>
         <div id="d-stage"></div>
         <div class="acts"><button class="btn" type="button" id="d-close">닫기</button><span class="sp"></span>
@@ -634,7 +688,11 @@ table.m tbody.g tr:last-child td{border-bottom:1px solid var(--border);padding-b
       render();
     });
     MQ.addEventListener ? MQ.addEventListener('change', render) : MQ.addListener(render);   // 화면 돌리면 표 모양 바꿈
-    $('#t').addEventListener('click', (e) => { const g = e.target.closest('tbody.g'); if (g) openDetail(g.dataset.i); });
+    $('#t').addEventListener('click', (e) => {
+      const side = e.target.closest('[data-oi]'); if (side) { openDetail(side.dataset.oi); return; }   // 짝 표: 누른 쪽 책
+      if ($('#t').classList.contains('pairs')) return;
+      const g = e.target.closest('tbody.g'); if (g) openDetail(g.dataset.i);
+    });
     // 틀 고정: 표 칸 높이 = 화면 − 필터 막대
     //  (휴대폰에선 필터 막대가 여러 줄이라 붙여 두지 않는다 → 표가 화면 전체를 쓰고 머리글만 고정)
     const fit = () => { const bar = $('.bar'); document.documentElement.style.setProperty('--barh', (getComputedStyle(bar).position === 'sticky' ? bar.offsetHeight : 0) + 'px'); };
