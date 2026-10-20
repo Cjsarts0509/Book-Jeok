@@ -32,7 +32,7 @@
 **새 OCI 계정**
 - 테넌시 OCID, 리전(권장: 기존과 동일 `ap-chuncheon-1`)
 - VM 접속용 SSH 공개키
-- Always Free 한도 확인(A1 Flex 합계 4 OCU / 24GB 무료)
+- Always Free 한도 확인(A1 Flex 합계 **2 OCPU / 12GB** 무료 — 2026-06 에 4/24 에서 줄었음. 블록 스토리지는 부팅+추가 디스크 합계 200GB)
 
 **기존 서버에서 확보**
 - `~/Book-Jeok/.env` (MASTER_KEY·JWT_SECRET 포함)

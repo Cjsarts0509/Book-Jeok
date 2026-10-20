@@ -55,7 +55,7 @@ cat ~/.ssh/bookjeok_oci.pub   # 이 내용을 복사해 둠
 2. **Placement**: 가용성 도메인(AD) 선택(용량 상황에 따라 AD-1/2/3 바꿔 시도)
 3. **Image and shape**
    - Image: **Ubuntu 22.04** (Canonical Ubuntu)
-   - Shape: **Ampere `VM.Standard.A1.Flex`** → **OCPU 2 / Memory 12GB**(Always Free 합계 4 OCPU·24GB 내)
+   - Shape: **Ampere `VM.Standard.A1.Flex`** → **OCPU 2 / Memory 12GB**(Always Free 한도가 **합계 2 OCPU·12GB**라 이 크기가 한도 전부 — 2026-06 에 4·24 → 2·12 로 줄었음)
      - 참고: Always Free x86(`E2.1.Micro`)는 1 OCPU/1GB라 이 서비스엔 부족. **ARM A1 권장.**
 4. **Networking**: 위에서 만든 VCN·퍼블릭 서브넷, **Assign public IPv4 = Yes**
 5. **Add SSH keys**: *Paste public keys* → 1단계 `bookjeok_oci.pub` 내용 붙여넣기
@@ -69,6 +69,10 @@ cat ~/.ssh/bookjeok_oci.pub   # 이 내용을 복사해 둠
 ssh -i ~/.ssh/bookjeok_oci ubuntu@<PUBLIC_IP>
 # (Ubuntu 이미지 기본 사용자: ubuntu)
 ```
+> **Windows PC 에서 접속**: `scripts/windows/bookjeok-ssh.bat` 를 PC 마다 한 번 실행하세요(→ `README-ssh.txt`).
+> PC 마다 자기 키를 만들어 서버에 등록하고 `ssh bookjeok` 한 줄로 접속하게 해 줍니다.
+> 키 파일 하나를 여러 PC·폴더로 복사해 쓰면 Windows 가 새 폴더 권한을 물려받아
+> `UNPROTECTED PRIVATE KEY FILE` 로 막히는데, 이 방식은 키를 옮기지 않으므로 그 문제가 생기지 않습니다.
 접속되면 기본 세팅:
 ```bash
 sudo timedatectl set-timezone Asia/Seoul
