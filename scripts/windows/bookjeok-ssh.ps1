@@ -43,7 +43,12 @@ function Get-SafeName([string]$s) { (($s -replace '[^A-Za-z0-9_-]', '').ToLower(
 function Get-PcName {
   $n = Get-SafeName $env:COMPUTERNAME
   if (-not $n) { $n = Get-SafeName ([System.Net.Dns]::GetHostName()) }
-  if (-not $n) { $n = 'pc' }
+  if (-not $n -or $n -eq 'pc') {
+    # PC 이름이 한글 등이라 영문이 안 남으면 PC 이름에서 짧은 고유 번호를 만든다(PC 마다 다르고, 같은 PC 에선 늘 같음)
+    $src = "$env:COMPUTERNAME|$([System.Net.Dns]::GetHostName())"
+    $h = [System.BitConverter]::ToString([System.Security.Cryptography.SHA1]::Create().ComputeHash([System.Text.Encoding]::UTF8.GetBytes($src))).Replace('-', '').Substring(0, 6).ToLower()
+    $n = "pc-$h"
+  }
   $n
 }
 function Get-KeyFileName { "bookjeok_$(Get-PcName)" }
@@ -297,6 +302,9 @@ function Invoke-Setup {
   if (-not (Test-SshTools)) { return }
   New-Item -ItemType Directory -Force -Path $SshDir | Out-Null
   $name = Get-KeyFileName
+  # 이미 이 도구로 만든 키가 설정돼 있으면(이름 규칙이 바뀌었어도) 그 키를 그대로 쓴다
+  $cur = Get-ManagedKeyPath
+  if ($cur -and (Test-Path -LiteralPath $cur) -and ((Split-Path -Leaf $cur) -like 'bookjeok_*') -and ((Split-Path -Leaf $cur) -ne 'bookjeok_shared')) { $name = Split-Path -Leaf $cur }
   $key = Join-Path $SshDir $name
   if (Test-Path -LiteralPath $key) {
     Say "  이 PC 의 키가 이미 있습니다: $key (그대로 씁니다)" Gray
