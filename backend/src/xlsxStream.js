@@ -83,7 +83,8 @@ function unesc(s) {
     return ENT[k] != null ? ENT[k] : m;
   });
 }
-const textOf = (xml) => { let out = ''; const re = /<t(?:\s[^>]*)?>([\s\S]*?)<\/t>/g; let m; while ((m = re.exec(xml))) out += m[1]; return unesc(out); };
+// <rPh>(일본어 후리가나 등 발음 표기)는 값이 아니므로 뺀다
+const textOf = (xml) => { let out = ''; const re = /<t(?:\s[^>]*)?>([\s\S]*?)<\/t>/g; let m; const body = xml.indexOf('<rPh') >= 0 ? xml.replace(/<rPh\b[\s\S]*?<\/rPh>/g, '') : xml; while ((m = re.exec(body))) out += m[1]; return unesc(out); };
 
 async function readSharedStrings(fd, path, entries) {
   const e = entries.get('xl/sharedStrings.xml'); if (!e) return [];
@@ -109,6 +110,7 @@ function parseRow(xml, sst) {
     if (type === 's') { const k = parseInt(v, 10); v = sst[k] != null ? sst[k] : ''; }
     else if (type === 'n' && v !== '') { const n = Number(v); if (Number.isFinite(n)) v = n; }
     else if (type === 'b') v = v === '1';
+    else if (type === 'e') v = '';   // 오류값(#NAME? 등)은 빈칸으로 — 엑셀도 값으로 치지 않는다
     arr[ci] = v;
   }
   return arr;
