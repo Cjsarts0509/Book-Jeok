@@ -83,6 +83,7 @@ const API = (() => {
     stockAuditBranches: () => req('GET', '/files/stock-audit/branches'),
     stockAuditDeliver: (payload) => req('POST', '/files/stock-audit/deliver', payload),
     stockAuditReportKey: (payload) => req('POST', '/files/stock-audit/report-key', payload),
+    stockAuditAnalyze: (payload) => req('POST', '/files/stock-audit/analyze', payload),   // ① ② 엑셀을 서버가 읽어 오차 항목만
     tree: (ownerId) => req('GET', `/files/tree${ownerId ? '?ownerId=' + ownerId : ''}`),
     recentUploads: (days, ownerId) => req('GET', `/files/recent?days=${days}${ownerId ? '&ownerId=' + ownerId : ''}`),
     // U10 잠금 · U6 이력 · U9 템플릿 · U12 도서정보

@@ -3673,15 +3673,6 @@ const App = (() => {
       const info = m.q('#sa-srcinfo');
       if (info) info.textContent = `${y}년${br ? ' · ' + br : ''} 엑셀 ${list.length.toLocaleString()}개 (최신순) — 이름으로 자동 선택했어요. 다르면 바꿔 주세요. 년도는 파일 이름의 20xx(없으면 올린 날짜), 영업점은 폴더 이름으로 정합니다.`;
     }
-    // 웹하드 파일 → 바이트. 로그인 토큰으로 직접 받는다(브라우저 다운로드 폴더를 거치지 않음).
-    async function fetchWebhardFile(id) {
-      const res = await fetch(API.downloadUrl(id), { headers: { Authorization: 'Bearer ' + API.getToken() }, credentials: 'include' });
-      if (!res.ok) {
-        let msg = ''; try { msg = (await res.json()).error || ''; } catch (_) {}
-        throw new Error(msg || `웹하드 파일을 읽지 못했습니다 (${res.status})`);
-      }
-      return res.arrayBuffer();
-    }
     if (!isOpened) {
       m.q('#sa-reload')?.addEventListener('click', loadWebhardXls);
       m.q('#sa-year')?.addEventListener('change', () => fillBranchesForYear(false));
@@ -3690,41 +3681,7 @@ const App = (() => {
     }
 
     const num = (v) => { const n = Number(String(v == null ? '' : v).replace(/[^\d.-]/g, '')); return isNaN(n) ? 0 : n; };
-    // 첫 시트를 2차원 배열로. 재고 시스템이 내보낸 파일은 '표 범위'(dimension, !ref)가 실제보다 작게 적힌 것이 있어
-    //  (예: 수십만 줄인데 A1:J1) 그대로 읽으면 머리글만 나와 "오차 없음"이 된다 → 셀을 직접 훑어 진짜 범위를 구한다.
-    //  시트가 여럿이면 'ISBN' 머리글이 있는 첫 시트를 고른다.
-    function readSheet(XLSX, buf) {
-      const wb = XLSX.read(buf, { type: 'array' });
-      const pick = (ws) => {
-        if (!ws) return null;
-        const ref = ws['!ref'] ? XLSX.utils.decode_range(ws['!ref']) : { s: { r: 0, c: 0 }, e: { r: 0, c: 0 } };
-        let maxR = ref.e.r, maxC = ref.e.c;
-        for (const k in ws) { if (k.charCodeAt(0) === 33) continue; const c = XLSX.utils.decode_cell(k); if (c.r > maxR) maxR = c.r; if (c.c > maxC) maxC = c.c; }
-        const range = { s: { r: 0, c: 0 }, e: { r: maxR, c: maxC } };
-        return XLSX.utils.sheet_to_json(ws, { header: 1, range, blankrows: false, defval: '' });
-      };
-      let rows = null;
-      for (const n of wb.SheetNames) {
-        const r = pick(wb.Sheets[n]); if (!r || !r.length) continue;
-        if (!rows) rows = r;
-        if (r.slice(0, 30).some((row) => row.some((c) => String(c).trim().toUpperCase() === 'ISBN'))) { rows = r; break; }
-      }
-      return rows || [];
-    }
-    // 머리글 줄(첫 30줄 안에 'ISBN' 이 있는 줄)을 찾아, 이름 → 열 번호 표를 만든다. 없으면 기본 열 번호(fallback)를 쓴다.
-    function headerMap(rows, names, fallback) {
-      let hi = 0;
-      for (let i = 0; i < Math.min(30, rows.length); i++) if ((rows[i] || []).some((c) => String(c).trim().toUpperCase() === 'ISBN')) { hi = i; break; }
-      const head = (rows[hi] || []).map((c) => String(c == null ? '' : c).replace(/\s+/g, ''));
-      const col = {};
-      names.forEach((nm, k) => { const j = head.findIndex((h) => h.toUpperCase() === nm.toUpperCase()); col[nm] = j >= 0 ? j : fallback[k]; });
-      return { hi, col, found: names.filter((nm) => head.some((h) => h.toUpperCase() === nm.toUpperCase())).length };
-    }
     let saReadInfo = null;   // 마지막 분석에서 읽은 줄 수 · 합계(오차 0건일 때 왜 0건인지 보여 주려고)
-    // 엑셀 셀 서식이 '일반'이면 서가번호 · ISBN 이 숫자로 저장돼 앞의 0 이 사라진다(서가번호 01507400404 → 1507400404).
-    //  숫자만 있고 자릿수가 모자라면 앞에 0 을 채운다. 서가번호는 11자리(수불처 3 · 대 2 · 중 4 · 소 2), ISBN-10 은 0 으로 시작할 수 있다.
-    const normShelf = (v) => { const s = String(v == null ? '' : v).trim(); return /^\d{9,10}$/.test(s) ? s.padStart(11, '0') : s; };
-    const normIsbn = (v) => { const s = String(v == null ? '' : v).trim(); return /^\d{9}$/.test(s) ? s.padStart(10, '0') : s; };
 
     const esc = UI.escapeHtml;
     let disc = [];                 // 오차 항목(상세·바코드검색·다운로드 공용)
@@ -4099,7 +4056,7 @@ const App = (() => {
       if (!disc.length) {
         // 왜 0건인지 같이 보여 준다 — 파일을 못 읽은 것(줄 수 0~1)과 정말 오차가 없는 것(합계가 같음)을 구분할 수 있게
         const ri = saReadInfo;
-        const why = ri ? `<br><small>① 파일에서 ${ri.rows1.toLocaleString('ko-KR')}줄을 읽었습니다 · 전산재고 합계 ${ri.sumSys.toLocaleString('ko-KR')} · 스캔재고 합계 ${ri.sumScan.toLocaleString('ko-KR')}${ri.head1 < 10 ? ` · 머리글 ${ri.head1}/10개만 알아봄(나머지는 기본 열 자리로 읽음)` : ''}${ri.rows1 <= 1 ? '<br>⚠️ 줄을 거의 못 읽었습니다 — 파일을 엑셀에서 열어 「다른 이름으로 저장」한 뒤 다시 올려 보세요.' : ''}</small>` : '';
+        const why = ri ? `<br><small>① 파일에서 ${ri.rows1.toLocaleString('ko-KR')}줄을 읽었습니다 · 전산재고 합계 ${ri.sumSys.toLocaleString('ko-KR')} · 스캔재고 합계 ${ri.sumScan.toLocaleString('ko-KR')}${ri.head1 < 10 ? ` · 머리글 ${ri.head1}/10개만 알아봄(나머지는 기본 열 자리로 읽음)` : ''}${ri.rows1 <= 1 ? '<br>⚠️ 줄을 거의 못 읽었습니다 — ① 에 고른 파일이 결과확인리스트(첫 줄 근처에 ISBN 머리글)가 맞는지 확인해 주세요.' : ''}</small>` : '';
         m.q('#sa-result').innerHTML = `<p class="muted" style="padding:14px">오차 항목이 없습니다.${why}</p>`; return;
       }
       // 필터 상태 초기화(새 목록/이어서 보기 시)
@@ -4425,60 +4382,13 @@ const App = (() => {
       if (id1 === id2) return UI.toast('① 과 ② 에 같은 파일을 골랐습니다', 'error');
       const btn = m.q('#sa-run'); btn.disabled = true;
       try {
-        // 너무 큰 파일은 브라우저가 못 읽는다(932,122행 · 63MB 짜리는 10분 넘게 걸리다 끝나지 않았다).
-        //  시스템이 바로 내보낸 원본은 보통 10~20MB 인데, 엑셀에서 다시 저장하면 몇 배로 불어난다.
-        const SA_MAX_MB = 40, SA_SLOW_MB = 20;
-        for (const [id, lbl] of [[id1, '①'], [id2, '②']]) {
-          const f = saXlsFiles.find((x) => String(x.id) === String(id)); const mb = f ? (f.size || 0) / 1048576 : 0;
-          if (mb > SA_MAX_MB) throw new Error(`${lbl} 파일이 ${mb.toFixed(0)}MB 로 너무 커서 브라우저에서 읽을 수 없습니다. 재고 시스템에서 바로 내보낸 원본(보통 10~20MB)을 올려서 고르세요 — 엑셀에서 열어 다시 저장한 파일은 몇 배로 커집니다.`);
-          if (mb > SA_SLOW_MB) UI.toast(`${lbl} 파일이 ${mb.toFixed(0)}MB 라 읽는 데 1분 넘게 걸릴 수 있습니다`, 'info');
-        }
-        status('엑셀 라이브러리 로드 중…'); const XLSX = await ensureXLSX();
-        status('웹하드에서 두 파일 가져오는 중…');
-        const [b1, b2] = await Promise.all([fetchWebhardFile(id1), fetchWebhardFile(id2)]);
-        status('① 결과확인리스트 읽는 중… (수십 초 걸릴 수 있어요)'); await new Promise((r) => setTimeout(r));
-        const r1 = readSheet(XLSX, b1);
-        status('② 서가별스캔데이터 읽는 중…'); await new Promise((r) => setTimeout(r));
-        const r2 = readSheet(XLSX, b2);
-        status('오차 계산 중…'); await new Promise((r) => setTimeout(r));
-
-        // ① 오차 추출: (차이≠0 '또는' 실재고-스캔재고≠0)이면 포함. 예외여부 Y 는 표시만(필터로 선택)
-        // 칼럼은 머리글 이름으로 찾고(열이 끼거나 순서가 바뀌어도), 없으면 기본 자리: ISBN0 도서명1 분야2 출판사3 전산재고4 실재고5 누락재고6 예외여부7 스캔재고8 차이9
-        const H1 = headerMap(r1, ['ISBN', '도서명', '분야', '출판사', '전산재고', '실재고', '누락재고', '예외여부', '스캔재고', '차이'], [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
-        const c1 = H1.col;
-        disc = []; isbnSet = new Set();
-        saReadInfo = { rows1: Math.max(0, r1.length - H1.hi - 1), rows2: Math.max(0, r2.length - 1), sumSys: 0, sumScan: 0, head1: H1.found };
-        for (let i = H1.hi + 1; i < r1.length; i++) {
-          const r = r1[i]; if (!r || r[c1.ISBN] == null || r[c1.ISBN] === '') continue;
-          saReadInfo.sumSys += num(r[c1['전산재고']]); saReadInfo.sumScan += num(r[c1['스캔재고']]);
-          // 예외여부 Y 도 목록에는 남긴다(exc='Y') — 화면·다운로드의 '예외' 필터로 빼거나 넣는다(기본: 빼기)
-          if (num(r[c1['차이']]) === 0 && num(r[c1['실재고']]) - num(r[c1['스캔재고']]) === 0) continue;   // 둘 다 0이면 제외(하나라도 ≠0이면 포함)
-          const isbn = normIsbn(r[c1.ISBN]);
-          disc.push({ isbn, name: r[c1['도서명']], field: r[c1['분야']], pub: r[c1['출판사']], sys: r[c1['전산재고']], real: r[c1['실재고']], miss: r[c1['누락재고']], exc: r[c1['예외여부']], scan: r[c1['스캔재고']], diff: r[c1['차이']] });
-          isbnSet.add(isbn);
-        }
-        // ② 서가별 실사수량 합산: 머리글 이름(ISBN · 서가번호 · 실사수량)으로, 없으면 ISBN0 … 서가번호4 실사수량5
-        const H2 = headerMap(r2, ['ISBN', '서가번호', '실사수량'], [0, 4, 5]);
-        const c2 = H2.col;
-        const shelfMap = new Map();
-        for (let i = H2.hi + 1; i < r2.length; i++) {
-          const r = r2[i]; if (!r || r[c2.ISBN] == null || r[c2.ISBN] === '') continue;
-          const isbn = normIsbn(r[c2.ISBN]), shelf = normShelf(r[c2['서가번호']]);
-          if (!shelf) continue;
-          const qty = num(r[c2['실사수량']]) || 1;
-          if (!shelfMap.has(isbn)) shelfMap.set(isbn, new Map());
-          const mm = shelfMap.get(isbn); mm.set(shelf, (mm.get(shelf) || 0) + qty);
-        }
-        // 서가번호 숫자 정렬. 서가 수는 자르지 않는다 —
-        //   예전엔 10곳까지만 실어서, 서가가 더 많은 책(예: 베스트셀러가 매대 수십 곳)은 나머지 서가 수량이
-        //   엑셀에서 통째로 빠져 서가별로 합치면 스캔재고보다 적게 나왔다.
-        let matched = 0;
-        for (const d of disc) {
-          const mm = shelfMap.get(d.isbn);
-          d.shelves = mm ? [...mm.entries()].sort((a, b) => Number(a[0]) - Number(b[0])) : [];
-          d.ssum = mm ? [...mm.values()].reduce((a, q) => a + q, 0) : 0;
-          if (d.shelves.length) matched++;
-        }
+        // 두 엑셀은 서버가 흘려 읽어(xlsxStream) 오차 항목만 돌려준다 — 932,122행 · 63MB 도 몇 초. 브라우저 · 휴대폰 메모리와 무관.
+        const f1 = saXlsFiles.find((x) => String(x.id) === String(id1)), f2 = saXlsFiles.find((x) => String(x.id) === String(id2));
+        const totalMb = (((f1 && f1.size) || 0) + ((f2 && f2.size) || 0)) / 1048576;
+        status(`서버에서 두 파일을 읽는 중…${totalMb > 20 ? ' (수십만 줄이라 30초쯤 걸릴 수 있어요)' : ''}`);
+        const r = await API.stockAuditAnalyze({ id1: Number(id1), id2: Number(id2) });
+        disc = Array.isArray(r.disc) ? r.disc : []; isbnSet = new Set(disc.map((d) => d.isbn));
+        saReadInfo = r.info || null;
         saAnalyzedYear = Number(yr) || null;
         const fb = (id) => ((saXlsFiles.find((f) => String(f.id) === String(id)) || {}).branch || '');
         saAnalyzedBranch = m.q('#sa-sbranch').value || fb(id1) || fb(id2) || '';

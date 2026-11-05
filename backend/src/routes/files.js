@@ -22,6 +22,7 @@ const notify = require('../notify');
 const { isAllowed, allowedLabel, getAllowedExtensions, trashRetentionDays, shareQrEnabled } = require('../settings');
 const QRCode = require('qrcode');
 
+const stockAudit = require('../stockAudit');
 const router = express.Router();
 
 const extOf = (name) => (name.split('.').pop() || '').toLowerCase();
@@ -207,6 +208,34 @@ router.get('/stock-audit/branches', authenticate, wrap(async (req, res) => {
 }));
 // 재고조사 HTML 보고서 열쇠 발급: 보고서를 휴대폰에서 열어 찍은 사진·확인 표시를 이 계정·폴더 웹하드에
 // 자동 저장하게 한다(routes/saReport.js). 원문은 응답으로 한 번만 주고 DB 엔 해시만 둔다.
+// ── 재고조사 오차체크: ① 결과확인리스트 + ② 서가별스캔데이터를 서버가 흘려 읽어 오차 항목만 돌려준다 ──
+//  브라우저는 932,122행 · 63MB 를 못 읽는다(10분 넘게 걸리다 끝나지 않음). 서버는 xlsxStream 으로 몇 초. worker 스레드라 다른 요청을 막지 않는다.
+//  한 번에 하나만(CPU 2개 · 메모리 보호) — 겹치면 429.
+let saAnalyzing = false;
+router.post('/stock-audit/analyze', authenticate, wrap(async (req, res) => {
+  const ids = [Number(req.body.id1), Number(req.body.id2)];
+  if (!ids.every((n) => Number.isInteger(n) && n > 0) || ids[0] === ids[1]) return res.status(400).json({ error: '두 파일을 고르세요.' });
+  const picked = [];
+  for (const id of ids) {
+    const r = await query('SELECT * FROM files WHERE id=$1 AND deleted_at IS NULL', [id]);
+    const file = r.rows[0];
+    if (!file) return res.status(404).json({ error: '파일을 찾을 수 없습니다.' });
+    if (!(await canAccessOwner(req.user, file.owner_id))) return res.status(403).json({ error: '접근 권한이 없습니다.' });
+    const disk = path.join(userDir(file.owner_id), file.stored_name);
+    if (!fs.existsSync(disk)) return res.status(410).json({ error: '파일 실체가 존재하지 않습니다.' });
+    picked.push({ file, disk });
+  }
+  if (saAnalyzing) return res.status(429).json({ error: '다른 재고조사 분석이 진행 중입니다. 잠시 뒤 다시 시도하세요.' });
+  saAnalyzing = true;
+  try {
+    const out = await stockAudit.analyzeInWorker(picked[0].disk, picked[1].disk);
+    await audit(req, 'stock-audit', `${picked[0].file.original_name} + ${picked[1].file.original_name} → 오차 ${out.disc.length}건 (${out.info.ms}ms)`, picked[0].file.owner_id);
+    res.json(out);
+  } catch (e) {
+    res.status(422).json({ error: `엑셀을 읽지 못했습니다: ${e.message || e}` });
+  } finally { saAnalyzing = false; }
+}));
+
 // 발급 권한: 그 계정 파일을 다룰 수 있는 사람(resolveOwner 규칙) + 담당자·관리자가 '영업점' 계정에(영업점에 전달과 같은 규칙).
 const SA_REPORT_DAYS = parseInt(process.env.SA_REPORT_KEY_DAYS || '60', 10);
 router.post('/stock-audit/report-key', authenticate, wrap(async (req, res) => {
