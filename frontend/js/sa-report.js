@@ -24,6 +24,7 @@ header h1{margin:0;font-size:22px;letter-spacing:-.3px}header .sub{color:var(--m
 .card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:11px 14px}
 .card .k{font-size:12px;color:var(--muted)}.card .v{font-size:21px;font-weight:800;margin-top:2px;font-variant-numeric:tabular-nums}
 .card .v small{font-size:12px;font-weight:500;color:var(--muted)}.card.neg .v{color:var(--neg)}.card.pos .v{color:var(--pos)}
+.cards.sel .card{border-color:var(--accent)}.cards.sel .card:first-child{background:var(--accent-soft)}
 .bar{position:sticky;top:0;z-index:30;display:flex;flex-wrap:wrap;gap:8px;align-items:center;background:var(--bg);padding:10px 0}
 .bar input[type=search],.bar select,.btn{height:36px;border:1px solid var(--border);background:var(--surface);color:var(--text);border-radius:9px;padding:0 11px;font:inherit;font-size:13px}
 .bar input[type=search]{min-width:200px;flex:1 1 220px;max-width:360px}
@@ -54,8 +55,15 @@ td.diff{font-weight:800}td.diff.neg{color:var(--neg);background:var(--neg-soft)!
 .tag.xs{background:#fde7ef;color:#b4235a;border:1px solid #f4a3c0}.tag.ph{background:#1f6feb;color:#fff}.tag.ok{background:var(--done-text);color:#fff}.tag.ex{background:var(--exc);color:#b45309;border:1px solid #f0bc3c}
 tfoot td{position:sticky;bottom:0;background:var(--head);font-weight:800;border-top:2px solid var(--border);z-index:2}
 .empty{padding:40px;text-align:center;color:var(--muted)}
+/* 분야별 통계 창 */
+.fs-wrap{overflow:auto;max-height:62vh;border:1px solid var(--border);border-radius:10px}table.fs{width:100%;font-size:13px;border-collapse:separate;border-spacing:0}
+table.fs th{position:sticky;top:0;z-index:1;background:var(--head);padding:8px 8px;text-align:left;white-space:nowrap;cursor:pointer;user-select:none;font-weight:700}table.fs th.num,table.fs td.num{text-align:right;font-variant-numeric:tabular-nums}
+table.fs th:hover{color:var(--chip-text)}table.fs td{padding:6px 8px;border-top:1px solid var(--border);white-space:nowrap}table.fs tbody tr{cursor:pointer}table.fs tbody tr:hover td{background:var(--accent-soft)}
+table.fs tfoot td{position:sticky;bottom:0;background:var(--head);font-weight:800;border-top:2px solid var(--border)}table.fs .neg{color:var(--neg)}table.fs .pos{color:var(--pos)}table.fs .muted{color:var(--muted)}
+.fs-bar{display:inline-block;height:7px;border-radius:4px;margin-left:6px;vertical-align:middle;background:var(--neg);opacity:.75}.fs-bar.pos{background:var(--pos)}
+table.fs.m .pc{display:none}table.fs.m{font-size:12px}table.fs.m td,table.fs.m th{padding:6px 5px}table.fs.m .fs-bar{display:none}
 tbody.probe td{visibility:hidden;height:0;padding-top:0;padding-bottom:0;line-height:0;border:0}
-.tbl-wrap{overflow-anchor:none}td{overflow:hidden;text-overflow:ellipsis}
+.tbl-wrap{overflow-anchor:none}#t td,table.blk td{overflow:hidden;text-overflow:ellipsis}
 .hint{color:var(--muted);font-size:12px;margin-top:10px}
 /* 상세 창 */
 .mbg{position:fixed;inset:0;background:rgba(15,17,21,.55);z-index:100;display:flex;align-items:flex-start;justify-content:center;padding:4vh 12px;overflow:auto}
@@ -439,18 +447,90 @@ table.m tbody.g tr:last-child td{border-bottom:1px solid var(--border);padding-b
       }
       return out;
     }
+    // 위 카드: 예외 필터 + 분야 선택을 따른다(분야를 고르면 그 분야 숫자로 바뀐다). 검색 · 차이 · 확인 같은 다른 필터는 영향 없음.
     function cards() {
-      const base = items.filter(excOk);
+      const base = items.filter((x) => excOk(x) && (!st.fields.size || st.fields.has(x.f)));
       const sum = (k) => base.reduce((a, x) => a + (Number(x[k]) || 0), 0);
       const sd = sum('sd'), withPh = base.filter((x) => photoCount(x.i)).length;
+      const fl = !st.fields.size ? '' : st.fields.size === 1 ? ` · 분야 「${esc([...st.fields][0] || '(분야 없음)')}」` : ` · 분야 ${st.fields.size}개`;
+      $('#cards').classList.toggle('sel', st.fields.size > 0);
       $('#cards').innerHTML = `
-        <div class="card"><div class="k">오차 항목${st.exc === 'all' ? ' (예외 포함)' : st.exc === 'only' ? ' (예외만)' : ''}</div><div class="v">${fmt(base.length)}<small> 건</small></div></div>
+        <div class="card"><div class="k">오차 항목${st.exc === 'all' ? ' (예외 포함)' : st.exc === 'only' ? ' (예외만)' : ''}${fl}</div><div class="v">${fmt(base.length)}<small> 건</small></div></div>
         <div class="card"><div class="k">전산재고 합계</div><div class="v">${fmt(sum('s'))}</div></div>
         <div class="card"><div class="k">스캔합계</div><div class="v">${fmt(sum('ss'))}</div></div>
         <div class="card ${sd < 0 ? 'neg' : sd > 0 ? 'pos' : ''}"><div class="k">스캔차이 합계</div><div class="v">${sgn(sd)}</div></div>
         <div class="card neg"><div class="k">부족 항목 (−)</div><div class="v">${fmt(base.filter((x) => x.sd < 0).length)}<small> 건</small></div></div>
         <div class="card pos"><div class="k">초과 항목 (+)</div><div class="v">${fmt(base.filter((x) => x.sd > 0).length)}<small> 건</small></div></div>
         <div class="card"><div class="k">✅ 확인완료</div><div class="v" style="color:var(--done-text)">${fmt(base.filter((x) => isDone(x.i)).length)}<small> / ${fmt(base.length)}건 · 사진 ${fmt(withPh)}건</small></div></div>`;
+    }
+    // ── 분야별 통계 ─────────────────────────────
+    //  예외 필터(기본: 예외 빼기)는 위 카드와 같은 기준. 다른 필터(검색 · 분야 …)와는 무관하게 전체 분야를 보여 준다.
+    //  분야를 누르면 그 분야만 표에 보인다. 📋 복사는 엑셀에 붙일 수 있는 탭 구분 글.
+    const FS = { k: 'sd', dir: 1 };
+    const FS_COLS = [['f', '분야', 0], ['n', '항목', 1], ['s', '전산재고', 1, 'pc'], ['ss', '스캔합계', 1, 'pc'], ['sd', '스캔차이', 1], ['neg', '부족 (−)', 1], ['pos', '초과 (+)', 1], ['done', '확인완료', 1, 'pc'], ['cross', '🔀 교차', 1, 'pc']];
+    function fieldStats() {
+      const m = new Map();
+      for (const x of items.filter(excOk)) {
+        const k = x.f || '(분야 없음)';
+        let r = m.get(k); if (!r) { r = { f: k, raw: x.f, n: 0, s: 0, ss: 0, sd: 0, negN: 0, neg: 0, posN: 0, pos: 0, done: 0, cross: 0 }; m.set(k, r); }
+        r.n++; r.s += Number(x.s) || 0; r.ss += Number(x.ss) || 0; r.sd += Number(x.sd) || 0;
+        if (x.sd < 0) { r.negN++; r.neg += x.sd; } else if (x.sd > 0) { r.posN++; r.pos += x.sd; }
+        if (isDone(x.i)) r.done++; if (x.x) r.cross++;
+      }
+      const rows = [...m.values()];
+      const k = FS.k, d = FS.dir;
+      rows.sort((a, b) => (k === 'f' ? a.f.localeCompare(b.f, 'ko') : (a[k] - b[k]) || a.f.localeCompare(b.f, 'ko')) * d);
+      return rows;
+    }
+    function openFieldStats() {
+      const mobile = MQ.matches;
+      const m = modal(`<h3>📊 분야별 통계 <small id="fs-sub" style="font-weight:400;color:var(--muted);font-size:12px"></small></h3>
+        <div class="fs-wrap"><table class="fs${mobile ? ' m' : ''}" id="fs-t"><thead></thead><tbody></tbody><tfoot></tfoot></table></div>
+        <div class="hint">분야를 누르면 그 분야만 표에 보입니다 · 열 제목을 누르면 정렬 · 부족·초과는 「건수 / 수량」</div>
+        <div class="acts"><button class="btn" type="button" id="fs-copy">📋 복사 (엑셀용)</button><span class="sp"></span><button class="btn" type="button" id="fs-close">닫기</button></div>`);
+      const cell = (r, k) => {
+        if (k === 'f') return esc(r.f);
+        const u = mobile ? '' : '건';   // 휴대폰은 좁아서 '건' 생략
+        if (k === 'neg') return r.negN ? `${fmt(r.negN)}${u} / <b class="neg">${fmt(r.neg)}</b>` : '<span class="muted">—</span>';
+        if (k === 'pos') return r.posN ? `${fmt(r.posN)}${u} / <b class="pos">${sgn(r.pos)}</b>` : '<span class="muted">—</span>';
+        if (k === 'sd') return `<b class="${r.sd < 0 ? 'neg' : r.sd > 0 ? 'pos' : ''}">${sgn(r.sd)}</b>`;
+        if (k === 'done') return `${fmt(r.done)}<small class="muted"> / ${fmt(r.n)}</small>`;
+        return fmt(r[k]);
+      };
+      function draw() {
+        const rows = fieldStats();
+        const tot = rows.reduce((a, r) => { for (const k of ['n', 's', 'ss', 'sd', 'negN', 'neg', 'posN', 'pos', 'done', 'cross']) a[k] += r[k]; return a; }, { f: '합계', n: 0, s: 0, ss: 0, sd: 0, negN: 0, neg: 0, posN: 0, pos: 0, done: 0, cross: 0 });
+        const absMax = Math.max(1, ...rows.map((r) => Math.abs(r.sd)));
+        m.q('#fs-sub').textContent = `${rows.length}개 분야 · ${st.exc === 'all' ? '예외 포함' : st.exc === 'only' ? '예외만' : '예외 빼기'} 기준`;
+        m.q('thead').innerHTML = '<tr>' + FS_COLS.map(([k, label, num, cls]) => `<th data-k="${k}" class="${num ? 'num' : ''}${cls ? ' ' + cls : ''}">${label}<span class="ar">${FS.k === k ? (FS.dir > 0 ? '▲' : '▼') : ''}</span></th>`).join('') + '</tr>';
+        m.q('tbody').innerHTML = rows.map((r) => `<tr data-f="${esc(r.raw == null ? '' : r.raw)}" title="이 분야만 보기">` + FS_COLS.map(([k, , num, cls]) => `<td class="${num ? 'num' : ''}${cls ? ' ' + cls : ''}">${cell(r, k)}${k === 'sd' ? `<span class="fs-bar ${r.sd < 0 ? 'neg' : 'pos'}" style="width:${Math.round(Math.abs(r.sd) / absMax * (mobile ? 36 : 70))}px"></span>` : ''}</td>`).join('') + '</tr>').join('');
+        m.q('tfoot').innerHTML = '<tr>' + FS_COLS.map(([k, , num, cls]) => `<td class="${num ? 'num' : ''}${cls ? ' ' + cls : ''}">${cell(tot, k)}</td>`).join('') + '</tr>';
+        m.el.__rows = rows; m.el.__tot = tot;
+      }
+      draw();
+      m.q('thead').addEventListener('click', (e) => {
+        const th = e.target.closest('th[data-k]'); if (!th) return;
+        const k = th.dataset.k;
+        if (FS.k === k) FS.dir = -FS.dir; else FS.dir = k === 'f' ? 1 : (k === 'sd' || k === 'neg' ? 1 : -1), FS.k = k;   // 차이·부족은 음수가 큰 것부터, 나머지는 큰 것부터
+        draw();
+      });
+      m.q('tbody').addEventListener('click', (e) => {
+        const tr = e.target.closest('tr[data-f]'); if (!tr) return;
+        const f = tr.dataset.f;
+        st.fields = new Set([f]);
+        $('#f-field').querySelectorAll('input').forEach((c) => { c.checked = c.value === f; });
+        m.close(); render();
+        toast(`분야 「${f || '(분야 없음)'}」만 보는 중 — 분야 단추나 초기화로 해제`);
+        window.scrollTo({ top: 0, behavior: 'smooth' }); wrap.scrollTop = 0;   // 카드(분야 숫자)가 보이게 맨 위로
+      });
+      m.q('#fs-close').addEventListener('click', m.close);
+      m.q('#fs-copy').addEventListener('click', async () => {
+        const rows = [...m.el.__rows, m.el.__tot];
+        const head = ['분야', '항목', '전산재고', '스캔합계', '스캔차이', '부족 건수', '부족 수량', '초과 건수', '초과 수량', '확인완료', '교차 의심'];
+        const tsv = [head.join('\t'), ...rows.map((r) => [r.f, r.n, r.s, r.ss, r.sd, r.negN, r.neg, r.posN, r.pos, r.done, r.cross].join('\t'))].join('\n');
+        try { await navigator.clipboard.writeText(tsv); toast('복사했습니다 — 엑셀에 붙여 넣으세요', 'ok'); }
+        catch (_) { const ta = document.createElement('textarea'); ta.value = tsv; document.body.appendChild(ta); ta.select(); try { document.execCommand('copy'); toast('복사했습니다 — 엑셀에 붙여 넣으세요', 'ok'); } catch (e) { toast('복사가 막혀 있습니다', 'err'); } ta.remove(); }
+      });
     }
     // 머리글(PC: 12열 · 휴대폰: 분야·상품코드·상품명·차이)
     const HEAD_PC = [['f', '분야'], ['i', 'ISBN'], ['n', '도서명'], ['p', '출판사'], ['loc', '수불처코드'], ['', '대분류'], ['', '중분류'], ['', '소분류'], ['', '스캔수량', 1], ['s', '전산재고', 1], ['ss', '스캔합계', 1], ['sd', '스캔차이', 1]];
@@ -834,6 +914,7 @@ table.m tbody.g tr:last-child td{border-bottom:1px solid var(--border);padding-b
       render();
     });
     $('#f-print').addEventListener('click', () => window.print());
+    $('#f-fstat').addEventListener('click', openFieldStats);
     $('#f-scan').addEventListener('click', scanFind);
     $('#f-savefile').addEventListener('click', saveFile);
     $('#f-zip').addEventListener('click', zipPhotos);
@@ -909,6 +990,7 @@ table.m tbody.g tr:last-child td{border-bottom:1px solid var(--border);padding-b
   <select id="f-photo" class="btn"><option value="">사진 전체</option><option value="has">사진 있음</option><option value="no">사진 없음</option></select>
   <select id="f-exc" class="btn"><option value="">예외 빼기</option><option value="all">예외 포함</option><option value="only">예외만</option></select>
   <select id="f-cross" class="btn" title="비슷한 책(1권·2권, 1-1·1-2, 판 차이…)이 한쪽은 더, 한쪽은 덜 찍힌 짝"><option value="">교차 전체</option><option value="only">🔀 교차 스캔 의심만</option></select>
+  <button type="button" class="btn noprint" id="f-fstat" title="분야마다 항목 수 · 전산재고 · 스캔차이 · 부족/초과 · 확인완료">📊 분야별</button>
   <button type="button" class="btn" id="f-reset">초기화</button>
   <button type="button" class="btn noprint" id="f-print">🖨️ 인쇄</button>
   <span class="count" id="count"></span>
