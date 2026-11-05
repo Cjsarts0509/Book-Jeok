@@ -61,7 +61,7 @@ table.fs th{position:sticky;top:0;z-index:1;background:var(--head);padding:8px 8
 table.fs th:hover{color:var(--chip-text)}table.fs td{padding:6px 8px;border-top:1px solid var(--border);white-space:nowrap}table.fs tbody tr{cursor:pointer}table.fs tbody tr:hover td{background:var(--accent-soft)}
 table.fs tfoot td{position:sticky;bottom:0;background:var(--head);font-weight:800;border-top:2px solid var(--border)}table.fs .neg{color:var(--neg)}table.fs .pos{color:var(--pos)}table.fs .muted{color:var(--muted)}
 .fs-bar{display:inline-block;height:7px;border-radius:4px;margin-left:6px;vertical-align:middle;background:var(--neg);opacity:.75}.fs-bar.pos{background:var(--pos)}
-table.fs.mob .pc{display:none}table.fs.mob{font-size:12px}table.fs.mob td,table.fs.mob th{padding:6px 5px}table.fs.mob .fs-bar{display:none}
+table.fs.mob .pc{display:none}table.fs.mob{font-size:12px}table.fs.mob td,table.fs.mob th{padding:5px 5px;line-height:1.3}table.fs.mob .fs-bar{display:none}
 tbody.probe td{visibility:hidden;height:0;padding-top:0;padding-bottom:0;line-height:0;border:0}
 .tbl-wrap{overflow-anchor:none}#t td,table.blk td{overflow:hidden;text-overflow:ellipsis}
 .hint{color:var(--muted);font-size:12px;margin-top:10px}
@@ -490,9 +490,9 @@ table.m tbody.g tr:last-child td{border-bottom:1px solid var(--border);padding-b
         <div class="acts"><button class="btn" type="button" id="fs-copy">📋 복사 (엑셀용)</button><span class="sp"></span><button class="btn" type="button" id="fs-close">닫기</button></div>`);
       const cell = (r, k) => {
         if (k === 'f') return esc(r.f);
-        const u = mobile ? '' : '건';   // 휴대폰은 좁아서 '건' 생략
-        if (k === 'neg') return r.negN ? `${fmt(r.negN)}${u} / <b class="neg">${fmt(r.neg)}</b>` : '<span class="muted">—</span>';
-        if (k === 'pos') return r.posN ? `${fmt(r.posN)}${u} / <b class="pos">${sgn(r.pos)}</b>` : '<span class="muted">—</span>';
+        const sep = mobile ? '<br>' : '건 / ';   // 휴대폰은 좁아서 건수 아래에 수량
+        if (k === 'neg') return r.negN ? `${fmt(r.negN)}${sep}<b class="neg">${fmt(r.neg)}</b>` : '<span class="muted">—</span>';
+        if (k === 'pos') return r.posN ? `${fmt(r.posN)}${sep}<b class="pos">${sgn(r.pos)}</b>` : '<span class="muted">—</span>';
         if (k === 'sd') return `<b class="${r.sd < 0 ? 'neg' : r.sd > 0 ? 'pos' : ''}">${sgn(r.sd)}</b>`;
         if (k === 'done') return `${fmt(r.done)}<small class="muted"> / ${fmt(r.n)}</small>`;
         return fmt(r[k]);
