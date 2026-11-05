@@ -40,19 +40,22 @@ header h1{margin:0;font-size:22px;letter-spacing:-.3px}header .sub{color:var(--m
 .tbl-wrap{background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:auto;max-height:calc(100vh - var(--barh,60px) - 12px)}
 @supports (height:100dvh){.tbl-wrap{max-height:calc(100dvh - var(--barh,60px) - 12px)}}
 table{border-collapse:separate;border-spacing:0;width:100%;font-size:13px}
+#t:not(.pairs){position:sticky;top:0;z-index:3}#tft{position:sticky;bottom:0;z-index:2}table.blk{table-layout:fixed}.sp{height:0}
 thead th{position:sticky;top:0;background:var(--head);text-align:left;font-weight:700;padding:9px 10px;border-bottom:1px solid var(--border);white-space:nowrap;cursor:pointer;user-select:none;z-index:3}
 thead th.num{text-align:right}thead th:hover{color:var(--chip-text)}thead th .ar{font-size:10px;margin-left:3px;color:var(--chip-text)}
 td{padding:7px 10px;border-bottom:1px solid var(--border);vertical-align:top;white-space:nowrap}
 td.num{text-align:right;font-variant-numeric:tabular-nums}td.name{white-space:normal;min-width:200px;font-weight:600}
 td.code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;color:var(--muted)}
 td.isbn{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-weight:700}
-tbody.g{cursor:pointer}tbody.g:nth-of-type(even) td{background:var(--group)}tbody.g.done td{background:var(--done)}tbody.g:hover td{background:var(--accent-soft)}
+tbody.g{cursor:pointer}tbody.g.ev td{background:var(--group)}tbody.g.done td{background:var(--done)}tbody.g:hover td{background:var(--accent-soft)}
 td.diff{font-weight:800}td.diff.neg{color:var(--neg);background:var(--neg-soft)!important}td.diff.pos{color:var(--pos);background:var(--pos-soft)!important}td.diff.zero{color:var(--muted)}
-.chip{display:inline-block;padding:1px 8px;border-radius:999px;background:var(--chip);color:var(--chip-text);font-size:12px;font-weight:600}
-.tag{display:inline-block;margin-left:6px;padding:0 6px;border-radius:6px;font-size:11px;font-weight:700;vertical-align:1px}
+.chip{display:inline;padding:1px 8px;border-radius:999px;background:var(--chip);color:var(--chip-text);font-size:12px;font-weight:600}
+.tag{display:inline;margin-left:6px;padding:0 6px;border-radius:6px;font-size:11px;font-weight:700;vertical-align:1px}
 .tag.xs{background:#fde7ef;color:#b4235a;border:1px solid #f4a3c0}.tag.ph{background:#1f6feb;color:#fff}.tag.ok{background:var(--done-text);color:#fff}.tag.ex{background:var(--exc);color:#b45309;border:1px solid #f0bc3c}
 tfoot td{position:sticky;bottom:0;background:var(--head);font-weight:800;border-top:2px solid var(--border);z-index:2}
 .empty{padding:40px;text-align:center;color:var(--muted)}
+tbody.probe td{visibility:hidden;height:0;padding-top:0;padding-bottom:0;line-height:0;border:0}
+.tbl-wrap{overflow-anchor:none}td{overflow:hidden;text-overflow:ellipsis}
 .hint{color:var(--muted);font-size:12px;margin-top:10px}
 /* 상세 창 */
 .mbg{position:fixed;inset:0;background:rgba(15,17,21,.55);z-index:100;display:flex;align-items:flex-start;justify-content:center;padding:4vh 12px;overflow:auto}
@@ -91,7 +94,7 @@ table.pairs.m td.pwhy{padding-top:0}
 /* 휴대폰 표: 분야·상품코드·상품명·차이 + 서가 두 줄 */
 table.m{table-layout:fixed;font-size:12.5px}table.m th,table.m td{padding:6px 6px;overflow:hidden;text-overflow:ellipsis}
 table.m thead th:nth-child(1){width:19%}table.m thead th:nth-child(2){width:33%}table.m thead th:nth-child(4){width:14%}
-table.m .chip{font-size:11px;padding:1px 6px;max-width:100%;overflow:hidden;text-overflow:ellipsis;vertical-align:middle}
+table.m .chip{display:inline-block;font-size:11px;padding:1px 6px;max-width:100%;overflow:hidden;text-overflow:ellipsis;vertical-align:middle}
 table.m tfoot td{overflow:visible;white-space:nowrap}tbody.g{-webkit-tap-highlight-color:transparent}table.m td.isbn{font-size:12px}table.m td.mname{white-space:nowrap;font-weight:600}table.m .tag{margin-left:3px;padding:0 4px}
 table.m td.msh{padding:0 6px 3px;border-bottom:none;font-family:ui-monospace,Menlo,monospace;font-size:11px;color:var(--muted);white-space:nowrap}
 table.m .mshr{display:grid;grid-template-columns:1fr 1fr;column-gap:8px}table.m .mshr span{overflow:hidden;text-overflow:ellipsis}
@@ -105,17 +108,19 @@ table.m tbody.g tr:last-child td{border-bottom:1px solid var(--border);padding-b
 .banner{margin:10px 0 0;padding:10px 12px;border-radius:10px;background:var(--exc);border:1px solid #f0bc3c;font-size:13px}
 @media (max-width:700px){.d-shelves{grid-template-columns:1fr 1fr}.bar{position:static}.wrap{padding:12px 10px 30px}header h1{font-size:18px}.card .v{font-size:17px}.bar input[type=search]{max-width:none}.count{width:100%;margin-left:0}
   .d-top{flex-direction:column}.d-cover{width:100%;height:220px}}
-@media print{.bar,.hint,.noprint,.banner{display:none!important}body{background:#fff}.wrap{max-width:none;padding:0}.tbl-wrap{border:none;overflow:visible;max-height:none}thead th,tfoot td{position:static}
+@media print{.bar,.hint,.noprint,.banner{display:none!important}body{background:#fff}.wrap{max-width:none;padding:0}.tbl-wrap{border:none;overflow:visible;max-height:none}thead th,tfoot td,#t,#tft{position:static}
   td,th{padding:4px 6px;font-size:11px}tbody.g{break-inside:avoid}.card{padding:6px 10px}.card .v{font-size:16px}}
 `;
 
   // 보고서 페이지 안에서 돌아가는 코드. 문자열로 직렬화해 넣으므로 바깥 변수를 쓰면 안 된다.
   function pageMain() {
     // 지금 이 순간의 문서 = 아직 아무것도 그리지 않은 원본. '사진 포함 저장' 때 사진 칸만 바꿔 끼워 새 파일로 만든다.
-    const PRISTINE = '<!doctype html>\n' + document.documentElement.outerHTML;
     const D = JSON.parse(document.getElementById('sa-data').textContent);
     const items = D.items, META = D.meta || {};
     let PH = JSON.parse(document.getElementById('sa-photos').textContent || '{}');
+    // 사진 JSON 은 수십 MB 일 수 있다 — 원본 복사본(PRISTINE)에는 빼고 둔다(저장할 때 어차피 새로 끼운다)
+    document.getElementById('sa-photos').textContent = '';
+    const PRISTINE = '<!doctype html>\n' + document.documentElement.outerHTML;
     if (!PH.photos) PH = { photos: {}, updatedAt: 0 };
     if (!PH.checked) PH.checked = {};   // 확인완료: { isbn: 시각 } — 사진이 없어도 '확인' 버튼으로 표시
     const $ = (s, r) => (r || document).querySelector(s);
@@ -221,7 +226,7 @@ table.m tbody.g tr:last-child td{border-bottom:1px solid var(--border);padding-b
       } catch (e) {
         SY.err = navigator.onLine ? (e.message || '전송 실패') : '인터넷 연결 없음';
         clearTimeout(SY.retry); SY.retry = setTimeout(flush, 15000);
-      } finally { SY.busy = false; syncUi(); refreshSaveBtn(); render(); }
+      } finally { SY.busy = false; syncUi(); refreshSaveBtn(); render(true); }
     }
     async function pull() {
       if (!SY.on || SY.dead || SY.busy) return;
@@ -242,7 +247,7 @@ table.m tbody.g tr:last-child td{border-bottom:1px solid var(--border);padding-b
         }
         for (const [id, p] of Object.entries(PH.photos)) if (!p.synced && !next[id]) next[id] = p;
         PH.checked = checked; PH.photos = next; SY.last = Date.now(); SY.err = '';
-        persist(); render(); refreshSaveBtn();
+        persist(); render(true); refreshSaveBtn();
       } catch (_) { SY.err = navigator.onLine ? '웹하드에 연결하지 못함' : '인터넷 연결 없음'; }
       syncUi();
     }
@@ -267,13 +272,18 @@ table.m tbody.g tr:last-child td{border-bottom:1px solid var(--border);padding-b
       const key = 'id="sa-photos">';
       const i = PRISTINE.indexOf(key); const j = PRISTINE.indexOf('<' + '/script>', i);   // 글자를 나눠 써야 이 스크립트가 HTML 안에서 끊기지 않는다
       if (i < 0 || j < 0) return toast('저장할 수 없습니다(파일 구조 오류)', 'err');
-      const json = JSON.stringify(PH).replace(/</g, '\\u003c');
+      // 웹하드에 이미 올라간 사진은 파일에 넣지 않는다(열 때 웹하드에서 불러옴) — 사진 한 장이 240KB 라 수백 장이면 파일이 수십 MB 가 되어 여는 데 1분 가까이 걸린다
+      let skipped = 0; const photos = {};
+      for (const [id, p] of Object.entries(PH.photos)) {
+        if (SY.on && !SY.dead && p.synced && p.files && p.files[0] && p.d) { photos[id] = { ...p, d: undefined }; skipped++; } else photos[id] = p;
+      }
+      const json = JSON.stringify({ ...PH, photos }).replace(/</g, '\\u003c');
       const html = PRISTINE.slice(0, i + key.length) + json + PRISTINE.slice(j);
       const url = URL.createObjectURL(new Blob([html], { type: 'text/html;charset=utf-8' }));
       const a = document.createElement('a'); a.href = url; a.download = (META.fileBase || '재고조사오차') + '.html';
       document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 5000);
       dirty = false; refreshSaveBtn();
-      toast(`사진 ${nPhotos()}장 · 확인 ${items.filter((x) => isDone(x.i)).length}건을 넣어 새 파일로 저장했습니다 — 앞으로는 그 파일을 여세요`, 'ok');
+      toast(`사진 ${nPhotos()}장 · 확인 ${items.filter((x) => isDone(x.i)).length}건을 넣어 새 파일로 저장했습니다 — 앞으로는 그 파일을 여세요${skipped ? ` (웹하드에 올라간 사진 ${skipped}장은 파일을 가볍게 하려고 웹하드에서 불러옵니다)` : ''}`, 'ok');
     }
 
     // 사진 ZIP 받기: 사진 한 장이 여러 항목에 들어가 있으면 항목마다 'ISBN.jpg'(같은 ISBN 이 또 있으면 'ISBN_2.jpg')로,
@@ -369,8 +379,19 @@ table.m tbody.g tr:last-child td{border-bottom:1px solid var(--border);padding-b
         return { img: im, data: c.toDataURL('image/jpeg', 0.8) };
       } finally { setTimeout(() => URL.revokeObjectURL(url), 1000); }
     }
+    // 바코드 인식 모듈(ZXing 330KB + isbn.js)은 파일 안에 글자로만 들어 있다가 처음 쓸 때 실행한다 — 열 때마다 읽어 들이지 않게
+    const hasLibs = () => !!(window.ISBN || (document.getElementById('lib-zxing') && document.getElementById('lib-isbn')));
+    function ensureLibs() {
+      if (window.ISBN) return true;
+      for (const id of ['lib-zxing', 'lib-isbn']) {
+        const el = document.getElementById(id); if (!el) return false;
+        (0, eval)(el.textContent);   // 전역에서 실행(window.ZXing · window.ISBN 을 만든다)
+        el.remove();
+      }
+      return !!window.ISBN;
+    }
     async function barcodes(img) {
-      if (!window.ISBN) return [];
+      if (!ensureLibs()) return [];
       try { const found = await window.ISBN.scanMulti(img); return [...new Set(found.map((f) => window.ISBN.clean(f.code)))]; } catch (_) { return []; }
     }
     function camera(onFile) {
@@ -466,11 +487,13 @@ table.m tbody.g tr:last-child td{border-bottom:1px solid var(--border);padding-b
         return `<div class="pside" data-oi="${esc(o.i)}" title="${esc(o.n)}"><div class="pn"><b>${esc(mobile ? cut(o.n, 18) : o.n)}${pc ? ` <span class="tag ph">📷 ${pc}</span>` : ''}${done && !pc ? ' <span class="tag ok">✓</span>' : ''}</b><small>${esc(o.i)}${where ? ' · ' + esc(where) : ' · 서가 없음'}</small></div>
           <div class="pq"><span class="diff ${o.sd < 0 ? 'neg' : 'pos'}">${sgn(o.sd)}</span>전산 ${fmt(o.s)} · 스캔 ${fmt(o.ss)}</div></div>`;
       };
-      const html = list.map((p) => `<tbody class="g${isDone(p.P.i) && isDone(p.M.i) ? ' done' : ''}" data-i="${esc(p.P.i)}"><tr>
+      const html = list.map((p, k) => `<tbody class="g${k % 2 ? ' ev' : ''}${isDone(p.P.i) && isDone(p.M.i) ? ' done' : ''}" data-i="${esc(p.P.i)}"><tr>
           <td class="pg"><span class="pgrade g${p.grade}">${esc(p.label)}</span></td><td>${side(p.P)}</td><td class="pm">↔</td><td>${side(p.M)}</td>${mobile ? '' : `<td class="pwhy">${esc(p.why)}</td>`}</tr>
           ${mobile ? `<tr><td></td><td class="pwhy" colspan="3">${esc(p.why)}</td></tr>` : ''}</tbody>`).join('');
-      document.querySelectorAll('#t > tbody.g').forEach((g) => g.remove());
-      if (list.length) $('#tf').insertAdjacentHTML('beforebegin', html);
+      document.querySelectorAll('#t > tbody').forEach((g) => g.remove());
+      blocks.querySelectorAll('table.blk').forEach((g) => g.remove()); WIN.parts = []; WIN.a = WIN.b = 0; setSpacers();
+      for (const t of [tbl, tft]) { const cg = t.querySelector(':scope > colgroup'); if (cg) cg.remove(); }
+      if (list.length) tbl.insertAdjacentHTML('beforeend', html);
       $('#empty').style.display = list.length ? 'none' : '';
       $('#tf').innerHTML = list.length ? `<tr><td colspan="${mobile ? 4 : 5}">교차 스캔 의심 · ${fmt(list.length)}쌍 — 책을 누르면 상세</td></tr>` : '';
       const total = items.filter(excOk).length;
@@ -479,21 +502,150 @@ table.m tbody.g tr:last-child td{border-bottom:1px solid var(--border);padding-b
       $('#f-field-lbl').textContent = st.fields.size ? `${st.fields.size}개` : '전체';
       cards();
     }
-    function render() {
+    // ── 표 창(window) 그리기 ─────────────────────────────
+    // 2,000줄이 넘는 표를 통째로 DOM 에 두면 여는 데 PC 4초 · 휴대폰 10초가 걸리고, 그 뒤 스크롤도 한 칸에 100ms 씩 멈춘다
+    //  (크롬은 표 한 줄 배치에 0.5ms 안팎을 쓰고, 큰 표는 줄을 붙일 때마다 표 전체를 다시 배치한다).
+    //  → 머리글(#t) · 합계(#tft) · 항목(STEP 건씩 작은 표 table.blk) 으로 나눈다. 화면 근처(위아래 KEEP 화면) 블록만 두고,
+    //    나머지는 위·아래 빈 칸(spacer)이 그 높이만큼 자리를 잡는다. 스크롤하면 한 프레임에 블록 하나씩 붙이고 멀어진 블록은 뗀다.
+    //    한 번 그린 줄의 높이는 기억해 두어 자리가 흔들리지 않는다.
+    //  열 너비: 표가 여럿이라 같은 <colgroup>(px) 을 모두에 넣어 맞춘다 — 제일 긴 글(probe 줄)과 첫 블록으로 자동 배치해 잰 값.
+    //  합계 · 건수 · 정렬 · 필터는 전체 기준 그대로. 짝 표(교차 의심만)는 수가 적어 예전처럼 #t 한 표에 그린다. 인쇄 때는 한 표로 전부.
+    const STEP = 20, KEEP = 1.5, KEEP_IDLE = 4;    // 블록 크기(건) · 스크롤 중엔 화면 몇 개 밖까지 · 쉬는 동안엔 몇 개까지 미리(그 밖은 뗀다)
+    const WIN = { parts: [], h: [], a: 0, b: 0, est: 34, cols: 12, all: false, pend: false, cg: '', mobile: false, probe: '' };
+    const wrap = $('.tbl-wrap'), tbl = $('#t'), blocks = $('#blocks'), tft = $('#tft');
+    const sumH = (a, b) => { let s = 0; for (let i = a; i < b; i++) s += WIN.h[i] || WIN.est; return s; };
+    const spTop = $('#sp-top'), spBot = $('#sp-bot');
+    let lastSp = '';
+    function setSpacers() {
+      const t = sumH(0, WIN.a) + 'px', bt = sumH(WIN.b, WIN.parts.length) + 'px', k = t + '|' + bt;
+      if (k === lastSp) return; lastSp = k; spTop.style.height = t; spBot.style.height = bt;
+    }
+    // 그려진 [a,b) 줄 높이를 기억(읽기만 — DOM 을 다 바꾼 뒤 한 번)
+    function measure() {
+      let i = WIN.a;
+      for (const blk of blocks.querySelectorAll('table.blk')) for (const g of blk.tBodies) { WIN.h[i++] = g.offsetHeight; }
+      if (!WIN.estOk && i - WIN.a >= 20) { WIN.est = sumH(WIN.a, i) / (i - WIN.a); WIN.estOk = true; }
+    }
+    const blockHtml = (from, to) => `<table class="blk${WIN.mobile ? ' m' : ''}" data-a="${from}" data-b="${to}">${WIN.cg}${WIN.parts.slice(from, to).join('')}</table>`;
+    function insertRows(from, to, atTop) {
+      if (atTop) spTop.insertAdjacentHTML('afterend', blockHtml(from, to)); else spBot.insertAdjacentHTML('beforebegin', blockHtml(from, to));
+    }
+    function dropRows(from, to) {   // [from,to) 안에 든 블록을 뗀다(블록 경계 = STEP 배수)
+      for (const blk of [...blocks.querySelectorAll('table.blk')]) { const a = +blk.dataset.a, b = +blk.dataset.b; if (a >= from && b <= to) blk.remove(); }
+    }
+    const alignDown = (i) => i - (i % STEP);
+    // 한 번 부를 때 블록 하나만 붙인다 — 한 프레임에 몰아 붙이면 그 프레임이 멈춘다. 더 필요하면 다음 프레임에 또.
+    function winUpdate() {
+      WIN.pend = false;
+      if (WIN.all || !WIN.parts.length || $('#t').classList.contains('pairs')) return;
+      const n = WIN.parts.length, top = wrap.scrollTop, vh = Math.min(wrap.clientHeight || 600, window.innerHeight || 600), head = tbl.offsetHeight;
+      const lo = top - vh * KEEP, hi = top + vh * (KEEP + 1);   // 이 범위에 걸치는 줄을 둔다
+      // 그려진 덩어리에서 아주 멀리 갔으면(스크롤 막대를 끌어 한참 아래로) 화면 바로 위에서 새로 시작
+      const y0 = head + sumH(0, WIN.a), y1 = y0 + sumH(WIN.a, WIN.b);
+      if (WIN.b > WIN.a && (y1 < lo - vh || y0 > hi + vh)) {
+        dropRows(WIN.a, WIN.b); let i = 0, y = head; while (i < n && y + (WIN.h[i] || WIN.est) < top - vh * 0.3) { y += WIN.h[i] || WIN.est; i++; }
+        WIN.a = WIN.b = alignDown(i);
+      }
+      const yb = head + sumH(0, WIN.b), ya = head + sumH(0, WIN.a);
+      let more = false, pre = null;
+      // 화면에 빈 데가 있는 쪽부터, 그다음 여유분 — 아래쪽 먼저. DOM 바꾸기를 모두 끝낸 뒤 높이를 한 번만 읽는다.
+      const needB = WIN.b < n && yb < hi, needA = WIN.a > 0 && ya > lo;
+      const urgentA = WIN.a > 0 && ya > top, urgentB = WIN.b < n && yb < top + vh;
+      if ((needB && !urgentA) || urgentB) {
+        const to = Math.min(n, WIN.b + STEP); insertRows(WIN.b, to, false); WIN.b = to; more = true;
+      } else if (needA) {
+        // 위에 붙이기: 추정 높이와 실제가 다르면 그만큼 스크롤 위치를 맞춰 보던 줄이 안 움직이게(아래에서)
+        const from = Math.max(0, WIN.a - STEP);
+        pre = { from, to: WIN.a, before: sumH(from, WIN.a) };
+        insertRows(from, WIN.a, true); WIN.a = from; more = true;
+      }
+      // 멀어진 블록 떼기(싸다) — 쉬는 동안 미리 그려 둔 범위(KEEP_IDLE) 밖만
+      const lo2 = top - vh * (KEEP_IDLE + 1), hi2 = top + vh * (KEEP_IDLE + 2);
+      let i = WIN.a, y = head + sumH(0, WIN.a);
+      while (i + STEP < WIN.b && y + sumH(i, i + STEP) < lo2) { y += sumH(i, i + STEP); i += STEP; }
+      if (i > WIN.a) { dropRows(WIN.a, i); WIN.a = i; }
+      let j = WIN.b, yj = head + sumH(0, WIN.b);
+      while (j - STEP > WIN.a && yj - sumH(alignDown(j - 1), j) > hi2) { yj -= sumH(alignDown(j - 1), j); j = alignDown(j - 1); }
+      if (j < WIN.b) { dropRows(j, WIN.b); WIN.b = j; }
+      setSpacers();
+      measure();
+      if (pre) { const d = sumH(pre.from, pre.to) - pre.before; if (d) wrap.scrollTop += d; }
+      if (more || (WIN.b < n && head + sumH(0, WIN.b) < hi) || (WIN.a > 0 && head + sumH(0, WIN.a) > lo)) winSoon();
+      else idleSoon();   // 급한 건 끝 — 쉬는 동안 더 멀리까지 미리 그려 둔다(다음 스크롤 때 덜 붙이게)
+    }
+    const winSoon = () => { if (!WIN.pend) { WIN.pend = true; requestAnimationFrame(winUpdate); } };
+    // 쉬는 동안 한 블록씩: 위아래 KEEP_IDLE 화면까지
+    const ric = window.requestIdleCallback ? (f) => window.requestIdleCallback(f, { timeout: 600 }) : (f) => setTimeout(f, 120);
+    function idleSoon() { if (!WIN.idle) WIN.idle = ric(winIdle); }
+    function winIdle() {
+      WIN.idle = 0;
+      if (WIN.all || WIN.pend || !WIN.parts.length || $('#t').classList.contains('pairs')) return;
+      const n = WIN.parts.length, top = wrap.scrollTop, vh = Math.min(wrap.clientHeight || 600, window.innerHeight || 600), head = tbl.offsetHeight;
+      const yb = head + sumH(0, WIN.b), ya = head + sumH(0, WIN.a);
+      const needB = WIN.b < n && yb < top + vh * (KEEP_IDLE + 1), needA = WIN.a > 0 && ya > top - vh * KEEP_IDLE;
+      if (!needB && !needA) return;
+      let pre = null;
+      if (needB && (!needA || yb - (top + vh) <= top - ya)) { const to = Math.min(n, WIN.b + STEP); insertRows(WIN.b, to, false); WIN.b = to; }
+      else { const from = Math.max(0, WIN.a - STEP); pre = { from, to: WIN.a, before: sumH(from, WIN.a) }; insertRows(from, WIN.a, true); WIN.a = from; }
+      setSpacers(); measure();
+      if (pre) { const d = sumH(pre.from, pre.to) - pre.before; if (d) wrap.scrollTop += d; }
+      idleSoon();
+    }
+    wrap.addEventListener('scroll', winSoon, { passive: true });
+    // 열 너비: 임시 표(머리글 + probe 줄 + 첫 블록)를 자동 배치로 재서 px 로 고정 — 머리글 · 합계 · 모든 블록에 같은 <colgroup>
+    function lockWidths() {
+      const tmp = document.createElement('table'); tmp.className = WIN.mobile ? 'm' : ''; tmp.style.cssText = `position:absolute;visibility:hidden;left:0;top:0;width:${wrap.clientWidth}px`;
+      tmp.innerHTML = $('#th').outerHTML.replace('id="th"', '') + WIN.probe + WIN.parts.slice(0, Math.min(WIN.parts.length, 40)).join('');
+      wrap.appendChild(tmp);
+      const w = [...tmp.tHead.rows[0].cells].map((c) => Math.round(c.getBoundingClientRect().width * 100) / 100);
+      tmp.remove();
+      WIN.cg = '<colgroup>' + w.map((v) => `<col style="width:${v}px">`).join('') + '</colgroup>';
+      for (const t of [tbl, tft, ...blocks.querySelectorAll('table.blk')]) { const old = t.querySelector(':scope > colgroup'); if (old) old.remove(); t.insertAdjacentHTML('afterbegin', WIN.cg); }
+    }
+    window.addEventListener('resize', () => { winSoon(); if (WIN.parts.length && !$('#t').classList.contains('pairs')) { clearTimeout(WIN.rl); WIN.rl = setTimeout(lockWidths, 150); } });
+    // 창 새로 시작(keep: 지금 보던 자리 그대로 — 동기화 · 임시 저장 반영 때)
+    function winStart(parts, probe, mobile, keep) {
+      const n = parts.length, oldA = WIN.a, oldB = WIN.b, oldTop = wrap.scrollTop;
+      blocks.querySelectorAll('table.blk').forEach((g) => g.remove());
+      document.querySelectorAll('#t > tbody').forEach((g) => g.remove());   // 짝 표에서 돌아올 때
+      WIN.parts = parts; WIN.cols = mobile ? 4 : 12; WIN.all = false; WIN.mobile = mobile; WIN.probe = probe; lastSp = '';
+      tbl.classList.toggle('m', mobile); tft.classList.toggle('m', mobile);
+      if (!keep || n !== WIN.h.length) { WIN.h = new Array(n); WIN.a = WIN.b = 0; WIN.estOk = false; }
+      if (!n) { setSpacers(); return; }
+      lockWidths();
+      const a = keep ? Math.min(alignDown(oldA), alignDown(n)) : 0, b = keep ? Math.min(Math.max(oldB, a + STEP * 3), n) : Math.min(n, STEP * 3);
+      for (let k = a; k < b; k += STEP) insertRows(k, Math.min(b, k + STEP), false);
+      WIN.a = a; WIN.b = b;
+      setSpacers(); measure(); setSpacers();
+      wrap.scrollTop = keep ? oldTop : 0;
+      winSoon();
+    }
+    // 인쇄: 한 표(#t)에 전부 그린다(빈 칸 없이, 머리글이 쪽마다 반복되게) → 끝나면 다시 창으로
+    window.addEventListener('beforeprint', () => {
+      if (WIN.all || !WIN.parts.length || $('#t').classList.contains('pairs')) return;
+      blocks.style.display = 'none'; tbl.insertAdjacentHTML('beforeend', WIN.parts.join('')); WIN.all = true;
+    });
+    window.addEventListener('afterprint', () => { if (WIN.all) { document.querySelectorAll('#t > tbody').forEach((g) => g.remove()); blocks.style.display = ''; WIN.all = false; render(true); } });
+    function render(keep) {
       const rows = view(), mobile = MQ.matches;
       if (st.cross === 'only') return renderPairs(rows, mobile);
       $('#t').classList.remove('pairs');
       const head = mobile ? HEAD_M : HEAD_PC;
       $('#t').classList.toggle('m', mobile);
       $('#th').innerHTML = '<tr>' + head.map(([k, label, num]) => `<th${k ? ` data-k="${k}"` : ''}${num ? ' class="num"' : ''}>${label}${k ? `<span class="ar">${st.sort.k === k ? (st.sort.dir > 0 ? '▲' : '▼') : ''}</span>` : ''}</th>`).join('') + '</tr>';
-      let html = '', sSys = 0, sQty = 0, sSum = 0, sDiff = 0;
+      const parts = []; let html = '', sSys = 0, sQty = 0, sSum = 0, sDiff = 0;
+      const L = { f: '', i: '', p: '', c0: '', c1: '', c2: '', c3: '', q: '', s: '', ss: '', sd: '' };   // 열마다 제일 긴 글(너비 재기용)
+      const longer = (k, v) => { v = String(v == null ? '' : v); if (v.length > L[k].length) L[k] = v; };
       for (const { x, sh } of rows) {
+        html = '';
+        longer('f', x.f); longer('i', x.i); longer('p', x.p); longer('s', fmt(x.s)); longer('ss', fmt(x.ss)); longer('sd', sgn(x.sd));
+        for (const s2 of sh) { longer('c0', s2[0]); longer('c1', s2[1]); longer('c2', s2[2]); longer('c3', s2[3]); longer('q', fmt(s2[4])); }
         const dc = x.sd < 0 ? 'neg' : x.sd > 0 ? 'pos' : 'zero';
         const pc = photoCount(x.i), done = isDone(x.i);
         const xtip = x.x ? x.x.map((c) => { const o = byIsbn.get(c[0]); return `${o ? o.n : c[0]} ${o ? sgn(o.sd) : ''} (${c[2]})`; }).join('\n') : '';
         const tags = `${x.x ? `<span class="tag xs" title="교차 스캔 의심 — 같이 확인할 책\n${esc(xtip)}">🔀</span>` : ''}${pc ? `<span class="tag ph">📷 ${pc}</span>` : ''}${done && !pc ? '<span class="tag ok">✓</span>' : ''}${x.e ? '<span class="tag ex">예외</span>' : ''}`;
         sSys += x.s; sSum += x.ss; sDiff += x.sd;
-        html += `<tbody class="g${done ? ' done' : ''}" data-i="${esc(x.i)}">`;
+        html += `<tbody class="g${parts.length % 2 ? ' ev' : ''}${done ? ' done' : ''}" data-i="${esc(x.i)}">`;
         if (mobile) {
           // 1줄: 분야 · 상품코드 · 상품명(10자 넘으면 …) · 차이 / 2~3줄: 서가 한 줄에 두 곳씩(최대 4곳, 넘치면 '외 N곳')
           //  5곳 이상이면 3곳까지 보이고 넷째 칸에 '외 N곳' — 세 줄을 넘지 않게
@@ -519,10 +671,14 @@ table.m tbody.g tr:last-child td{border-bottom:1px solid var(--border);padding-b
           });
         }
         html += '</tbody>';
+        parts.push(html);
       }
-      // 항목마다 <tbody class="g"> 하나(줄무늬·강조·클릭이 항목 단위로). 이전 묶음을 지우고 tfoot 앞에 끼운다.
-      document.querySelectorAll('#t > tbody.g').forEach((g) => g.remove());
-      if (rows.length) $('#tf').insertAdjacentHTML('beforebegin', html);
+      // 항목마다 <tbody class="g"> 하나(줄무늬·강조·클릭이 항목 단위로). 화면 근처만 DOM 에 둔다(위 '표 창').
+      // probe 줄: 열마다 제일 긴 글 — 열 너비를 이걸로 재서 고정하면 뒤쪽 줄이 와도 열이 안 움직인다(보이지 않고 높이 0)
+      const probe = mobile
+        ? `<tbody class="probe"><tr><td><span class="chip">${esc(cut(L.f, 6))}</span></td><td class="isbn">${esc(L.i)}</td><td></td><td class="num diff">${esc(L.sd)}</td></tr></tbody>`
+        : `<tbody class="probe"><tr><td><span class="chip">${esc(L.f)}</span></td><td class="isbn">${esc(L.i)}</td><td></td><td>${esc(L.p)}</td><td class="code">${esc(L.c0)}</td><td class="code">${esc(L.c1)}</td><td class="code">${esc(L.c2)}</td><td class="code">${esc(L.c3)}</td><td class="num">${esc(L.q)}</td><td class="num">${esc(L.s)}</td><td class="num">${esc(L.ss)}</td><td class="num diff">${esc(L.sd)}</td></tr></tbody>`;
+      winStart(parts, probe, mobile, keep);
       $('#empty').style.display = rows.length ? 'none' : '';
       const dcls = sDiff < 0 ? 'neg' : sDiff > 0 ? 'pos' : 'zero';
       $('#tf').innerHTML = !rows.length ? '' : mobile
@@ -645,7 +801,7 @@ table.m tbody.g tr:last-child td{border-bottom:1px solid var(--border);padding-b
     function zoom(src) { const z = document.createElement('div'); z.className = 'zoom'; z.innerHTML = `<img src="${src}" alt="">`; z.addEventListener('click', () => z.remove()); document.body.appendChild(z); }
     // 바코드로 찾기: 카메라 → 인식된 ISBN 중 목록에 있는 것 열기
     function scanFind() {
-      if (!window.ISBN) return toast('이 파일에는 바코드 인식 모듈이 없습니다', 'err');
+      if (!hasLibs()) return toast('이 파일에는 바코드 인식 모듈이 없습니다', 'err');
       camera(async (file) => {
         toast('바코드 인식 중…');
         try {
@@ -687,8 +843,9 @@ table.m tbody.g tr:last-child td{border-bottom:1px solid var(--border);padding-b
       if (st.sort.k === k) st.sort.dir = -st.sort.dir; else st.sort = { k, dir: 1 };
       render();
     });
-    MQ.addEventListener ? MQ.addEventListener('change', render) : MQ.addListener(render);   // 화면 돌리면 표 모양 바꿈
-    $('#t').addEventListener('click', (e) => {
+    const reflow = () => render(true);
+    MQ.addEventListener ? MQ.addEventListener('change', reflow) : MQ.addListener(reflow);   // 화면 돌리면 표 모양 바꿈
+    wrap.addEventListener('click', (e) => {
       const side = e.target.closest('[data-oi]'); if (side) { openDetail(side.dataset.oi); return; }   // 짝 표: 누른 쪽 책
       if ($('#t').classList.contains('pairs')) return;
       const g = e.target.closest('tbody.g'); if (g) openDetail(g.dataset.i);
@@ -701,16 +858,18 @@ table.m tbody.g tr:last-child td{border-bottom:1px solid var(--border);padding-b
     refreshSaveBtn(); render(); syncUi();
     // 브라우저 임시 저장에 더 최근 것이 있으면(닫기 전에 못 보낸 것 등) 불러온 뒤 → 웹하드 최신 상태 → 남은 것 보내기
     idbOpen().then(async (ok) => {
+      let changedPH = false;
       if (ok) {
         const saved = await idbGet(META.rid);
         if (saved && saved.photos && (saved.updatedAt || 0) > (PH.updatedAt || 0)) {
-          PH = saved; if (!PH.checked) PH.checked = {}; if (!Array.isArray(PH.q)) PH.q = []; dirty = true;
+          PH = saved; if (!PH.checked) PH.checked = {}; if (!Array.isArray(PH.q)) PH.q = []; dirty = true; changedPH = true;
           if (!SY.on) toast(`이 브라우저에 임시 저장된 사진 ${nPhotos()}장을 불러왔습니다 — 💾 저장으로 파일에 넣으세요`);
         }
       } else if (!SY.on) {
         $('#store-note').textContent = '이 브라우저에서는 임시 저장이 안 됩니다 — 사진을 찍은 뒤 꼭 💾 저장을 누르세요.'; $('#store-note').style.display = '';
       }
-      refreshSaveBtn(); render();
+      // 표는 위에서 이미 그렸다 — 임시 저장분이 반영됐을 때만 다시(표를 두 번 그리면 여는 시간이 두 배)
+      if (changedPH) { refreshSaveBtn(); render(true); }
       if (SY.on) { await pull(); flush(); setInterval(() => { if (!document.hidden && !PH.q.length) pull(); }, 60000); }
     });
   }
@@ -726,7 +885,8 @@ table.m tbody.g tr:last-child td{border-bottom:1px solid var(--border);padding-b
   function build(meta, items, libs) {
     const rid = 'r' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);   // 이 보고서 식별자(브라우저 임시 저장 열쇠)
     const data = { items, meta: { ...meta, rid } };
-    const lib = libs && libs.zxing && libs.isbn ? `<script>${safeJs(libs.zxing)}</script>\n<script>${safeJs(libs.isbn)}</script>` : '';
+    // type="text/plain" — 브라우저가 실행하지 않고 글자로만 둔다. 📷 바코드를 처음 쓸 때 pageMain 의 ensureLibs 가 실행한다.
+    const lib = libs && libs.zxing && libs.isbn ? `<script type="text/plain" id="lib-zxing">${safeJs(libs.zxing)}</script>\n<script type="text/plain" id="lib-isbn">${safeJs(libs.isbn)}</script>` : '';
     return `<!doctype html>
 <html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${escHtml(meta.title)}</title><style>${CSS}</style></head>
@@ -753,9 +913,9 @@ table.m tbody.g tr:last-child td{border-bottom:1px solid var(--border);padding-b
   <button type="button" class="btn noprint" id="f-print">🖨️ 인쇄</button>
   <span class="count" id="count"></span>
 </div>
-<div class="tbl-wrap"><table id="t">
-<thead id="th"></thead>
-<tfoot id="tf"></tfoot></table>
+<div class="tbl-wrap"><table id="t"><thead id="th"></thead></table>
+<div id="blocks"><div class="sp" id="sp-top"></div><div class="sp" id="sp-bot"></div></div>
+<table id="tft"><tfoot id="tf"></tfoot></table>
 <div class="empty" id="empty" style="display:none">조건에 맞는 항목이 없습니다.</div></div>
 
 </div>
