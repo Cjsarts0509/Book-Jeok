@@ -61,7 +61,7 @@ table.fs th{position:sticky;top:0;z-index:1;background:var(--head);padding:8px 8
 table.fs th:hover{color:var(--chip-text)}table.fs td{padding:6px 8px;border-top:1px solid var(--border);white-space:nowrap}table.fs tbody tr{cursor:pointer}table.fs tbody tr:hover td{background:var(--accent-soft)}
 table.fs tfoot td{position:sticky;bottom:0;background:var(--head);font-weight:800;border-top:2px solid var(--border)}table.fs .neg{color:var(--neg)}table.fs .pos{color:var(--pos)}table.fs .muted{color:var(--muted)}
 .fs-bar{display:inline-block;height:7px;border-radius:4px;margin-left:6px;vertical-align:middle;background:var(--neg);opacity:.75}.fs-bar.pos{background:var(--pos)}
-table.fs.m .pc{display:none}table.fs.m{font-size:12px}table.fs.m td,table.fs.m th{padding:6px 5px}table.fs.m .fs-bar{display:none}
+table.fs.mob .pc{display:none}table.fs.mob{font-size:12px}table.fs.mob td,table.fs.mob th{padding:6px 5px}table.fs.mob .fs-bar{display:none}
 tbody.probe td{visibility:hidden;height:0;padding-top:0;padding-bottom:0;line-height:0;border:0}
 .tbl-wrap{overflow-anchor:none}#t td,table.blk td{overflow:hidden;text-overflow:ellipsis}
 .hint{color:var(--muted);font-size:12px;margin-top:10px}
@@ -485,7 +485,7 @@ table.m tbody.g tr:last-child td{border-bottom:1px solid var(--border);padding-b
     function openFieldStats() {
       const mobile = MQ.matches;
       const m = modal(`<h3>📊 분야별 통계 <small id="fs-sub" style="font-weight:400;color:var(--muted);font-size:12px"></small></h3>
-        <div class="fs-wrap"><table class="fs${mobile ? ' m' : ''}" id="fs-t"><thead></thead><tbody></tbody><tfoot></tfoot></table></div>
+        <div class="fs-wrap"><table class="fs${mobile ? ' mob' : ''}" id="fs-t"><thead></thead><tbody></tbody><tfoot></tfoot></table></div>
         <div class="hint">분야를 누르면 그 분야만 표에 보입니다 · 열 제목을 누르면 정렬 · 부족·초과는 「건수 / 수량」</div>
         <div class="acts"><button class="btn" type="button" id="fs-copy">📋 복사 (엑셀용)</button><span class="sp"></span><button class="btn" type="button" id="fs-close">닫기</button></div>`);
       const cell = (r, k) => {
