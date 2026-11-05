@@ -3690,11 +3690,37 @@ const App = (() => {
     }
 
     const num = (v) => { const n = Number(String(v == null ? '' : v).replace(/[^\d.-]/g, '')); return isNaN(n) ? 0 : n; };
+    // 첫 시트를 2차원 배열로. 재고 시스템이 내보낸 파일은 '표 범위'(dimension, !ref)가 실제보다 작게 적힌 것이 있어
+    //  (예: 수십만 줄인데 A1:J1) 그대로 읽으면 머리글만 나와 "오차 없음"이 된다 → 셀을 직접 훑어 진짜 범위를 구한다.
+    //  시트가 여럿이면 'ISBN' 머리글이 있는 첫 시트를 고른다.
     function readSheet(XLSX, buf) {
       const wb = XLSX.read(buf, { type: 'array' });
-      const ws = wb.Sheets[wb.SheetNames[0]];
-      return XLSX.utils.sheet_to_json(ws, { header: 1, blankrows: false, defval: '' });
+      const pick = (ws) => {
+        if (!ws) return null;
+        const ref = ws['!ref'] ? XLSX.utils.decode_range(ws['!ref']) : { s: { r: 0, c: 0 }, e: { r: 0, c: 0 } };
+        let maxR = ref.e.r, maxC = ref.e.c;
+        for (const k in ws) { if (k.charCodeAt(0) === 33) continue; const c = XLSX.utils.decode_cell(k); if (c.r > maxR) maxR = c.r; if (c.c > maxC) maxC = c.c; }
+        const range = { s: { r: 0, c: 0 }, e: { r: maxR, c: maxC } };
+        return XLSX.utils.sheet_to_json(ws, { header: 1, range, blankrows: false, defval: '' });
+      };
+      let rows = null;
+      for (const n of wb.SheetNames) {
+        const r = pick(wb.Sheets[n]); if (!r || !r.length) continue;
+        if (!rows) rows = r;
+        if (r.slice(0, 30).some((row) => row.some((c) => String(c).trim().toUpperCase() === 'ISBN'))) { rows = r; break; }
+      }
+      return rows || [];
     }
+    // 머리글 줄(첫 30줄 안에 'ISBN' 이 있는 줄)을 찾아, 이름 → 열 번호 표를 만든다. 없으면 기본 열 번호(fallback)를 쓴다.
+    function headerMap(rows, names, fallback) {
+      let hi = 0;
+      for (let i = 0; i < Math.min(30, rows.length); i++) if ((rows[i] || []).some((c) => String(c).trim().toUpperCase() === 'ISBN')) { hi = i; break; }
+      const head = (rows[hi] || []).map((c) => String(c == null ? '' : c).replace(/\s+/g, ''));
+      const col = {};
+      names.forEach((nm, k) => { const j = head.findIndex((h) => h.toUpperCase() === nm.toUpperCase()); col[nm] = j >= 0 ? j : fallback[k]; });
+      return { hi, col, found: names.filter((nm) => head.some((h) => h.toUpperCase() === nm.toUpperCase())).length };
+    }
+    let saReadInfo = null;   // 마지막 분석에서 읽은 줄 수 · 합계(오차 0건일 때 왜 0건인지 보여 주려고)
 
     const esc = UI.escapeHtml;
     let disc = [];                 // 오차 항목(상세·바코드검색·다운로드 공용)
@@ -4066,7 +4092,12 @@ const App = (() => {
     }
 
     function renderResult() {
-      if (!disc.length) { m.q('#sa-result').innerHTML = '<p class="muted" style="padding:14px">오차 항목이 없습니다.</p>'; return; }
+      if (!disc.length) {
+        // 왜 0건인지 같이 보여 준다 — 파일을 못 읽은 것(줄 수 0~1)과 정말 오차가 없는 것(합계가 같음)을 구분할 수 있게
+        const ri = saReadInfo;
+        const why = ri ? `<br><small>① 파일에서 ${ri.rows1.toLocaleString('ko-KR')}줄을 읽었습니다 · 전산재고 합계 ${ri.sumSys.toLocaleString('ko-KR')} · 스캔재고 합계 ${ri.sumScan.toLocaleString('ko-KR')}${ri.head1 < 10 ? ` · 머리글 ${ri.head1}/10개만 알아봄(나머지는 기본 열 자리로 읽음)` : ''}${ri.rows1 <= 1 ? '<br>⚠️ 줄을 거의 못 읽었습니다 — 파일을 엑셀에서 열어 「다른 이름으로 저장」한 뒤 다시 올려 보세요.' : ''}</small>` : '';
+        m.q('#sa-result').innerHTML = `<p class="muted" style="padding:14px">오차 항목이 없습니다.${why}</p>`; return;
+      }
       // 필터 상태 초기화(새 목록/이어서 보기 시)
       saSort = { col: null, dir: 1 }; saFilterFields = new Set(); saFilterPhoto = ''; saFilterExc = ''; saFilterCross = '';
       computeCross();
@@ -4400,23 +4431,29 @@ const App = (() => {
         status('오차 계산 중…'); await new Promise((r) => setTimeout(r));
 
         // ① 오차 추출: (차이≠0 '또는' 실재고-스캔재고≠0)이면 포함. 예외여부 Y 는 표시만(필터로 선택)
-        // 칼럼: ISBN0 도서명1 분야2 출판사3 전산재고4 실재고5 누락재고6 예외여부7 스캔재고8 차이9
+        // 칼럼은 머리글 이름으로 찾고(열이 끼거나 순서가 바뀌어도), 없으면 기본 자리: ISBN0 도서명1 분야2 출판사3 전산재고4 실재고5 누락재고6 예외여부7 스캔재고8 차이9
+        const H1 = headerMap(r1, ['ISBN', '도서명', '분야', '출판사', '전산재고', '실재고', '누락재고', '예외여부', '스캔재고', '차이'], [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+        const c1 = H1.col;
         disc = []; isbnSet = new Set();
-        for (let i = 1; i < r1.length; i++) {
-          const r = r1[i]; if (!r || r[0] == null || r[0] === '') continue;
+        saReadInfo = { rows1: Math.max(0, r1.length - H1.hi - 1), rows2: Math.max(0, r2.length - 1), sumSys: 0, sumScan: 0, head1: H1.found };
+        for (let i = H1.hi + 1; i < r1.length; i++) {
+          const r = r1[i]; if (!r || r[c1.ISBN] == null || r[c1.ISBN] === '') continue;
+          saReadInfo.sumSys += num(r[c1['전산재고']]); saReadInfo.sumScan += num(r[c1['스캔재고']]);
           // 예외여부 Y 도 목록에는 남긴다(exc='Y') — 화면·다운로드의 '예외' 필터로 빼거나 넣는다(기본: 빼기)
-          if (num(r[9]) === 0 && num(r[5]) - num(r[8]) === 0) continue;            // 둘 다 0이면 제외(하나라도 ≠0이면 포함)
-          const isbn = String(r[0]).trim();
-          disc.push({ isbn, name: r[1], field: r[2], pub: r[3], sys: r[4], real: r[5], miss: r[6], exc: r[7], scan: r[8], diff: r[9] });
+          if (num(r[c1['차이']]) === 0 && num(r[c1['실재고']]) - num(r[c1['스캔재고']]) === 0) continue;   // 둘 다 0이면 제외(하나라도 ≠0이면 포함)
+          const isbn = String(r[c1.ISBN]).trim();
+          disc.push({ isbn, name: r[c1['도서명']], field: r[c1['분야']], pub: r[c1['출판사']], sys: r[c1['전산재고']], real: r[c1['실재고']], miss: r[c1['누락재고']], exc: r[c1['예외여부']], scan: r[c1['스캔재고']], diff: r[c1['차이']] });
           isbnSet.add(isbn);
         }
-        // ② 서가별 실사수량 합산: ISBN0 … 서가번호4 실사수량5
+        // ② 서가별 실사수량 합산: 머리글 이름(ISBN · 서가번호 · 실사수량)으로, 없으면 ISBN0 … 서가번호4 실사수량5
+        const H2 = headerMap(r2, ['ISBN', '서가번호', '실사수량'], [0, 4, 5]);
+        const c2 = H2.col;
         const shelfMap = new Map();
-        for (let i = 1; i < r2.length; i++) {
-          const r = r2[i]; if (!r || r[0] == null || r[0] === '') continue;
-          const isbn = String(r[0]).trim(), shelf = String(r[4] == null ? '' : r[4]).trim();
+        for (let i = H2.hi + 1; i < r2.length; i++) {
+          const r = r2[i]; if (!r || r[c2.ISBN] == null || r[c2.ISBN] === '') continue;
+          const isbn = String(r[c2.ISBN]).trim(), shelf = String(r[c2['서가번호']] == null ? '' : r[c2['서가번호']]).trim();
           if (!shelf) continue;
-          const qty = num(r[5]) || 1;
+          const qty = num(r[c2['실사수량']]) || 1;
           if (!shelfMap.has(isbn)) shelfMap.set(isbn, new Map());
           const mm = shelfMap.get(isbn); mm.set(shelf, (mm.get(shelf) || 0) + qty);
         }
