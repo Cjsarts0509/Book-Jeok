@@ -3667,7 +3667,7 @@ const App = (() => {
         const auto = list.find((f) => SA_PICK[id](noSpace(f.name)));
         const chosen = prev && list.some((f) => String(f.id) === prev) ? prev : (auto ? String(auto.id) : '');
         sel.innerHTML = '<option value="">— 웹하드에서 선택 —</option>' + list.map((f) =>
-          `<option value="${f.id}"${String(f.id) === chosen ? ' selected' : ''}>${esc(f.name)} · ${esc(f.folder === '/' ? '홈' : f.folder)} · ${dayStr(f.createdAt)}</option>`).join('');
+          `<option value="${f.id}"${String(f.id) === chosen ? ' selected' : ''}>${esc(f.name)} · ${UI.bytes(f.size || 0)} · ${esc(f.folder === '/' ? '홈' : f.folder)} · ${dayStr(f.createdAt)}</option>`).join('');
         sel.disabled = false;
       }
       const info = m.q('#sa-srcinfo');
@@ -4425,6 +4425,14 @@ const App = (() => {
       if (id1 === id2) return UI.toast('① 과 ② 에 같은 파일을 골랐습니다', 'error');
       const btn = m.q('#sa-run'); btn.disabled = true;
       try {
+        // 너무 큰 파일은 브라우저가 못 읽는다(932,122행 · 63MB 짜리는 10분 넘게 걸리다 끝나지 않았다).
+        //  시스템이 바로 내보낸 원본은 보통 10~20MB 인데, 엑셀에서 다시 저장하면 몇 배로 불어난다.
+        const SA_MAX_MB = 40, SA_SLOW_MB = 20;
+        for (const [id, lbl] of [[id1, '①'], [id2, '②']]) {
+          const f = saXlsFiles.find((x) => String(x.id) === String(id)); const mb = f ? (f.size || 0) / 1048576 : 0;
+          if (mb > SA_MAX_MB) throw new Error(`${lbl} 파일이 ${mb.toFixed(0)}MB 로 너무 커서 브라우저에서 읽을 수 없습니다. 재고 시스템에서 바로 내보낸 원본(보통 10~20MB)을 올려서 고르세요 — 엑셀에서 열어 다시 저장한 파일은 몇 배로 커집니다.`);
+          if (mb > SA_SLOW_MB) UI.toast(`${lbl} 파일이 ${mb.toFixed(0)}MB 라 읽는 데 1분 넘게 걸릴 수 있습니다`, 'info');
+        }
         status('엑셀 라이브러리 로드 중…'); const XLSX = await ensureXLSX();
         status('웹하드에서 두 파일 가져오는 중…');
         const [b1, b2] = await Promise.all([fetchWebhardFile(id1), fetchWebhardFile(id2)]);
