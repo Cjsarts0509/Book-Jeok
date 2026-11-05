@@ -3721,6 +3721,10 @@ const App = (() => {
       return { hi, col, found: names.filter((nm) => head.some((h) => h.toUpperCase() === nm.toUpperCase())).length };
     }
     let saReadInfo = null;   // 마지막 분석에서 읽은 줄 수 · 합계(오차 0건일 때 왜 0건인지 보여 주려고)
+    // 엑셀 셀 서식이 '일반'이면 서가번호 · ISBN 이 숫자로 저장돼 앞의 0 이 사라진다(서가번호 01507400404 → 1507400404).
+    //  숫자만 있고 자릿수가 모자라면 앞에 0 을 채운다. 서가번호는 11자리(수불처 3 · 대 2 · 중 4 · 소 2), ISBN-10 은 0 으로 시작할 수 있다.
+    const normShelf = (v) => { const s = String(v == null ? '' : v).trim(); return /^\d{9,10}$/.test(s) ? s.padStart(11, '0') : s; };
+    const normIsbn = (v) => { const s = String(v == null ? '' : v).trim(); return /^\d{9}$/.test(s) ? s.padStart(10, '0') : s; };
 
     const esc = UI.escapeHtml;
     let disc = [];                 // 오차 항목(상세·바코드검색·다운로드 공용)
@@ -4441,7 +4445,7 @@ const App = (() => {
           saReadInfo.sumSys += num(r[c1['전산재고']]); saReadInfo.sumScan += num(r[c1['스캔재고']]);
           // 예외여부 Y 도 목록에는 남긴다(exc='Y') — 화면·다운로드의 '예외' 필터로 빼거나 넣는다(기본: 빼기)
           if (num(r[c1['차이']]) === 0 && num(r[c1['실재고']]) - num(r[c1['스캔재고']]) === 0) continue;   // 둘 다 0이면 제외(하나라도 ≠0이면 포함)
-          const isbn = String(r[c1.ISBN]).trim();
+          const isbn = normIsbn(r[c1.ISBN]);
           disc.push({ isbn, name: r[c1['도서명']], field: r[c1['분야']], pub: r[c1['출판사']], sys: r[c1['전산재고']], real: r[c1['실재고']], miss: r[c1['누락재고']], exc: r[c1['예외여부']], scan: r[c1['스캔재고']], diff: r[c1['차이']] });
           isbnSet.add(isbn);
         }
@@ -4451,7 +4455,7 @@ const App = (() => {
         const shelfMap = new Map();
         for (let i = H2.hi + 1; i < r2.length; i++) {
           const r = r2[i]; if (!r || r[c2.ISBN] == null || r[c2.ISBN] === '') continue;
-          const isbn = String(r[c2.ISBN]).trim(), shelf = String(r[c2['서가번호']] == null ? '' : r[c2['서가번호']]).trim();
+          const isbn = normIsbn(r[c2.ISBN]), shelf = normShelf(r[c2['서가번호']]);
           if (!shelf) continue;
           const qty = num(r[c2['실사수량']]) || 1;
           if (!shelfMap.has(isbn)) shelfMap.set(isbn, new Map());
