@@ -236,6 +236,40 @@ router.post('/stock-audit/analyze', authenticate, wrap(async (req, res) => {
   } finally { saAnalyzing = false; }
 }));
 
+// ── 두 엑셀(①②) → 요약 숫자만(전 지점 비교용). 결과는 디스크에 캐시(파일 id · 크기가 같으면 재사용) ──
+//  외부업체 웹하드에 있는 엑셀을 영업점에 옮기지 않고 그대로 비교에 쓰려고. 권한 · 잠금은 analyze 와 같다.
+const SA_CACHE_DIR = path.join(config.storageRoot, '_cache', 'sa-summary');
+router.post('/stock-audit/summary', authenticate, wrap(async (req, res) => {
+  if (!['manager', 'admin'].includes(req.user.role)) return res.status(403).json({ error: '권한이 없습니다.' });
+  const ids = [Number(req.body.id1), Number(req.body.id2)];
+  if (!ids.every((n) => Number.isInteger(n) && n > 0) || ids[0] === ids[1]) return res.status(400).json({ error: '두 파일을 고르세요.' });
+  const picked = [];
+  for (const id of ids) {
+    const r = await query('SELECT * FROM files WHERE id=$1 AND deleted_at IS NULL', [id]);
+    const file = r.rows[0];
+    if (!file) return res.status(404).json({ error: '파일을 찾을 수 없습니다.' });
+    if (!(await canAccessOwner(req.user, file.owner_id))) return res.status(403).json({ error: '접근 권한이 없습니다.' });
+    const disk = path.join(userDir(file.owner_id), file.stored_name);
+    if (!fs.existsSync(disk)) return res.status(410).json({ error: '파일 실체가 존재하지 않습니다.' });
+    picked.push({ file, disk });
+  }
+  const key = `${ids[0]}_${ids[1]}`, sig = picked.map((p) => `${p.file.id}:${p.file.size_bytes}`).join('|');
+  const cacheFile = path.join(SA_CACHE_DIR, key + '.json');
+  try { const c = JSON.parse(await fsp.readFile(cacheFile, 'utf8')); if (c && c.sig === sig && c.summary) return res.json({ summary: c.summary, info: c.info, cached: true, at: c.at }); } catch (_) { /* 캐시 없음 */ }
+  if (saAnalyzing) return res.status(429).json({ error: '다른 재고조사 분석이 진행 중입니다. 잠시 뒤 다시 시도하세요.' });
+  saAnalyzing = true;
+  try {
+    const out = await stockAudit.analyzeInWorker(picked[0].disk, picked[1].disk);
+    const summary = stockAudit.summarizeDisc(out.disc);
+    const rec = { sig, summary, info: out.info, at: new Date().toISOString() };
+    try { await fsp.mkdir(SA_CACHE_DIR, { recursive: true }); await fsp.writeFile(cacheFile, JSON.stringify(rec)); } catch (_) { /* 캐시 실패는 무시 */ }
+    await audit(req, 'stock-audit', `요약 ${picked[0].file.original_name} + ${picked[1].file.original_name} → 오차 ${summary.items}건 (${out.info.ms}ms)`, picked[0].file.owner_id);
+    res.json({ summary, info: out.info, cached: false, at: rec.at });
+  } catch (e) {
+    res.status(422).json({ error: `엑셀을 읽지 못했습니다: ${e.message || e}` });
+  } finally { saAnalyzing = false; }
+}));
+
 // ── 전 지점 · 두 해 비교: 영업점 계정의 재고조사오차_<년도> 폴더에 전달된 .bjsa 를 읽어 지점 · 분야별 숫자를 돌려준다 ──
 //  지점 · 해마다 가장 최근에 전달된 파일 하나. '문구' 폴더(경로에 문구가 든 하위 폴더)의 파일은 뺀다 — 문구 재고조사는 비교 대상이 아니다.
 //  담당자 · 관리자만. 영업점 웹하드를 '열람'하는 게 아니라 전달한 결과 파일만 읽는다(deliver 와 같은 전용 경로).

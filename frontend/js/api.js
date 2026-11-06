@@ -84,6 +84,7 @@ const API = (() => {
     stockAuditDeliver: (payload) => req('POST', '/files/stock-audit/deliver', payload),
     stockAuditReportKey: (payload) => req('POST', '/files/stock-audit/report-key', payload),
     stockAuditAnalyze: (payload) => req('POST', '/files/stock-audit/analyze', payload),   // ① ② 엑셀을 서버가 읽어 오차 항목만
+    stockAuditSummary: (payload) => req('POST', '/files/stock-audit/summary', payload),   // ① ② 엑셀 → 요약 숫자만(캐시)
     stockAuditCompare: (y1, y2) => req('GET', `/files/stock-audit/compare?y1=${encodeURIComponent(y1)}&y2=${encodeURIComponent(y2)}`),   // 전 지점 두 해 비교
     tree: (ownerId) => req('GET', `/files/tree${ownerId ? '?ownerId=' + ownerId : ''}`),
     recentUploads: (days, ownerId) => req('GET', `/files/recent?days=${days}${ownerId ? '&ownerId=' + ownerId : ''}`),

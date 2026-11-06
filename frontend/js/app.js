@@ -3555,6 +3555,40 @@ const App = (() => {
     return (s && !s.closed && Array.isArray(s.disc) && s.disc.length &&
       Date.now() - (s.at || 0) < 6 * 60 * 60 * 1000 && (s.ownerId || null) === (state.ownerId || null)) ? s : null;
   }
+  // ── 재고조사 엑셀 파일의 년도 · 영업점 알아보기(오차체크 창과 전 지점 비교가 같이 쓴다) ──
+  const SA_PICK = {
+    '#sa-f1': (n) => n.includes('결과확인'),
+    '#sa-f2': (n) => n.includes('서가') || n.includes('스캔'),
+  };
+  // 파일의 영업점: 파일이 들어 있는 '폴더 이름'에 등록된 영업점명이 있으면 그 영업점.
+  //   '/광화문점/…' · '/2025 광화문 재고조사/…' → 광화문점. 공백과 끝의 '점'은 무시하고 비교한다.
+  //   안쪽 폴더부터 보고, 한 폴더에 여러 이름이 걸리면 가장 긴 이름(더 구체적인 것)을 고른다.
+  const brCore = (x) => String(x || '').replace(/\s+/g, '').replace(/점$/, '');
+  const stripExt = (n) => String(n || '').replace(/\.[^.]+$/, '');
+  function branchOf(f) {
+    const names = (state.branches || []).map((b) => ({ name: b.name, c: brCore(b.name) })).filter((b) => b.c.length >= 2);
+    // 안쪽 폴더부터 보고, 폴더에 없으면 파일 이름에서도 찾는다('광화문점_결과확인리스트_2026.xlsx')
+    const segs = [...String(f.folder || '').split('/').filter(Boolean).reverse(), stripExt(f.name)];
+    for (const seg of segs) {
+      const sc = String(seg).replace(/\s+/g, '');
+      const hit = names.filter((b) => sc.includes(b.c)).sort((a, b) => b.c.length - a.c.length)[0];
+      if (hit) return hit.name;
+    }
+    return '';
+  }
+  const dayStr = (v) => { const d = new Date(v); const p2 = (x) => String(x).padStart(2, '0'); return isNaN(d) ? '' : `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())} ${p2(d.getHours())}:${p2(d.getMinutes())}`; };
+  const noSpace = (x) => String(x || '').replace(/\s+/g, '');
+  // 파일의 년도: '파일 이름'에 적힌 20xx(또는 20xxMMDD). 폴더 이름은 보지 않는다.
+  //   '결과확인리스트_2025.xlsx' · '결과확인리스트_20250928.xlsx' → 2025
+  //   이름에 년도가 없으면 올린 날짜의 년도.
+  //   ISBN 같은 긴 숫자 안의 20xx 는 년도로 보지 않는다(앞뒤가 숫자가 아니어야 인정).
+  function fileYear(f) {
+    const m1 = String(f.name || '').match(/(?:^|[^0-9])(20\d{2})(?:[01]\d[0-3]\d)?(?![0-9])/);
+    if (m1) return m1[1];
+    const d = new Date(f.createdAt);
+    return isNaN(d) ? '' : String(d.getFullYear());
+  }
+
   function stockAuditModal(auto, preload) {
     // 전달받은 파일(.bjsa)로 열린 '작업 모드' — 엑셀 업로드/분석/영업점 전달은 필요 없음(이미 만들어 준 목록).
     const isOpened = !!(preload && Array.isArray(preload.disc));
@@ -3579,41 +3613,9 @@ const App = (() => {
 
     // ── 두 엑셀은 PC 에 내려받은 것이 아니라 '지금 보고 있는 계정의 웹하드'에서 바로 읽는다 ──
     // 이름에 '결과확인' / '서가' 가 든 가장 최근 파일을 자동으로 골라 두고, 다른 걸 원하면 바꿀 수 있게 한다.
-    const SA_PICK = {
-      '#sa-f1': (n) => n.includes('결과확인'),
-      '#sa-f2': (n) => n.includes('서가') || n.includes('스캔'),
-    };
     let saXlsFiles = [];   // 이 계정 웹하드의 엑셀 파일(최신순)
     let saAnalyzedYear = null;   // 분석에 쓴 년도 — 영업점 전달 폴더(재고조사오차_<년도>)에도 쓴다
     let saAnalyzedBranch = '';   // 분석에 쓴 영업점 — '영업점에 전달' 대상 계정을 미리 골라 둔다
-    // 파일의 영업점: 파일이 들어 있는 '폴더 이름'에 등록된 영업점명이 있으면 그 영업점.
-    //   '/광화문점/…' · '/2025 광화문 재고조사/…' → 광화문점. 공백과 끝의 '점'은 무시하고 비교한다.
-    //   안쪽 폴더부터 보고, 한 폴더에 여러 이름이 걸리면 가장 긴 이름(더 구체적인 것)을 고른다.
-    const brCore = (x) => String(x || '').replace(/\s+/g, '').replace(/점$/, '');
-    const stripExt = (n) => String(n || '').replace(/\.[^.]+$/, '');
-    function branchOf(f) {
-      const names = (state.branches || []).map((b) => ({ name: b.name, c: brCore(b.name) })).filter((b) => b.c.length >= 2);
-      // 안쪽 폴더부터 보고, 폴더에 없으면 파일 이름에서도 찾는다('광화문점_결과확인리스트_2026.xlsx')
-      const segs = [...String(f.folder || '').split('/').filter(Boolean).reverse(), stripExt(f.name)];
-      for (const seg of segs) {
-        const sc = String(seg).replace(/\s+/g, '');
-        const hit = names.filter((b) => sc.includes(b.c)).sort((a, b) => b.c.length - a.c.length)[0];
-        if (hit) return hit.name;
-      }
-      return '';
-    }
-    const dayStr = (v) => { const d = new Date(v); const p2 = (x) => String(x).padStart(2, '0'); return isNaN(d) ? '' : `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())} ${p2(d.getHours())}:${p2(d.getMinutes())}`; };
-    const noSpace = (x) => String(x || '').replace(/\s+/g, '');
-    // 파일의 년도: '파일 이름'에 적힌 20xx(또는 20xxMMDD). 폴더 이름은 보지 않는다.
-    //   '결과확인리스트_2025.xlsx' · '결과확인리스트_20250928.xlsx' → 2025
-    //   이름에 년도가 없으면 올린 날짜의 년도.
-    //   ISBN 같은 긴 숫자 안의 20xx 는 년도로 보지 않는다(앞뒤가 숫자가 아니어야 인정).
-    function fileYear(f) {
-      const m1 = String(f.name || '').match(/(?:^|[^0-9])(20\d{2})(?:[01]\d[0-3]\d)?(?![0-9])/);
-      if (m1) return m1[1];
-      const d = new Date(f.createdAt);
-      return isNaN(d) ? '' : String(d.getFullYear());
-    }
     async function loadWebhardXls() {
       const sy = m.q('#sa-year'), s1 = m.q('#sa-f1'), s2 = m.q('#sa-f2'); if (!s1) return;
       const sb = m.q('#sa-sbranch');
@@ -4444,7 +4446,7 @@ const App = (() => {
       <td class="num">${np(a, 'posN', 'pos')}</td><td class="num">${np(b, 'posN', 'pos')}</td>
       <td class="num">${a ? fmt(a.abs) : dash}</td><td class="num">${b ? fmt(b.abs) : dash}</td>${dcell(a ? a.abs : null, b ? b.abs : null)}
       <td class="num">${a ? fmt(a.sd) : dash}</td><td class="num">${b ? fmt(b.sd) : dash}</td>${file == null ? '' : `<td class="cmp-file">${file}</td>`}</tr>`;
-    const fileTxt = (br) => [br.fileA ? `${y1}: ${esc(br.fileA.name)}` : `${y1}: 없음`, br.fileB ? `${y2}: ${esc(br.fileB.name)}` : `${y2}: 없음`].join('<br>');
+    const fileTxt = (br) => [br.fileA ? `${y1}: ${esc(br.fileA.name)}` : `${y1}: 없음`, br.fileB ? `${y2}: ${esc(br.fileB.name)}` : `${y2}: 없음`].join('<br>');   // 엑셀로 계산한 것은 '① + ②' 두 이름
     let body = '';
     for (const br of built.branches) {
       body += line(`<b>${esc(br.name)}</b>`, br.a, br.b, 'br', fileTxt(br));
@@ -4456,14 +4458,56 @@ const App = (() => {
       : '';
     return `<div class="sa-tablewrap" style="max-height:52vh"><table class="sa-table cmp-table">${head('지점', true)}<tbody>${body}</tbody><tfoot>${tot}</tfoot></table></div>${fieldsAll}`;
   }
+  // 웹하드(외부업체 등)의 엑셀 ①②로 지점 · 년도별 요약을 채운다 — 영업점에 전달해 둔 결과(.bjsa)가 없는 지점 · 년도만.
+  //  지점 · 년도마다 가장 최근 결과확인리스트 + 가장 최근 서가별스캔데이터 한 쌍. '문구'가 든 폴더 · 파일은 뺀다.
+  //  서버는 한 번에 하나만 계산하므로 차례로 부르고(큰 지점 10~20초), 다른 사람이 돌리는 중(429)이면 잠시 기다려 다시.
+  async function cmpFillFromXlsx(r, y1, y2, ownerIds, progress) {
+    if (!(state.branches || []).length) await loadBranches();
+    const files = [];
+    for (const oid of ownerIds) {
+      try { const rr = await API.searchAdvanced({ exts: 'xlsx,xls', sort: 'createdAt' }, oid); for (const f of rr.files || []) files.push({ ...f, ownerId: oid, year: fileYear(f), branch: branchOf(f) }); }
+      catch (_) { /* 접근 못 하는 계정은 건너뜀 */ }
+    }
+    const isMungu = (f) => /문구/.test(String(f.folder || '')) || /문구/.test(String(f.name || ''));
+    const groups = new Map();
+    for (const f of files) {
+      if (!f.branch || isMungu(f) || (f.year !== String(y1) && f.year !== String(y2))) continue;
+      const k = brCore(f.branch) + '|' + f.year; const g = groups.get(k) || { branch: f.branch, year: Number(f.year), f1: null, f2: null };
+      const n = noSpace(f.name); const newer = (a, b) => !a || new Date(b.createdAt) > new Date(a.createdAt);
+      if (SA_PICK['#sa-f1'](n)) { if (newer(g.f1, f)) g.f1 = f; } else if (SA_PICK['#sa-f2'](n)) { if (newer(g.f2, f)) g.f2 = f; }
+      groups.set(k, g);
+    }
+    const rowOf = (branch) => r.rows.find((x) => brCore(x.branchName) === brCore(branch));
+    const todo = [...groups.values()].filter((g) => g.f1 && g.f2 && !(rowOf(g.branch) && rowOf(g.branch).years[g.year]));
+    r.errors = r.errors || [];
+    for (const g of groups.values()) if ((g.f1 && !g.f2) || (!g.f1 && g.f2)) r.errors.push({ branchName: g.branch, year: g.year, name: (g.f1 || g.f2).name, error: g.f1 ? '서가별스캔데이터 없음' : '결과확인리스트 없음' });
+    let k = 0;
+    for (const g of todo) {
+      k++; progress(`웹하드 엑셀로 계산 중 ${k}/${todo.length} — ${g.branch} ${g.year} (큰 지점은 10~20초)`);
+      let res = null, err = null;
+      for (let tries = 0; tries < 6 && !res; tries++) {
+        try { res = await API.stockAuditSummary({ id1: g.f1.id, id2: g.f2.id }); }
+        catch (e) { err = e; if (!/진행 중/.test(e.message || '')) break; await new Promise((w) => setTimeout(w, 5000)); }
+      }
+      if (!res) { r.errors.push({ branchName: g.branch, year: g.year, name: g.f1.name, error: (err && err.message) || '계산 실패' }); continue; }
+      let row = rowOf(g.branch);
+      if (!row) { row = { branchId: 'x:' + brCore(g.branch), branchName: g.branch, years: {} }; r.rows.push(row); }
+      row.years[g.year] = { ...res.summary, file: { name: `${g.f1.name} + ${g.f2.name}`, folder: g.f1.folder, at: g.f1.createdAt, src: 'xlsx', cached: !!res.cached } };
+    }
+  }
   function stockAuditCompareModal() {
     const thisYear = new Date().getFullYear();
+    // 엑셀을 찾을 웹하드: 외부업체(role user) 계정들 + 내 웹하드
+    const vendors = (state.accounts || []).filter((a) => a.role === 'user');
+    const srcList = [...vendors.map((a) => ({ id: a.id, name: a.displayName })), { id: state.user.id, name: `내 웹하드 (${state.user.displayName})` }];
+    const srcOpts = srcList.map((a) => `<option value="${a.id}">${UI.escapeHtml(a.name)}</option>`).join('');
     const yearOpts = (sel) => Array.from({ length: 6 }, (_, k) => thisYear - k).map((y) => `<option value="${y}"${y === sel ? ' selected' : ''}>${y}</option>`).join('');
     const m = UI.modal(`<h3>📈 전 지점 재고조사 오차 비교</h3>
-      <p class="muted" style="font-size:12px;margin:-6px 0 10px">영업점 계정의 <b>재고조사오차_&lt;년도&gt;</b> 폴더에 전달된 결과(가장 최근 파일)로 두 해를 비교합니다. 예외 항목과 <b>'문구' 폴더</b>의 결과는 뺍니다. 스캔차이 = 스캔합계 + 누락재고 − 전산재고. 증감 = 앞 해 − 뒤 해(빨강이 나빠진 것).</p>
+      <p class="muted" style="font-size:12px;margin:-6px 0 10px">웹하드에 있는 <b>결과확인리스트 · 서가별스캔데이터</b> 엑셀을 지점 · 년도별로 찾아 서버가 계산합니다(영업점에 전달해 둔 결과가 있으면 그것을 먼저 씀). 파일의 년도는 이름의 20xx, 지점은 폴더 · 파일 이름의 영업점명으로 알아봅니다. 예외 항목과 <b>'문구'</b> 폴더 · 파일은 뺍니다. 스캔차이 = 스캔합계 + 누락재고 − 전산재고. 증감 = 앞 해 − 뒤 해(빨강이 나빠진 것). 한 번 계산한 파일은 서버가 기억해 다음부터 바로 나옵니다.</p>
       <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
         <label>📅 <select class="input" id="cmp-y1">${yearOpts(thisYear)}</select></label><span class="muted">vs</span>
         <label><select class="input" id="cmp-y2">${yearOpts(thisYear - 1)}</select></label>
+        <label>🗂 <select class="input" id="cmp-src"><option value="all">모든 외부업체 웹하드</option>${srcOpts}<option value="">(영업점에 전달된 결과만)</option></select></label>
         <button class="btn btn-primary btn-sm" id="cmp-run">비교</button>
         <label class="muted" style="font-size:12px;display:flex;gap:4px;align-items:center"><input type="checkbox" id="cmp-fields"> 지점마다 분야별 펼치기</label>
         <span style="flex:1"></span><button class="btn btn-ghost btn-sm" id="cmp-xlsx" disabled>📥 엑셀</button>
@@ -4480,7 +4524,10 @@ const App = (() => {
       if (y1 === y2) return UI.toast('서로 다른 두 해를 고르세요', 'error');
       const btn = m.q('#cmp-run'); btn.disabled = true; m.q('#cmp-body').innerHTML = '<p class="muted">지점별 결과 파일을 읽는 중… (큰 지점은 몇 초 걸려요)</p>';
       try {
-        const r = await API.stockAuditCompare(y1, y2);
+        const r = await API.stockAuditCompare(y1, y2);   // 영업점에 전달된 결과(.bjsa)
+        const src = m.q('#cmp-src').value;
+        if (src !== '') await cmpFillFromXlsx(r, y1, y2, src === 'all' ? srcList.map((a) => a.id) : [Number(src)], (t) => { m.q('#cmp-body').innerHTML = `<p class="muted">${UI.escapeHtml(t)}</p>`; });
+        r.rows.sort((a, b) => String(a.branchName).localeCompare(String(b.branchName), 'ko'));
         built = cmpBuild(r);
         const withAny = built.branches.filter((b) => b.a || b.b).length;
         note = [`지점 ${built.branches.length}곳 중 결과 있는 곳 ${withAny}곳`, r.errors && r.errors.length ? `읽지 못한 파일 ${r.errors.length}개(${r.errors.map((e) => e.branchName + ' ' + e.year).join(', ')})` : ''].filter(Boolean).join(' · ');
