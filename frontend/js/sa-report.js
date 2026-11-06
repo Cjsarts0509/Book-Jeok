@@ -532,6 +532,65 @@ table.m tbody.g tr:last-child td{border-bottom:1px solid var(--border);padding-b
         catch (_) { const ta = document.createElement('textarea'); ta.value = tsv; document.body.appendChild(ta); ta.select(); try { document.execCommand('copy'); toast('복사했습니다 — 엑셀에 붙여 넣으세요', 'ok'); } catch (e) { toast('복사가 막혀 있습니다', 'err'); } ta.remove(); }
       });
     }
+    // ── 엑셀 받기: 지금 조회된 항목(필터 · 정렬 그대로) ─────────────────────────────
+    //  표는 화면 근처만 DOM 에 두므로(표 창) 화면에서 복사하면 일부만 잡힌다 → 파일로 전부 내준다.
+    //  xlsx 는 zip 안의 XML 이라 makeZip(저장만, 압축 없음)으로 라이브러리 없이 만든다. 코드 칸(ISBN · 수불처 · 분류)은 글자 셀로 — 앞 0 보존.
+    //  시트: 항목별(한 줄에 한 항목, 서가는 한 칸에) · 서가별(서가마다 한 줄, 항목 칸은 첫 줄에만 — 합쳐도 두 번 안 세게) · 분야별
+    function buildXlsx(sheets) {
+      const enc = new TextEncoder();
+      const xe = (v) => String(v == null ? '' : v).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])).replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, '');
+      const colName = (i) => { let s = ''; i++; while (i > 0) { const m = (i - 1) % 26; s = String.fromCharCode(65 + m) + s; i = Math.floor((i - 1) / 26); } return s; };
+      // 셀: 숫자(number) → 숫자 셀, 그 밖(글자 · '' ) → 글자 셀. { t: 'n'|'s', v } 로 명시도 가능
+      const cell = (ref, v, style) => {
+        const st = style ? ` s="${style}"` : '';
+        if (v && typeof v === 'object' && 't' in v) { if (v.t === 'n') return `<c r="${ref}"${st}><v>${Number(v.v) || 0}</v></c>`; v = v.v; }
+        if (typeof v === 'number' && Number.isFinite(v)) return `<c r="${ref}"${st}><v>${v}</v></c>`;
+        if (v == null || v === '') return '';
+        return `<c r="${ref}" t="inlineStr"${st}><is><t xml:space="preserve">${xe(v)}</t></is></c>`;
+      };
+      const sheetXml = (sh) => {
+        const rows = [sh.head, ...sh.rows];
+        const widths = sh.widths || [];
+        const cols = widths.length ? `<cols>${widths.map((w, i) => `<col min="${i + 1}" max="${i + 1}" width="${w}" customWidth="1"/>`).join('')}</cols>` : '';
+        const data = rows.map((r, ri) => `<row r="${ri + 1}">${r.map((v, ci) => cell(colName(ci) + (ri + 1), v, ri === 0 ? 1 : 0)).join('')}</row>`).join('');
+        const ref = `A1:${colName(sh.head.length - 1)}${rows.length}`;
+        return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><dimension ref="${ref}"/><sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews><sheetFormatPr defaultRowHeight="15"/>${cols}<sheetData>${data}</sheetData>${sh.filter ? `<autoFilter ref="${ref}"/>` : ''}</worksheet>`;
+      };
+      const files = [];
+      const add = (name, xml) => files.push({ name, data: enc.encode(xml) });
+      add('[Content_Types].xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>${sheets.map((_, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join('')}</Types>`);
+      add('_rels/.rels', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>`);
+      add('xl/workbook.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>${sheets.map((sh, i) => `<sheet name="${xe(sh.name)}" sheetId="${i + 1}" r:id="rId${i + 1}"/>`).join('')}</sheets></workbook>`);
+      add('xl/_rels/workbook.xml.rels', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${sheets.map((_, i) => `<Relationship Id="rId${i + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${i + 1}.xml"/>`).join('')}<Relationship Id="rId${sheets.length + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`);
+      add('xl/styles.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="2"><font><sz val="11"/><name val="Malgun Gothic"/></font><font><b/><sz val="11"/><name val="Malgun Gothic"/></font></fonts><fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills><borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/></cellXfs></styleSheet>`);
+      sheets.forEach((sh, i) => add(`xl/worksheets/sheet${i + 1}.xml`, sheetXml(sh)));
+      return makeZip(files);
+    }
+    function exportXlsx() {
+      const rows = view();
+      if (!rows.length) return toast('조회된 항목이 없습니다', 'err');
+      const crossTxt = (x) => (x.x || []).map((c) => { const o = byIsbn.get(c[0]); return `${c[0]}${o ? ' ' + o.n : ''} (${c[2]})`; }).join(' / ');
+      const items = { name: '항목별', filter: true, widths: [12, 15, 40, 18, 9, 9, 9, 7, 40, 6, 6, 6, 40],
+        head: ['분야', 'ISBN', '도서명', '출판사', '전산재고', '스캔합계', '스캔차이', '서가수', '서가 (스캔수량)', '확인', '사진', '예외', '교차 의심'],
+        rows: rows.map(({ x, sh }) => [x.f, x.i, x.n, x.p, Number(x.s) || 0, Number(x.ss) || 0, Number(x.sd) || 0, sh.length, sh.map(shelfTxt).join(' / '), isDone(x.i) ? '✓' : '', photoCount(x.i) || '', x.e ? 'Y' : '', crossTxt(x)]) };
+      const shelf = { name: '서가별', widths: [12, 15, 40, 18, 10, 8, 8, 8, 9, 9, 9, 9], head: ['분야', 'ISBN', '도서명', '출판사', '수불처코드', '대분류', '중분류', '소분류', '스캔수량', '전산재고', '스캔합계', '스캔차이'], rows: [] };
+      for (const { x, sh } of rows) {
+        const list = sh.length ? sh : [['', '', '', '', '']];
+        list.forEach((s2, k) => shelf.rows.push(k === 0
+          ? [x.f, x.i, x.n, x.p, s2[0], s2[1], s2[2], s2[3], s2[4] === '' ? '' : Number(s2[4]) || 0, Number(x.s) || 0, Number(x.ss) || 0, Number(x.sd) || 0]
+          : ['', '', '', '', s2[0], s2[1], s2[2], s2[3], Number(s2[4]) || 0, '', '', '']));
+      }
+      const fsRows = fieldStats();
+      const tot = fsRows.reduce((a, r) => { for (const k of ['n', 's', 'ss', 'sd', 'negN', 'neg', 'posN', 'pos', 'done', 'cross']) a[k] += r[k]; return a; }, { f: '합계', n: 0, s: 0, ss: 0, sd: 0, negN: 0, neg: 0, posN: 0, pos: 0, done: 0, cross: 0 });
+      const fields = { name: '분야별', widths: [14, 8, 10, 10, 10, 10, 10, 10, 10, 10, 10], head: ['분야', '항목', '전산재고', '스캔합계', '스캔차이', '부족 건수', '부족 수량', '초과 건수', '초과 수량', '확인완료', '교차 의심'],
+        rows: [...fsRows, tot].map((r) => [r.f, r.n, r.s, r.ss, r.sd, r.negN, r.neg, r.posN, r.pos, r.done, r.cross]) };
+      const blob = buildXlsx([items, shelf, fields]);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href = url; a.download = `${META.fileBase || '재고조사오차'}_조회${fmt(rows.length)}건.xlsx`;
+      document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 5000);
+      const filtered = !!(st.fields.size || st.q.trim() || st.diff || st.maj || st.done || st.photo || st.cross || st.exc);
+      toast(`항목 ${fmt(items.rows.length)}건 · 서가 ${fmt(shelf.rows.length)}줄을 엑셀로 저장했습니다${filtered ? ' (지금 필터 기준)' : ''}`, 'ok');
+    }
     // 머리글(PC: 12열 · 휴대폰: 분야·상품코드·상품명·차이)
     const HEAD_PC = [['f', '분야'], ['i', 'ISBN'], ['n', '도서명'], ['p', '출판사'], ['loc', '수불처코드'], ['', '대분류'], ['', '중분류'], ['', '소분류'], ['', '스캔수량', 1], ['s', '전산재고', 1], ['ss', '스캔합계', 1], ['sd', '스캔차이', 1]];
     const HEAD_M = [['f', '분야'], ['i', '상품코드'], ['n', '상품명'], ['sd', '차이', 1]];
@@ -915,6 +974,7 @@ table.m tbody.g tr:last-child td{border-bottom:1px solid var(--border);padding-b
     });
     $('#f-print').addEventListener('click', () => window.print());
     $('#f-fstat').addEventListener('click', openFieldStats);
+    $('#f-xlsx').addEventListener('click', exportXlsx);
     $('#f-scan').addEventListener('click', scanFind);
     $('#f-savefile').addEventListener('click', saveFile);
     $('#f-zip').addEventListener('click', zipPhotos);
@@ -991,6 +1051,7 @@ table.m tbody.g tr:last-child td{border-bottom:1px solid var(--border);padding-b
   <select id="f-exc" class="btn"><option value="">예외 빼기</option><option value="all">예외 포함</option><option value="only">예외만</option></select>
   <select id="f-cross" class="btn" title="비슷한 책(1권·2권, 1-1·1-2, 판 차이…)이 한쪽은 더, 한쪽은 덜 찍힌 짝"><option value="">교차 전체</option><option value="only">🔀 교차 스캔 의심만</option></select>
   <button type="button" class="btn noprint" id="f-fstat" title="분야마다 항목 수 · 전산재고 · 스캔차이 · 부족/초과 · 확인완료">📊 분야별</button>
+  <button type="button" class="btn noprint" id="f-xlsx" title="지금 조회된 항목(필터 · 정렬 그대로)을 엑셀 파일로 — 화면에서 복사하면 일부만 잡히니 이걸 쓰세요">📥 엑셀</button>
   <button type="button" class="btn" id="f-reset">초기화</button>
   <button type="button" class="btn noprint" id="f-print">🖨️ 인쇄</button>
   <span class="count" id="count"></span>
