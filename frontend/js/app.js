@@ -4510,7 +4510,7 @@ const App = (() => {
         <label>🗂 <select class="input" id="cmp-src"><option value="all">모든 외부업체 웹하드</option>${srcOpts}<option value="">(영업점에 전달된 결과만)</option></select></label>
         <button class="btn btn-primary btn-sm" id="cmp-run">비교</button>
         <label class="muted" style="font-size:12px;display:flex;gap:4px;align-items:center"><input type="checkbox" id="cmp-fields"> 지점마다 분야별 펼치기</label>
-        <span style="flex:1"></span><button class="btn btn-ghost btn-sm" id="cmp-xlsx" disabled>📥 엑셀</button>
+        <span style="flex:1"></span><button class="btn btn-ghost btn-sm" id="cmp-html" disabled title="혼자 열리는 HTML 보고서(필터 · 정렬 · 분야별 · 엑셀 받기 · 인쇄)">📄 HTML</button><button class="btn btn-ghost btn-sm" id="cmp-xlsx" disabled>📥 엑셀</button>
       </div>
       <div id="cmp-body" style="margin-top:10px"><p class="muted">년도를 고르고 「비교」를 누르세요.</p></div>
       <div class="modal-actions"><button class="btn btn-ghost" id="cmp-close">닫기</button></div>`);
@@ -4531,9 +4531,23 @@ const App = (() => {
         built = cmpBuild(r);
         const withAny = built.branches.filter((b) => b.a || b.b).length;
         note = [`지점 ${built.branches.length}곳 중 결과 있는 곳 ${withAny}곳`, r.errors && r.errors.length ? `읽지 못한 파일 ${r.errors.length}개(${r.errors.map((e) => e.branchName + ' ' + e.year).join(', ')})` : ''].filter(Boolean).join(' · ');
-        draw(); m.q('#cmp-xlsx').disabled = false;
+        draw(); m.q('#cmp-xlsx').disabled = false; m.q('#cmp-html').disabled = false;
       } catch (e) { m.q('#cmp-body').innerHTML = `<p class="muted" style="color:var(--danger)">${UI.escapeHtml(e.message || '비교 실패')}</p>`; }
       finally { btn.disabled = false; }
+    });
+    // 혼자 열리는 HTML 보고서 — 보고서 코드는 처음 누를 때만 불러온다
+    m.q('#cmp-html').addEventListener('click', async () => {
+      if (!built) return;
+      try {
+        if (!window.SACompareReport) {
+          await new Promise((res, rej) => { const sc = document.createElement('script'); sc.src = 'js/sa-compare-report.js?v=226'; sc.onload = res; sc.onerror = () => rej(new Error('보고서 모듈을 불러오지 못했습니다.')); document.head.appendChild(sc); });
+        }
+        const dt = new Date(); const p2 = (x) => String(x).padStart(2, '0');
+        const base = `재고조사오차_지점비교_${built.y1}vs${built.y2}_${dt.getFullYear()}${p2(dt.getMonth() + 1)}${p2(dt.getDate())}`;
+        const html = window.SACompareReport.build({ title: `전 지점 재고조사 오차 비교 ${built.y1} vs ${built.y2}`, generatedAt: `${dt.getFullYear()}-${p2(dt.getMonth() + 1)}-${p2(dt.getDate())} ${p2(dt.getHours())}:${p2(dt.getMinutes())}`, fileBase: base, note }, built);
+        const url = URL.createObjectURL(new Blob([html], { type: 'text/html;charset=utf-8' }));
+        const a = document.createElement('a'); a.href = url; a.download = base + '.html'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 4000);
+      } catch (e) { UI.toast(e.message || 'HTML 저장 실패', 'error'); }
     });
     m.q('#cmp-xlsx').addEventListener('click', async () => {
       if (!built) return;
