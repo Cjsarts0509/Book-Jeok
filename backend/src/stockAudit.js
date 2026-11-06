@@ -8,7 +8,9 @@
 //
 // 규칙(브라우저에서 하던 것과 같다)
 //  ① 머리글은 첫 30줄 안에 'ISBN' 이 있는 줄. 열은 이름으로 찾고 없으면 기본 자리(ISBN0 도서명1 분야2 출판사3 전산재고4 실재고5 누락재고6 예외여부7 스캔재고8 차이9).
-//     차이≠0 또는 실재고−스캔재고≠0 이면 오차 항목(예외여부 Y 도 남긴다 — 화면 필터로 가른다).
+//     차이≠0 이면 오차 항목(예외여부 Y 도 남긴다 — 화면 필터로 가른다).
+//     ※ 예전엔 '또는 실재고≠스캔재고'도 넣었는데, 이 파일에서 차이 = 실재고 − 전산재고 · 실재고 = 스캔재고 + 누락재고 라서
+//        그 조건은 '누락재고가 있는 줄'을 전부 오차로 잡았다(광화문 동양서적 225건이 348건으로). 시스템이 맞춰 둔 누락분은 오차가 아니다.
 //  ② 열은 ISBN · 서가번호 · 실사수량(기본 자리 0 · 4 · 5). 오차 항목의 ISBN 만 서가별로 합산.
 //  셀 서식이 '일반'이라 앞 0 이 빠진 서가번호(9~10자리)는 11자리로, ISBN-10 은 10자리로 채운다.
 const { Worker, isMainThread, parentPort, workerData } = require('worker_threads');
@@ -63,8 +65,7 @@ async function analyze(p1, p2) {
     info.rows1++;
     const sys = r[c['전산재고']], real = has['실재고'] ? r[c['실재고']] : undefined, scan = r[c['스캔재고']], diff = r[c['차이']];
     info.sumSys += num(sys); info.sumScan += num(scan);
-    // 오차: 차이≠0, 또는 실재고 열이 있는 파일에서 실재고≠스캔재고
-    if (num(diff) === 0 && (!has['실재고'] || num(real) - num(scan) === 0)) return;
+    if (num(diff) === 0) return;   // 오차 = 차이≠0 (엑셀에서 직접 세는 기준과 같게)
     const isbn = normIsbn(rawIsbn);
     if (!index.has(isbn)) index.set(isbn, disc.length);
     disc.push({ isbn, name: r[c['도서명']], field: r[c['분야']], pub: r[c['출판사']], sys, real, miss: r[c['누락재고']], exc: r[c['예외여부']], scan, diff, shelves: [], ssum: 0 });
