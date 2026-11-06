@@ -18,21 +18,24 @@ const HEAD1 = ['ISBN', '도서명', '분야', '출판사', '전산재고', '실�
 const FALL1 = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
 const HEAD2 = ['ISBN', '서가번호', '실사수량'];
 const FALL2 = [0, 4, 5];
+// 다른 시스템이 내보낸 결과확인리스트(1행 합계 · 2행 머리글 '바코드 · 상품명 · 상품구분 · 매입처 · 장부재고 · X · X · X · 스캔재고 · 차이')도 같은 뜻으로 읽는다
+const SYN = { '바코드': 'ISBN', '상품코드': 'ISBN', '상품명': '도서명', '상품구분': '분야', '매입처': '출판사', '장부재고': '전산재고', '수불재고': '전산재고', '실사수량': '실사수량', '서가': '서가번호' };
 const HEADER_SCAN_ROWS = 30;
 
 const num = (v) => { const n = Number(String(v == null ? '' : v).replace(/[^\d.-]/g, '')); return Number.isNaN(n) ? 0 : n; };
 const normShelf = (v) => { const s = String(v == null ? '' : v).trim(); return /^\d{9,10}$/.test(s) ? s.padStart(11, '0') : s; };
 const normIsbn = (v) => { const s = String(v == null ? '' : v).trim(); return /^\d{9}$/.test(s) ? s.padStart(10, '0') : s; };
-const cellKey = (v) => String(v == null ? '' : v).replace(/\s+/g, '').toUpperCase();
+const cellKey = (v) => { const k = String(v == null ? '' : v).replace(/\s+/g, ''); return (SYN[k] || k).toUpperCase(); };
 const hasIsbn = (row) => row.some((c) => cellKey(c) === 'ISBN');
 
+// found: 알아본 머리글 수 · has: 머리글에 실제로 있는 열(없는 열은 기본 자리로 읽되, 규칙에서 '없음'으로 안다)
 function mapHeader(row, names, fallback) {
   const head = row.map(cellKey);
-  const col = {}; let found = 0;
-  names.forEach((nm, k) => { const j = head.indexOf(nm.toUpperCase()); if (j >= 0) found++; col[nm] = j >= 0 ? j : fallback[k]; });
-  return { col, found };
+  const col = {}, has = {}; let found = 0;
+  names.forEach((nm, k) => { const j = head.indexOf(nm.toUpperCase()); if (j >= 0) found++; has[nm] = j >= 0; col[nm] = j >= 0 ? j : fallback[k]; });
+  return { col, found, has };
 }
-const fallbackMap = (names, fallback) => { const col = {}; names.forEach((nm, k) => { col[nm] = fallback[k]; }); return { col, found: 0 }; };
+const fallbackMap = (names, fallback) => { const col = {}, has = {}; names.forEach((nm, k) => { col[nm] = fallback[k]; has[nm] = true; }); return { col, found: 0, has }; };
 
 // 머리글을 찾을 때까지 앞줄을 모아 두고, 찾으면 그 뒤 줄만 · 끝내 못 찾으면 모아 둔 줄을 기본 자리로 처리한다
 function headerGate(names, fallback, onData) {
@@ -40,12 +43,12 @@ function headerGate(names, fallback, onData) {
   const gate = {
     found: 0, onData,
     row(row) {
-      if (map) return onData(row, map.col);
+      if (map) return onData(row, map.col, map.has);
       if (hasIsbn(row)) { map = mapHeader(row, names, fallback); gate.found = map.found; pend.length = 0; return; }
       pend.push(row);
-      if (pend.length > HEADER_SCAN_ROWS) { map = fallbackMap(names, fallback); pend.shift(); for (const r of pend) onData(r, map.col); pend.length = 0; }
+      if (pend.length > HEADER_SCAN_ROWS) { map = fallbackMap(names, fallback); pend.shift(); for (const r of pend) onData(r, map.col, map.has); pend.length = 0; }
     },
-    end() { if (!map && pend.length > 1) { map = fallbackMap(names, fallback); for (const r of pend.slice(1)) onData(r, map.col); } },
+    end() { if (!map && pend.length > 1) { map = fallbackMap(names, fallback); for (const r of pend.slice(1)) onData(r, map.col, map.has); } },
   };
   return gate;
 }
@@ -54,12 +57,14 @@ async function analyze(p1, p2) {
   const t0 = Date.now();
   const disc = []; const index = new Map();   // isbn → 오차 항목 번호
   const info = { rows1: 0, rows2: 0, sumSys: 0, sumScan: 0, head1: 0, head2: 0, matched: 0, ms: 0 };
-  const g1 = headerGate(HEAD1, FALL1, (r, c) => {
+  const g1 = headerGate(HEAD1, FALL1, (r, c, has) => {
     const rawIsbn = r[c.ISBN]; if (rawIsbn == null || rawIsbn === '') return;
+    if (typeof rawIsbn === 'string' && !/\d/.test(rawIsbn)) return;   // '합계' 같은 글자 줄
     info.rows1++;
-    const sys = r[c['전산재고']], real = r[c['실재고']], scan = r[c['스캔재고']], diff = r[c['차이']];
+    const sys = r[c['전산재고']], real = has['실재고'] ? r[c['실재고']] : undefined, scan = r[c['스캔재고']], diff = r[c['차이']];
     info.sumSys += num(sys); info.sumScan += num(scan);
-    if (num(diff) === 0 && num(real) - num(scan) === 0) return;
+    // 오차: 차이≠0, 또는 실재고 열이 있는 파일에서 실재고≠스캔재고
+    if (num(diff) === 0 && (!has['실재고'] || num(real) - num(scan) === 0)) return;
     const isbn = normIsbn(rawIsbn);
     if (!index.has(isbn)) index.set(isbn, disc.length);
     disc.push({ isbn, name: r[c['도서명']], field: r[c['분야']], pub: r[c['출판사']], sys, real, miss: r[c['누락재고']], exc: r[c['예외여부']], scan, diff, shelves: [], ssum: 0 });
