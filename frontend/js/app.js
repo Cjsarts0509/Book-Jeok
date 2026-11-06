@@ -3568,11 +3568,12 @@ const App = (() => {
         <div class="sa-src"><span class="sa-lbl">② 서가별스캔데이터</span><select class="input" id="sa-f2" disabled><option>웹하드 파일 불러오는 중…</option></select></div>
         <div class="sa-src-foot muted"><span id="sa-srcinfo"></span><button type="button" class="btn btn-ghost btn-sm" id="sa-reload">🔄 목록 새로고침</button></div>
       </div>`}
-      <div class="modal-actions"><span class="muted" id="sa-status" style="flex:1;font-size:12px"></span><button class="btn btn-ghost" id="sa-close">닫기</button>${isOpened ? '' : '<button class="btn btn-primary" id="sa-run">분석</button>'}</div>
+      <div class="modal-actions"><span class="muted" id="sa-status" style="flex:1;font-size:12px"></span>${!isOpened && isPriv() ? '<button class="btn btn-ghost" id="sa-compare" title="영업점에 전달된 결과로 두 해를 지점별 · 분야별로 비교">📈 전 지점 비교</button>' : ''}<button class="btn btn-ghost" id="sa-close">닫기</button>${isOpened ? '' : '<button class="btn btn-primary" id="sa-run">분석</button>'}</div>
       <div id="sa-result" style="margin-top:12px"></div>`,
       { onClose: () => saSessionSave({ closed: true }) });   // 닫으면 자동 복귀 대상에서 제외
     m.el.querySelector('.modal').classList.add('sa-modal');
     m.q('#sa-close').addEventListener('click', m.close);
+    m.q('#sa-compare')?.addEventListener('click', stockAuditCompareModal);
     const status = (t) => { const s = m.q('#sa-status'); if (s) s.textContent = t || ''; };
     let lastAoa = null; // 다운로드용(헤더+데이터)
 
@@ -4400,6 +4401,106 @@ const App = (() => {
       } catch (err) {
         status(''); m.q('#sa-result').innerHTML = `<p class="muted" style="color:var(--danger)">${esc(err.message)}</p>`;
       } finally { btn.disabled = false; }
+    });
+  }
+
+  // ── 전 지점 재고조사 오차 비교(두 해) ──────────
+  //  서버가 영업점 계정에 전달된 .bjsa(가장 최근 파일, '문구' 폴더 제외)를 읽어 지점 · 분야별 숫자를 준다.
+  //  표 만들기는 순수 함수(cmpBuild · cmpTableHTML)로 — 시험하기 쉽게. 증감은 앞 해(y1) − 뒤 해(y2).
+  const CMP_KEYS = ['items', 'negN', 'neg', 'posN', 'pos', 'abs', 'sd', 'sys'];
+  function cmpEmpty() { return { items: 0, negN: 0, neg: 0, posN: 0, pos: 0, abs: 0, sd: 0, sys: 0 }; }
+  function cmpAdd(a, b) { for (const k of CMP_KEYS) a[k] += Number(b && b[k]) || 0; return a; }
+  // 서버 응답 → { y1, y2, branches: [{ id, name, a, b, fileA, fileB, fields: [{ name, a, b }] }], total: { a, b, nA, nB }, fields: [{ name, a, b }] }
+  function cmpBuild(data) {
+    const { y1, y2 } = data;
+    const branches = (data.rows || []).map((r) => {
+      const A = r.years[y1] || null, B = r.years[y2] || null;
+      const names = new Set([...Object.keys(A ? A.fields : {}), ...Object.keys(B ? B.fields : {})]);
+      const fields = [...names].map((n) => ({ name: n, a: A ? A.fields[n] || null : null, b: B ? B.fields[n] || null : null }))
+        .sort((x, y) => ((y.a ? y.a.abs : 0) + (y.b ? y.b.abs : 0)) - ((x.a ? x.a.abs : 0) + (x.b ? x.b.abs : 0)));
+      return { id: r.branchId, name: r.branchName, a: A, b: B, fileA: A ? A.file : null, fileB: B ? B.file : null, fields };
+    });
+    const total = { a: cmpEmpty(), b: cmpEmpty(), nA: 0, nB: 0 };
+    const fm = new Map();
+    for (const br of branches) {
+      if (br.a) { cmpAdd(total.a, br.a); total.nA++; } if (br.b) { cmpAdd(total.b, br.b); total.nB++; }
+      for (const f of br.fields) { let e = fm.get(f.name); if (!e) { e = { name: f.name, a: cmpEmpty(), b: cmpEmpty() }; fm.set(f.name, e); } if (f.a) cmpAdd(e.a, f.a); if (f.b) cmpAdd(e.b, f.b); }
+    }
+    const fields = [...fm.values()].sort((x, y) => (y.a.abs + y.b.abs) - (x.a.abs + x.b.abs));
+    return { y1, y2, branches, total, fields };
+  }
+  function cmpTableHTML(built, opts = {}) {
+    const esc = UI.escapeHtml, fmt = (n) => Number(n || 0).toLocaleString('ko-KR');
+    const { y1, y2 } = built;
+    const dash = '<span class="muted">—</span>';
+    // 증감: 건수 · 오차 수량은 늘면 나빠진 것(빨강)
+    const dcell = (a, b) => { if (a == null || b == null) return `<td class="num">${dash}</td>`; const d = a - b; return `<td class="num ${d > 0 ? 'up' : d < 0 ? 'down' : ''}">${d > 0 ? '+' : ''}${fmt(d)}</td>`; };
+    const np = (o, nk, qk) => (o ? `${fmt(o[nk])}<small class="muted"> / ${fmt(o[qk])}</small>` : dash);
+    const head = (first, withFile) => `<thead><tr><th rowspan="2">${first}</th><th colspan="3">오차 건수</th><th colspan="2">부족 (건 / 수량)</th><th colspan="2">초과 (건 / 수량)</th><th colspan="3">오차 수량 (부족+초과)</th><th colspan="2">스캔차이 합계</th>${withFile ? '<th rowspan="2">전달 파일</th>' : ''}</tr>
+      <tr><th class="num">${y1}</th><th class="num">${y2}</th><th class="num">증감</th><th class="num">${y1}</th><th class="num">${y2}</th><th class="num">${y1}</th><th class="num">${y2}</th><th class="num">${y1}</th><th class="num">${y2}</th><th class="num">증감</th><th class="num">${y1}</th><th class="num">${y2}</th></tr></thead>`;
+    const line = (label, a, b, cls, file) => `<tr class="${cls || ''}"><td>${label}</td>
+      <td class="num">${a ? fmt(a.items) : dash}</td><td class="num">${b ? fmt(b.items) : dash}</td>${dcell(a ? a.items : null, b ? b.items : null)}
+      <td class="num">${np(a, 'negN', 'neg')}</td><td class="num">${np(b, 'negN', 'neg')}</td>
+      <td class="num">${np(a, 'posN', 'pos')}</td><td class="num">${np(b, 'posN', 'pos')}</td>
+      <td class="num">${a ? fmt(a.abs) : dash}</td><td class="num">${b ? fmt(b.abs) : dash}</td>${dcell(a ? a.abs : null, b ? b.abs : null)}
+      <td class="num">${a ? fmt(a.sd) : dash}</td><td class="num">${b ? fmt(b.sd) : dash}</td>${file == null ? '' : `<td class="cmp-file">${file}</td>`}</tr>`;
+    const fileTxt = (br) => [br.fileA ? `${y1}: ${esc(br.fileA.name)}` : `${y1}: 없음`, br.fileB ? `${y2}: ${esc(br.fileB.name)}` : `${y2}: 없음`].join('<br>');
+    let body = '';
+    for (const br of built.branches) {
+      body += line(`<b>${esc(br.name)}</b>`, br.a, br.b, 'br', fileTxt(br));
+      if (opts.fields) for (const f of br.fields) body += line(`<span class="cmp-sub">↳ ${esc(f.name)}</span>`, f.a, f.b, 'sub', '');
+    }
+    const tot = line(`<b>합계</b> <small class="muted">(${y1}: ${built.total.nA}지점 · ${y2}: ${built.total.nB}지점)</small>`, built.total.nA ? built.total.a : null, built.total.nB ? built.total.b : null, 'tot', '');
+    const fieldsAll = built.fields.length
+      ? `<h4 style="margin:16px 0 6px">분야별 (전 지점 합)</h4><div class="sa-tablewrap" style="max-height:40vh"><table class="sa-table cmp-table">${head('분야', false)}<tbody>${built.fields.map((f) => line(esc(f.name), f.a, f.b, '', null)).join('')}</tbody></table></div>`
+      : '';
+    return `<div class="sa-tablewrap" style="max-height:52vh"><table class="sa-table cmp-table">${head('지점', true)}<tbody>${body}</tbody><tfoot>${tot}</tfoot></table></div>${fieldsAll}`;
+  }
+  function stockAuditCompareModal() {
+    const thisYear = new Date().getFullYear();
+    const yearOpts = (sel) => Array.from({ length: 6 }, (_, k) => thisYear - k).map((y) => `<option value="${y}"${y === sel ? ' selected' : ''}>${y}</option>`).join('');
+    const m = UI.modal(`<h3>📈 전 지점 재고조사 오차 비교</h3>
+      <p class="muted" style="font-size:12px;margin:-6px 0 10px">영업점 계정의 <b>재고조사오차_&lt;년도&gt;</b> 폴더에 전달된 결과(가장 최근 파일)로 두 해를 비교합니다. 예외 항목과 <b>'문구' 폴더</b>의 결과는 뺍니다. 스캔차이 = 스캔합계 + 누락재고 − 전산재고. 증감 = 앞 해 − 뒤 해(빨강이 나빠진 것).</p>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <label>📅 <select class="input" id="cmp-y1">${yearOpts(thisYear)}</select></label><span class="muted">vs</span>
+        <label><select class="input" id="cmp-y2">${yearOpts(thisYear - 1)}</select></label>
+        <button class="btn btn-primary btn-sm" id="cmp-run">비교</button>
+        <label class="muted" style="font-size:12px;display:flex;gap:4px;align-items:center"><input type="checkbox" id="cmp-fields"> 지점마다 분야별 펼치기</label>
+        <span style="flex:1"></span><button class="btn btn-ghost btn-sm" id="cmp-xlsx" disabled>📥 엑셀</button>
+      </div>
+      <div id="cmp-body" style="margin-top:10px"><p class="muted">년도를 고르고 「비교」를 누르세요.</p></div>
+      <div class="modal-actions"><button class="btn btn-ghost" id="cmp-close">닫기</button></div>`);
+    m.el.querySelector('.modal').classList.add('modal-wide');
+    m.q('#cmp-close').addEventListener('click', m.close);
+    let built = null, note = '';
+    const draw = () => { if (built) m.q('#cmp-body').innerHTML = `<p class="muted" style="font-size:12px;margin:0 0 6px">${UI.escapeHtml(note)}</p>` + cmpTableHTML(built, { fields: m.q('#cmp-fields').checked }); };
+    m.q('#cmp-fields').addEventListener('change', draw);
+    m.q('#cmp-run').addEventListener('click', async () => {
+      const y1 = Number(m.q('#cmp-y1').value), y2 = Number(m.q('#cmp-y2').value);
+      if (y1 === y2) return UI.toast('서로 다른 두 해를 고르세요', 'error');
+      const btn = m.q('#cmp-run'); btn.disabled = true; m.q('#cmp-body').innerHTML = '<p class="muted">지점별 결과 파일을 읽는 중… (큰 지점은 몇 초 걸려요)</p>';
+      try {
+        const r = await API.stockAuditCompare(y1, y2);
+        built = cmpBuild(r);
+        const withAny = built.branches.filter((b) => b.a || b.b).length;
+        note = [`지점 ${built.branches.length}곳 중 결과 있는 곳 ${withAny}곳`, r.errors && r.errors.length ? `읽지 못한 파일 ${r.errors.length}개(${r.errors.map((e) => e.branchName + ' ' + e.year).join(', ')})` : ''].filter(Boolean).join(' · ');
+        draw(); m.q('#cmp-xlsx').disabled = false;
+      } catch (e) { m.q('#cmp-body').innerHTML = `<p class="muted" style="color:var(--danger)">${UI.escapeHtml(e.message || '비교 실패')}</p>`; }
+      finally { btn.disabled = false; }
+    });
+    m.q('#cmp-xlsx').addEventListener('click', async () => {
+      if (!built) return;
+      try {
+        const XLSX = await ensureXLSX(); const { y1, y2 } = built;
+        const H = (lbl) => [lbl, `오차건수 ${y1}`, `오차건수 ${y2}`, '증감', `부족건수 ${y1}`, `부족수량 ${y1}`, `부족건수 ${y2}`, `부족수량 ${y2}`, `초과건수 ${y1}`, `초과수량 ${y1}`, `초과건수 ${y2}`, `초과수량 ${y2}`, `오차수량 ${y1}`, `오차수량 ${y2}`, '증감', `스캔차이합계 ${y1}`, `스캔차이합계 ${y2}`];
+        const R = (lbl, a, b, extra) => [lbl, a ? a.items : '', b ? b.items : '', a && b ? a.items - b.items : '', a ? a.negN : '', a ? a.neg : '', b ? b.negN : '', b ? b.neg : '', a ? a.posN : '', a ? a.pos : '', b ? b.posN : '', b ? b.pos : '', a ? a.abs : '', b ? b.abs : '', a && b ? a.abs - b.abs : '', a ? a.sd : '', b ? b.sd : '', ...(extra || [])];
+        const s1 = [[...H('지점'), `파일 ${y1}`, `파일 ${y2}`], ...built.branches.map((br) => R(br.name, br.a, br.b, [br.fileA ? br.fileA.name : '', br.fileB ? br.fileB.name : ''])), R('합계', built.total.nA ? built.total.a : null, built.total.nB ? built.total.b : null)];
+        const s2 = [['지점', ...H('분야')], ...built.branches.flatMap((br) => br.fields.map((f) => [br.name, ...R(f.name, f.a, f.b)]))];
+        const s3 = [H('분야'), ...built.fields.map((f) => R(f.name, f.a, f.b))];
+        const wb = XLSX.utils.book_new();
+        for (const [name, aoa] of [['지점별', s1], ['지점×분야', s2], ['분야별(전 지점)', s3]]) { const ws = XLSX.utils.aoa_to_sheet(aoa); ws['!autofilter'] = { ref: XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: aoa.length - 1, c: aoa[0].length - 1 } }) }; XLSX.utils.book_append_sheet(wb, ws, name); }
+        XLSX.writeFile(wb, `재고조사오차_지점비교_${y1}vs${y2}.xlsx`);
+      } catch (e) { UI.toast(e.message || '엑셀 저장 실패', 'error'); }
     });
   }
 

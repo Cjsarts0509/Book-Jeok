@@ -236,6 +236,39 @@ router.post('/stock-audit/analyze', authenticate, wrap(async (req, res) => {
   } finally { saAnalyzing = false; }
 }));
 
+// ── 전 지점 · 두 해 비교: 영업점 계정의 재고조사오차_<년도> 폴더에 전달된 .bjsa 를 읽어 지점 · 분야별 숫자를 돌려준다 ──
+//  지점 · 해마다 가장 최근에 전달된 파일 하나. '문구' 폴더(경로에 문구가 든 하위 폴더)의 파일은 뺀다 — 문구 재고조사는 비교 대상이 아니다.
+//  담당자 · 관리자만. 영업점 웹하드를 '열람'하는 게 아니라 전달한 결과 파일만 읽는다(deliver 와 같은 전용 경로).
+router.get('/stock-audit/compare', authenticate, wrap(async (req, res) => {
+  if (!['manager', 'admin'].includes(req.user.role)) return res.status(403).json({ error: '권한이 없습니다.' });
+  const yr = (v, d) => { const n = parseInt(String(v || ''), 10); return Number.isInteger(n) && n >= 2000 && n <= 2100 ? n : d; };
+  const y1 = yr(req.query.y1, new Date().getFullYear()), y2 = yr(req.query.y2, y1 - 1);
+  const br = await query("SELECT id, display_name FROM users WHERE role='branch' AND is_active ORDER BY display_name");
+  const files = []; const picked = {};
+  for (const b of br.rows) {
+    for (const y of [y1, y2]) {
+      const folder = `/재고조사오차_${y}`;
+      const r = await query(
+        `SELECT id, folder, original_name, stored_name, created_at FROM files
+          WHERE owner_id=$1 AND deleted_at IS NULL AND original_name ILIKE '%.bjsa'
+            AND (folder = $2 OR folder LIKE $3) AND folder NOT ILIKE '%문구%' AND original_name NOT ILIKE '%문구%'
+          ORDER BY created_at DESC LIMIT 1`,
+        [b.id, folder, folder + '/%']);
+      if (!r.rowCount) continue;
+      const f = r.rows[0]; const disk = path.join(userDir(b.id), f.stored_name);
+      if (!fs.existsSync(disk)) continue;
+      files.push({ branchId: b.id, branchName: b.display_name, year: y, path: disk, name: f.original_name, folder: f.folder, at: f.created_at });
+    }
+  }
+  const out = await stockAudit.compareInWorker(files);
+  // 전달 파일이 하나도 없는 지점도 줄에 넣는다(빈 칸으로 보이게)
+  const have = new Set(out.rows.map((r) => r.branchId));
+  for (const b of br.rows) if (!have.has(b.id)) out.rows.push({ branchId: b.id, branchName: b.display_name, years: {} });
+  out.rows.sort((a, b) => String(a.branchName).localeCompare(String(b.branchName), 'ko'));
+  await audit(req, 'stock-audit-compare', `${y1} vs ${y2} · 지점 ${br.rowCount} · 파일 ${files.length}`, req.user.id);
+  res.json({ y1, y2, rows: out.rows, errors: out.errors, excluded: '문구' });
+}));
+
 // 발급 권한: 그 계정 파일을 다룰 수 있는 사람(resolveOwner 규칙) + 담당자·관리자가 '영업점' 계정에(영업점에 전달과 같은 규칙).
 const SA_REPORT_DAYS = parseInt(process.env.SA_REPORT_KEY_DAYS || '60', 10);
 router.post('/stock-audit/report-key', authenticate, wrap(async (req, res) => {

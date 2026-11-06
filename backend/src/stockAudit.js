@@ -103,6 +103,49 @@ async function analyze(p1, p2) {
   return { disc, info };
 }
 
+// ── 전 지점 · 두 해 비교 ─────────────────────────────
+// 영업점에 전달한 .bjsa(오차 목록 JSON)를 읽어 지점마다 · 분야마다 숫자를 뽑는다. 예외(Y) 항목은 뺀다.
+//  스캔차이는 저장 당시 값이 아니라 지금 규칙(스캔합계 + 누락재고 − 전산재고)으로 다시 계산 — 예전 파일도 같은 잣대로.
+const fsp = require('fs/promises');
+const toN = (v) => { const n = Number(v); return Number.isFinite(n) ? n : num(v); };
+function summarizeDisc(disc) {
+  const S = () => ({ items: 0, negN: 0, neg: 0, posN: 0, pos: 0, sd: 0, abs: 0, sys: 0 });
+  const all = S(), fields = {};
+  for (const d of disc || []) {
+    if (!d || String(d.exc || '').trim().toUpperCase() === 'Y') continue;
+    const ssum = d.ssum != null && d.ssum !== '' ? toN(d.ssum) : (d.shelves || []).reduce((a, s) => a + toN(s[1]), 0);
+    const sd = ssum + toN(d.miss) - toN(d.sys);
+    const f = String(d.field == null || d.field === '' ? '(분야 없음)' : d.field);
+    const bucket = fields[f] || (fields[f] = S());
+    for (const o of [all, bucket]) { o.items++; o.sd += sd; o.abs += Math.abs(sd); o.sys += toN(d.sys); if (sd < 0) { o.negN++; o.neg += sd; } else if (sd > 0) { o.posN++; o.pos += sd; } }
+  }
+  return { ...all, fields };
+}
+// files: [{ branchId, branchName, year, path, name, folder, at }] → { rows: [{ branchId, branchName, years: { [year]: { ...summary, file } } }], errors }
+async function compare(files) {
+  const byBranch = new Map(); const errors = [];
+  for (const f of files) {
+    let row = byBranch.get(f.branchId); if (!row) { row = { branchId: f.branchId, branchName: f.branchName, years: {} }; byBranch.set(f.branchId, row); }
+    try {
+      const txt = await fsp.readFile(f.path, 'utf8');
+      const j = JSON.parse(txt);
+      const disc = Array.isArray(j) ? j : (j && Array.isArray(j.disc) ? j.disc : null);
+      if (!disc) throw new Error('오차 목록이 없는 파일');
+      row.years[f.year] = { ...summarizeDisc(disc), file: { name: f.name, folder: f.folder, at: f.at, deliveredAt: j.deliveredAt || null } };
+    } catch (e) { errors.push({ branchName: f.branchName, year: f.year, name: f.name, error: e.message }); }
+  }
+  return { rows: [...byBranch.values()], errors };
+}
+function compareInWorker(files) {
+  return new Promise((resolve, reject) => {
+    const w = new Worker(__filename, { workerData: { compare: files }, resourceLimits: { maxOldGenerationSizeMb: 2048 } });
+    let done = false;
+    w.on('message', (m) => { done = true; if (m.ok) resolve(m.result); else reject(new Error(m.error || '비교 실패')); });
+    w.on('error', (e) => { if (!done) { done = true; reject(e); } });
+    w.on('exit', (code) => { if (!done) { done = true; reject(new Error('비교 작업이 중단되었습니다(코드 ' + code + ')')); } });
+  });
+}
+
 // worker 스레드에서 돌린다(CPU 작업이 이벤트 루프를 막지 않게). 메모리 상한 2GB.
 function analyzeInWorker(p1, p2) {
   return new Promise((resolve, reject) => {
@@ -114,10 +157,10 @@ function analyzeInWorker(p1, p2) {
   });
 }
 
-if (!isMainThread && workerData && workerData.p1) {
-  analyze(workerData.p1, workerData.p2)
+if (!isMainThread && workerData && (workerData.p1 || workerData.compare)) {
+  (workerData.compare ? compare(workerData.compare) : analyze(workerData.p1, workerData.p2))
     .then((result) => parentPort.postMessage({ ok: true, result }))
     .catch((e) => parentPort.postMessage({ ok: false, error: e && e.message ? e.message : String(e) }));
 }
 
-module.exports = { analyze, analyzeInWorker, normShelf, normIsbn };
+module.exports = { analyze, analyzeInWorker, summarizeDisc, compare, compareInWorker, normShelf, normIsbn };
