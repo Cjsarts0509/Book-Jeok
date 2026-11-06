@@ -68,7 +68,7 @@ async function analyze(p1, p2) {
     if (num(diff) === 0) return;   // 오차 = 차이≠0 (엑셀에서 직접 세는 기준과 같게)
     const isbn = normIsbn(rawIsbn);
     if (!index.has(isbn)) index.set(isbn, disc.length);
-    disc.push({ isbn, name: r[c['도서명']], field: r[c['분야']], pub: r[c['출판사']], sys, real, miss: r[c['누락재고']], exc: r[c['예외여부']], scan, diff, shelves: [], ssum: 0 });
+    disc.push({ isbn, name: r[c['도서명']], field: r[c['분야']], pub: r[c['출판사']], sys, real, miss: has['누락재고'] ? r[c['누락재고']] : 0, exc: r[c['예외여부']], scan, diff, shelves: [], ssum: 0 });
   });
   // 첫 시트가 요약 시트면(ISBN 머리글 없음 · 줄 거의 없음) 다음 시트를 차례로 본다
   const first = await readXlsxRows(p1, (row) => { g1.row(row); });

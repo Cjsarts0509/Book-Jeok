@@ -3716,15 +3716,15 @@ const App = (() => {
     }
     const isExc = (d) => String(d.exc == null ? '' : d.exc).trim().toUpperCase() === 'Y';
     const excOk = (d) => (saFilterExc === 'all' ? true : saFilterExc === 'only' ? isExc(d) : !isExc(d));
-    // 표·엑셀 열(12열). 실재고·누락재고·예외여부·스캔재고·차이는 쓰지 않는다
+    // 표·엑셀 열(13열). 실재고·예외여부·스캔재고·차이는 쓰지 않는다(누락재고는 스캔차이에 더한다)
     //   (예외여부 Y 는 분석에서 이미 빠지고, 원본 차이 = 스캔재고 − 전산재고 = 스캔차이라 겹친다).
     //   shelf=true 는 서가 분해값(수불처코드·대/중/소분류·스캔수량)으로 disc 항목이 아닌 '행'에서 취함.
     //   calc 는 항목 값으로 계산하는 열(스캔합계·스캔차이).
-    const SA_HEADERS = ['분야', 'ISBN', '도서명', '출판사', '수불처코드', '대분류', '중분류', '소분류', '스캔수량', '전산재고', '스캔합계', '스캔차이'];
+    const SA_HEADERS = ['분야', 'ISBN', '도서명', '출판사', '수불처코드', '대분류', '중분류', '소분류', '스캔수량', '전산재고', '누락재고', '스캔합계', '스캔차이'];
     const SA_COLS = [
       { k: 'field', num: false }, { k: 'isbn', num: false }, { k: 'name', num: false }, { k: 'pub', num: false },
       { k: 'code', num: false, shelf: true }, { k: 'maj', num: false, shelf: true }, { k: 'mid', num: false, shelf: true }, { k: 'min', num: false, shelf: true },
-      { k: 'qty', num: true, shelf: true }, { k: 'sys', num: true },
+      { k: 'qty', num: true, shelf: true }, { k: 'sys', num: true }, { k: 'miss', num: true, calc: (d) => missing(d) },
       { k: 'ssum', num: true, calc: (d) => scanSum(d) }, { k: 'sdiff', num: true, calc: (d) => scanDiff(d) },
     ];
 
@@ -3778,7 +3778,9 @@ const App = (() => {
       if (d.ssum != null && d.ssum !== '') return num(d.ssum);
       return (d.shelves || []).reduce((a, s) => a + num(s[1]), 0);
     }
-    const scanDiff = (d) => scanSum(d) - num(d.sys);
+    // 누락재고: 시스템이 '있는 것으로 맞춰 둔' 수량(실재고 = 스캔재고 + 누락재고). 오차는 이걸 더해서 — 엑셀의 '차이'와 같은 기준.
+    const missing = (d) => num(d.miss);
+    const scanDiff = (d) => scanSum(d) + missing(d) - num(d.sys);
     // 표시할 항목(disc) 순서: 필터 적용 + (열 클릭 시) 항목 정렬. 서가 열로 정렬하면 그 항목의 '첫(=중분류 최소)' 서가값 기준.
     function buildOrder() {
       let idx = disc.map((_, i) => i).filter((i) => {
@@ -3821,7 +3823,7 @@ const App = (() => {
         const shelfTd = (h) => `<td class="sa-shelf">${h}</td>`;
         const shc = [stack(sh.map((x) => x.code)), stack(sh.map((x) => x.maj)), stack(sh.map((x) => x.mid)), stack(sh.map((x) => x.min))].map(shelfTd).join('');
         const sd = scanDiff(d);
-        const tail = `${shelfTd(stack(sh.map((x) => x.qty)))}<td>${esc(String(d.sys == null ? '' : d.sys))}</td><td>${scanSum(d)}</td><td class="${sd ? 'sa-sdiff' : ''}">${sd}</td>`;
+        const tail = `${shelfTd(stack(sh.map((x) => x.qty)))}<td>${esc(String(d.sys == null ? '' : d.sys))}</td><td>${missing(d) || ''}</td><td>${scanSum(d)}</td><td class="${sd ? 'sa-sdiff' : ''}">${sd}</td>`;
         const grp = saFilterCross === 'only' ? saCross.groupOf.get(d.isbn) : 0;
         return `<tr data-ri="${ri}"${grp ? ` class="sa-xgrp${grp % 2 ? ' odd' : ''}"` : ''}>${b4}${shc}${tail}</tr>`;
       }).join('');
@@ -3951,7 +3953,7 @@ const App = (() => {
             <div class="sad-title">${esc(String(d.name == null ? '(제목없음)' : d.name))}</div>
             <div class="sad-sub">${esc(String(d.pub == null ? '' : d.pub))}${d.field ? ' · ' + esc(String(d.field)) : ''}</div>
             <div class="sad-isbn">ISBN ${esc(d.isbn)}</div>
-            <div class="sad-stock"><span>전산재고<b>${esc(String(d.sys == null ? '' : d.sys))}</b></span><span>스캔재고<b>${esc(String(d.scan == null ? '' : d.scan))}</b></span><span class="diff">차이<b>${esc(String(d.diff == null ? '' : d.diff))}</b></span><span>스캔합계<b>${scanSum(d)}</b></span><span class="diff">스캔차이<b>${scanDiff(d)}</b></span></div>
+            <div class="sad-stock"><span>전산재고<b>${esc(String(d.sys == null ? '' : d.sys))}</b></span><span>스캔재고<b>${esc(String(d.scan == null ? '' : d.scan))}</b></span><span class="diff">차이<b>${esc(String(d.diff == null ? '' : d.diff))}</b></span><span>누락재고<b>${missing(d)}</b></span><span>스캔합계<b>${scanSum(d)}</b></span><span class="diff">스캔차이<b>${scanDiff(d)}</b></span></div>
           </div>
         </div>
         <div class="sad-shelves"><div class="lbl">서가번호 (실사수량)</div>${shelfChips}</div>
@@ -4166,7 +4168,7 @@ const App = (() => {
       const H1 = withExc ? [...SA_HEADERS, '예외'] : SA_HEADERS;
 
       // ① 서가별(병합) — 분야 ISBN 도서명 출판사 | 수불처코드 대 중 소 | 스캔수량 | 전산재고 | 스캔합계 스캔차이 (| 예외)
-      const MERGE_COLS = withExc ? [0, 1, 2, 3, 9, 10, 11, 12] : [0, 1, 2, 3, 9, 10, 11];
+      const MERGE_COLS = withExc ? [0, 1, 2, 3, 9, 10, 11, 12, 13] : [0, 1, 2, 3, 9, 10, 11, 12];
       const rows = []; const merges = [];
       for (const d of list) {
         const sh = itemShelves(d);                        // 항목 내 서가 위치 순 정렬
@@ -4176,14 +4178,14 @@ const App = (() => {
         //  비어 있으면 '0 빼기' 같은 필터에서 첫 줄만 숨고 나머지 줄은 (빈 값이라) 남았다.
         //  숫자 칸(전산재고·스캔합계·스캔차이)의 가려진 줄은 '글자'로 넣는다: 필터 목록에선 같은 값으로 묶이고,
         //  SUM·피벗 합계는 글자를 세지 않아 서가별로 합쳐도 두 번 세어지지 않는다.
-        const sys = d.sys, ss = scanSum(d), sd = scanDiff(d);
+        const sys = d.sys, ms = missing(d), ss = scanSum(d), sd = scanDiff(d);
         const asStr = (v) => (v === '' || v == null ? '' : String(v));
         shelves.forEach((s, k) => {
           const first = k === 0;
           const row = [
             d.field, d.isbn, d.name, d.pub,
             s.code, s.maj, s.mid, s.min,
-            s.qty, first ? sys : asStr(sys),
+            s.qty, first ? sys : asStr(sys), first ? ms : asStr(ms),
             first ? ss : asStr(ss), first ? sd : asStr(sd),
           ];
           if (withExc) row.push(isExc(d) ? 'Y' : '');
@@ -4194,19 +4196,19 @@ const App = (() => {
       const ws = XLSX.utils.aoa_to_sheet([H1, ...rows]);
       asText(ws, rows.length, [1, 4, 5, 6, 7]);   // ISBN, 수불처코드, 대분류, 중분류, 소분류
       ws['!merges'] = merges;
-      ws['!cols'] = widths([12, 15, 34, 14, 10, 8, 7, 7, 8, 8, 8, 8, 6]);
+      ws['!cols'] = widths([12, 15, 34, 14, 10, 8, 7, 7, 8, 8, 8, 8, 8, 6]);
       filterAll(ws, rows.length, H1.length);
 
       // ② 항목별(정렬용)
-      const h2 = ['분야', 'ISBN', '도서명', '출판사', '전산재고', '스캔합계', '스캔차이', '서가수', '서가 (스캔수량)', ...(withExc ? ['예외'] : [])];
+      const h2 = ['분야', 'ISBN', '도서명', '출판사', '전산재고', '누락재고', '스캔합계', '스캔차이', '서가수', '서가 (스캔수량)', ...(withExc ? ['예외'] : [])];
       const rows2 = list.map((d) => {
         const sh = itemShelves(d);
         const where = sh.map((s) => (s.maj ? `${s.code}-${s.maj}-${s.mid}-${s.min}` : s.code) + ` 스캔 ${s.qty}`).join(' / ');
-        return [d.field, d.isbn, d.name, d.pub, d.sys, scanSum(d), scanDiff(d), sh.length, where, ...(withExc ? [isExc(d) ? 'Y' : ''] : [])];
+        return [d.field, d.isbn, d.name, d.pub, d.sys, missing(d), scanSum(d), scanDiff(d), sh.length, where, ...(withExc ? [isExc(d) ? 'Y' : ''] : [])];
       });
       const ws2 = XLSX.utils.aoa_to_sheet([h2, ...rows2]);
       asText(ws2, rows2.length, [1]);
-      ws2['!cols'] = widths([12, 15, 34, 14, 8, 8, 8, 6, 60]);
+      ws2['!cols'] = widths([12, 15, 34, 14, 8, 8, 8, 8, 6, 60]);
       filterAll(ws2, rows2.length, h2.length);
 
       const wb = XLSX.utils.book_new();
@@ -4215,18 +4217,18 @@ const App = (() => {
       // 교차 스캔 의심 — 짝마다 두 줄(더 찍힘 · 덜 찍힘). 예외 선택과 상관없이 예외가 아닌 항목끼리의 짝.
       if (saCross.pairs.length) {
         const by = discByIsbn();
-        const h3 = ['짝', '판단', '근거', '구분', '분야', 'ISBN', '도서명', '출판사', '전산재고', '스캔합계', '스캔차이', '서가 (스캔수량)'];
+        const h3 = ['짝', '판단', '근거', '구분', '분야', 'ISBN', '도서명', '출판사', '전산재고', '누락재고', '스캔합계', '스캔차이', '서가 (스캔수량)'];
         const rows3 = [];
         saCross.pairs.forEach((p, i) => {
           for (const [k, tag] of [[p.plus, '더 찍힘(+)'], [p.minus, '덜 찍힘(−)']]) {
             const d = by.get(k); if (!d) continue;
             const where = itemShelves(d).map((x) => (x.maj ? `${x.code}-${x.maj}-${x.mid}-${x.min}` : x.code) + ` 스캔 ${x.qty}`).join(' / ');
-            rows3.push([i + 1, p.label, p.why.join(' · '), tag, d.field, d.isbn, d.name, d.pub, d.sys, scanSum(d), scanDiff(d), where]);
+            rows3.push([i + 1, p.label, p.why.join(' · '), tag, d.field, d.isbn, d.name, d.pub, d.sys, missing(d), scanSum(d), scanDiff(d), where]);
           }
         });
         const ws3 = XLSX.utils.aoa_to_sheet([h3, ...rows3]);
         asText(ws3, rows3.length, [5]);
-        ws3['!cols'] = widths([5, 6, 34, 10, 12, 15, 40, 14, 8, 8, 8, 50]);
+        ws3['!cols'] = widths([5, 6, 34, 10, 12, 15, 40, 14, 8, 8, 8, 8, 50]);
         filterAll(ws3, rows3.length, h3.length);
         XLSX.utils.book_append_sheet(wb, ws3, '교차스캔의심');
       }
@@ -4264,7 +4266,7 @@ const App = (() => {
         // 예외 항목도 넣고(e) 보고서의 '예외' 필터로 고른다(기본 빼기)
         const items = disc.map((d) => ({
           f: String(d.field == null ? '' : d.field), i: String(d.isbn), n: d.name == null ? '' : String(d.name), p: d.pub == null ? '' : String(d.pub),
-          s: num(d.sys), ss: scanSum(d), sd: scanDiff(d), e: isExc(d),
+          s: num(d.sys), m: missing(d), ss: scanSum(d), sd: scanDiff(d), e: isExc(d),
           sh: itemShelves(d).map((x) => [x.code, x.maj, x.mid, x.min, num(x.qty)]),
           ...(saCross.byKey.has(d.isbn) ? { x: saCross.byKey.get(d.isbn).map((c) => [c.other, c.grade, c.label, c.why.join(' · ')]), xg: saCross.groupOf.get(d.isbn) } : {}),
         }));

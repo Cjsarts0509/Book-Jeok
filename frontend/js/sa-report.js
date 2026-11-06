@@ -570,15 +570,15 @@ table.m tbody.g tr:last-child td{border-bottom:1px solid var(--border);padding-b
       const rows = view();
       if (!rows.length) return toast('조회된 항목이 없습니다', 'err');
       const crossTxt = (x) => (x.x || []).map((c) => { const o = byIsbn.get(c[0]); return `${c[0]}${o ? ' ' + o.n : ''} (${c[2]})`; }).join(' / ');
-      const items = { name: '항목별', filter: true, widths: [12, 15, 40, 18, 9, 9, 9, 7, 40, 6, 6, 6, 40],
-        head: ['분야', 'ISBN', '도서명', '출판사', '전산재고', '스캔합계', '스캔차이', '서가수', '서가 (스캔수량)', '확인', '사진', '예외', '교차 의심'],
-        rows: rows.map(({ x, sh }) => [x.f, x.i, x.n, x.p, Number(x.s) || 0, Number(x.ss) || 0, Number(x.sd) || 0, sh.length, sh.map(shelfTxt).join(' / '), isDone(x.i) ? '✓' : '', photoCount(x.i) || '', x.e ? 'Y' : '', crossTxt(x)]) };
-      const shelf = { name: '서가별', widths: [12, 15, 40, 18, 10, 8, 8, 8, 9, 9, 9, 9], head: ['분야', 'ISBN', '도서명', '출판사', '수불처코드', '대분류', '중분류', '소분류', '스캔수량', '전산재고', '스캔합계', '스캔차이'], rows: [] };
+      const items = { name: '항목별', filter: true, widths: [12, 15, 40, 18, 9, 9, 9, 9, 7, 40, 6, 6, 6, 40],
+        head: ['분야', 'ISBN', '도서명', '출판사', '전산재고', '누락재고', '스캔합계', '스캔차이', '서가수', '서가 (스캔수량)', '확인', '사진', '예외', '교차 의심'],
+        rows: rows.map(({ x, sh }) => [x.f, x.i, x.n, x.p, Number(x.s) || 0, Number(x.m) || 0, Number(x.ss) || 0, Number(x.sd) || 0, sh.length, sh.map(shelfTxt).join(' / '), isDone(x.i) ? '✓' : '', photoCount(x.i) || '', x.e ? 'Y' : '', crossTxt(x)]) };
+      const shelf = { name: '서가별', widths: [12, 15, 40, 18, 10, 8, 8, 8, 9, 9, 9, 9, 9], head: ['분야', 'ISBN', '도서명', '출판사', '수불처코드', '대분류', '중분류', '소분류', '스캔수량', '전산재고', '누락재고', '스캔합계', '스캔차이'], rows: [] };
       for (const { x, sh } of rows) {
         const list = sh.length ? sh : [['', '', '', '', '']];
         list.forEach((s2, k) => shelf.rows.push(k === 0
-          ? [x.f, x.i, x.n, x.p, s2[0], s2[1], s2[2], s2[3], s2[4] === '' ? '' : Number(s2[4]) || 0, Number(x.s) || 0, Number(x.ss) || 0, Number(x.sd) || 0]
-          : ['', '', '', '', s2[0], s2[1], s2[2], s2[3], Number(s2[4]) || 0, '', '', '']));
+          ? [x.f, x.i, x.n, x.p, s2[0], s2[1], s2[2], s2[3], s2[4] === '' ? '' : Number(s2[4]) || 0, Number(x.s) || 0, Number(x.m) || 0, Number(x.ss) || 0, Number(x.sd) || 0]
+          : ['', '', '', '', s2[0], s2[1], s2[2], s2[3], Number(s2[4]) || 0, '', '', '', '']));
       }
       const fsRows = fieldStats();
       const tot = fsRows.reduce((a, r) => { for (const k of ['n', 's', 'ss', 'sd', 'negN', 'neg', 'posN', 'pos', 'done', 'cross']) a[k] += r[k]; return a; }, { f: '합계', n: 0, s: 0, ss: 0, sd: 0, negN: 0, neg: 0, posN: 0, pos: 0, done: 0, cross: 0 });
@@ -592,7 +592,8 @@ table.m tbody.g tr:last-child td{border-bottom:1px solid var(--border);padding-b
       toast(`항목 ${fmt(items.rows.length)}건 · 서가 ${fmt(shelf.rows.length)}줄을 엑셀로 저장했습니다${filtered ? ' (지금 필터 기준)' : ''}`, 'ok');
     }
     // 머리글(PC: 12열 · 휴대폰: 분야·상품코드·상품명·차이)
-    const HEAD_PC = [['f', '분야'], ['i', 'ISBN'], ['n', '도서명'], ['p', '출판사'], ['loc', '수불처코드'], ['', '대분류'], ['', '중분류'], ['', '소분류'], ['', '스캔수량', 1], ['s', '전산재고', 1], ['ss', '스캔합계', 1], ['sd', '스캔차이', 1]];
+    // 누락재고(m): 시스템이 있는 것으로 맞춰 둔 수량 — 스캔차이 = 스캔합계 + 누락재고 − 전산재고 (앱이 계산해 넣음)
+    const HEAD_PC = [['f', '분야'], ['i', 'ISBN'], ['n', '도서명'], ['p', '출판사'], ['loc', '수불처코드'], ['', '대분류'], ['', '중분류'], ['', '소분류'], ['', '스캔수량', 1], ['s', '전산재고', 1], ['m', '누락재고', 1], ['ss', '스캔합계', 1], ['sd', '스캔차이', 1]];
     const HEAD_M = [['f', '분야'], ['i', '상품코드'], ['n', '상품명'], ['sd', '차이', 1]];
     const shelfNo = (s) => `${s[0]}-${s[1]}-${s[2]}-${s[3]}`;
     // 휴대폰에선 수불처코드(앞 세 자리)는 빼고 대-중-소만 — 한 영업점 안에선 늘 같아 자리만 차지한다
@@ -624,7 +625,7 @@ table.m tbody.g tr:last-child td{border-bottom:1px solid var(--border);padding-b
         const pc = photoCount(o.i), done = isDone(o.i);
         const where = (o.sh || []).slice(0, 2).map((s2) => (MQ.matches ? shelfNoM(s2) : shelfNo(s2))).join(', ') + ((o.sh || []).length > 2 ? ` 외 ${o.sh.length - 2}` : '');
         return `<div class="pside" data-oi="${esc(o.i)}" title="${esc(o.n)}"><div class="pn"><b>${esc(mobile ? cut(o.n, 18) : o.n)}${pc ? ` <span class="tag ph">📷 ${pc}</span>` : ''}${done && !pc ? ' <span class="tag ok">✓</span>' : ''}</b><small>${esc(o.i)}${where ? ' · ' + esc(where) : ' · 서가 없음'}</small></div>
-          <div class="pq"><span class="diff ${o.sd < 0 ? 'neg' : 'pos'}">${sgn(o.sd)}</span>전산 ${fmt(o.s)} · 스캔 ${fmt(o.ss)}</div></div>`;
+          <div class="pq"><span class="diff ${o.sd < 0 ? 'neg' : 'pos'}">${sgn(o.sd)}</span>전산 ${fmt(o.s)}${o.m ? ` · 누락 ${fmt(o.m)}` : ''} · 스캔 ${fmt(o.ss)}</div></div>`;
       };
       const html = list.map((p, k) => `<tbody class="g${k % 2 ? ' ev' : ''}${isDone(p.P.i) && isDone(p.M.i) ? ' done' : ''}" data-i="${esc(p.P.i)}"><tr>
           <td class="pg"><span class="pgrade g${p.grade}">${esc(p.label)}</span></td><td>${side(p.P)}</td><td class="pm">↔</td><td>${side(p.M)}</td>${mobile ? '' : `<td class="pwhy">${esc(p.why)}</td>`}</tr>
@@ -650,7 +651,7 @@ table.m tbody.g tr:last-child td{border-bottom:1px solid var(--border);padding-b
     //  열 너비: 표가 여럿이라 같은 <colgroup>(px) 을 모두에 넣어 맞춘다 — 제일 긴 글(probe 줄)과 첫 블록으로 자동 배치해 잰 값.
     //  합계 · 건수 · 정렬 · 필터는 전체 기준 그대로. 짝 표(교차 의심만)는 수가 적어 예전처럼 #t 한 표에 그린다. 인쇄 때는 한 표로 전부.
     const STEP = 20, KEEP = 1.5, KEEP_IDLE = 4;    // 블록 크기(건) · 스크롤 중엔 화면 몇 개 밖까지 · 쉬는 동안엔 몇 개까지 미리(그 밖은 뗀다)
-    const WIN = { parts: [], h: [], a: 0, b: 0, est: 34, cols: 12, all: false, pend: false, cg: '', mobile: false, probe: '' };
+    const WIN = { parts: [], h: [], a: 0, b: 0, est: 34, cols: 13, all: false, pend: false, cg: '', mobile: false, probe: '' };
     const wrap = $('.tbl-wrap'), tbl = $('#t'), blocks = $('#blocks'), tft = $('#tft');
     const sumH = (a, b) => { let s = 0; for (let i = a; i < b; i++) s += WIN.h[i] || WIN.est; return s; };
     const spTop = $('#sp-top'), spBot = $('#sp-bot');
@@ -747,7 +748,7 @@ table.m tbody.g tr:last-child td{border-bottom:1px solid var(--border);padding-b
       const n = parts.length, oldA = WIN.a, oldB = WIN.b, oldTop = wrap.scrollTop;
       blocks.querySelectorAll('table.blk').forEach((g) => g.remove());
       document.querySelectorAll('#t > tbody').forEach((g) => g.remove());   // 짝 표에서 돌아올 때
-      WIN.parts = parts; WIN.cols = mobile ? 4 : 12; WIN.all = false; WIN.mobile = mobile; WIN.probe = probe; lastSp = '';
+      WIN.parts = parts; WIN.cols = mobile ? 4 : 13; WIN.all = false; WIN.mobile = mobile; WIN.probe = probe; lastSp = '';
       tbl.classList.toggle('m', mobile); tft.classList.toggle('m', mobile);
       if (!keep || n !== WIN.h.length) { WIN.h = new Array(n); WIN.a = WIN.b = 0; WIN.estOk = false; }
       if (!n) { setSpacers(); return; }
@@ -772,18 +773,18 @@ table.m tbody.g tr:last-child td{border-bottom:1px solid var(--border);padding-b
       const head = mobile ? HEAD_M : HEAD_PC;
       $('#t').classList.toggle('m', mobile);
       $('#th').innerHTML = '<tr>' + head.map(([k, label, num]) => `<th${k ? ` data-k="${k}"` : ''}${num ? ' class="num"' : ''}>${label}${k ? `<span class="ar">${st.sort.k === k ? (st.sort.dir > 0 ? '▲' : '▼') : ''}</span>` : ''}</th>`).join('') + '</tr>';
-      const parts = []; let html = '', sSys = 0, sQty = 0, sSum = 0, sDiff = 0;
-      const L = { f: '', i: '', p: '', c0: '', c1: '', c2: '', c3: '', q: '', s: '', ss: '', sd: '' };   // 열마다 제일 긴 글(너비 재기용)
+      const parts = []; let html = '', sSys = 0, sMiss = 0, sQty = 0, sSum = 0, sDiff = 0;
+      const L = { f: '', i: '', p: '', c0: '', c1: '', c2: '', c3: '', q: '', s: '', m: '', ss: '', sd: '' };   // 열마다 제일 긴 글(너비 재기용)
       const longer = (k, v) => { v = String(v == null ? '' : v); if (v.length > L[k].length) L[k] = v; };
       for (const { x, sh } of rows) {
         html = '';
-        longer('f', x.f); longer('i', x.i); longer('p', x.p); longer('s', fmt(x.s)); longer('ss', fmt(x.ss)); longer('sd', sgn(x.sd));
+        longer('f', x.f); longer('i', x.i); longer('p', x.p); longer('s', fmt(x.s)); longer('m', fmt(x.m || 0)); longer('ss', fmt(x.ss)); longer('sd', sgn(x.sd));
         for (const s2 of sh) { longer('c0', s2[0]); longer('c1', s2[1]); longer('c2', s2[2]); longer('c3', s2[3]); longer('q', fmt(s2[4])); }
         const dc = x.sd < 0 ? 'neg' : x.sd > 0 ? 'pos' : 'zero';
         const pc = photoCount(x.i), done = isDone(x.i);
         const xtip = x.x ? x.x.map((c) => { const o = byIsbn.get(c[0]); return `${o ? o.n : c[0]} ${o ? sgn(o.sd) : ''} (${c[2]})`; }).join('\n') : '';
         const tags = `${x.x ? `<span class="tag xs" title="교차 스캔 의심 — 같이 확인할 책\n${esc(xtip)}">🔀</span>` : ''}${pc ? `<span class="tag ph">📷 ${pc}</span>` : ''}${done && !pc ? '<span class="tag ok">✓</span>' : ''}${x.e ? '<span class="tag ex">예외</span>' : ''}`;
-        sSys += x.s; sSum += x.ss; sDiff += x.sd;
+        sSys += x.s; sMiss += x.m || 0; sSum += x.ss; sDiff += x.sd;
         html += `<tbody class="g${parts.length % 2 ? ' ev' : ''}${done ? ' done' : ''}" data-i="${esc(x.i)}">`;
         if (mobile) {
           // 1줄: 분야 · 상품코드 · 상품명(10자 넘으면 …) · 차이 / 2~3줄: 서가 한 줄에 두 곳씩(최대 4곳, 넘치면 '외 N곳')
@@ -804,7 +805,7 @@ table.m tbody.g tr:last-child td{border-bottom:1px solid var(--border);padding-b
             if (k === 0) html += `<td${rs}>${x.f ? `<span class="chip">${esc(x.f)}</span>` : ''}</td><td${rs} class="isbn">${esc(x.i)}</td><td${rs} class="name">${esc(x.n)}${tags}</td><td${rs}>${esc(x.p)}</td>`;
             html += `<td class="code">${esc(s2[0])}</td><td class="code">${esc(s2[1])}</td><td class="code">${esc(s2[2])}</td><td class="code">${esc(s2[3])}</td>`;
             html += `<td class="num">${s2[4] === '' ? '' : fmt(s2[4])}</td>`;
-            if (k === 0) html += `<td${rs} class="num">${fmt(x.s)}</td>`;
+            if (k === 0) html += `<td${rs} class="num">${fmt(x.s)}</td><td${rs} class="num">${x.m ? fmt(x.m) : ''}</td>`;
             if (k === 0) html += `<td${rs} class="num">${fmt(x.ss)}</td><td${rs} class="num diff ${dc}">${sgn(x.sd)}</td>`;
             html += '</tr>';
           });
@@ -816,13 +817,13 @@ table.m tbody.g tr:last-child td{border-bottom:1px solid var(--border);padding-b
       // probe 줄: 열마다 제일 긴 글 — 열 너비를 이걸로 재서 고정하면 뒤쪽 줄이 와도 열이 안 움직인다(보이지 않고 높이 0)
       const probe = mobile
         ? `<tbody class="probe"><tr><td><span class="chip">${esc(cut(L.f, 6))}</span></td><td class="isbn">${esc(L.i)}</td><td></td><td class="num diff">${esc(L.sd)}</td></tr></tbody>`
-        : `<tbody class="probe"><tr><td><span class="chip">${esc(L.f)}</span></td><td class="isbn">${esc(L.i)}</td><td></td><td>${esc(L.p)}</td><td class="code">${esc(L.c0)}</td><td class="code">${esc(L.c1)}</td><td class="code">${esc(L.c2)}</td><td class="code">${esc(L.c3)}</td><td class="num">${esc(L.q)}</td><td class="num">${esc(L.s)}</td><td class="num">${esc(L.ss)}</td><td class="num diff">${esc(L.sd)}</td></tr></tbody>`;
+        : `<tbody class="probe"><tr><td><span class="chip">${esc(L.f)}</span></td><td class="isbn">${esc(L.i)}</td><td></td><td>${esc(L.p)}</td><td class="code">${esc(L.c0)}</td><td class="code">${esc(L.c1)}</td><td class="code">${esc(L.c2)}</td><td class="code">${esc(L.c3)}</td><td class="num">${esc(L.q)}</td><td class="num">${esc(L.s)}</td><td class="num">${esc(L.m)}</td><td class="num">${esc(L.ss)}</td><td class="num diff">${esc(L.sd)}</td></tr></tbody>`;
       winStart(parts, probe, mobile, keep);
       $('#empty').style.display = rows.length ? 'none' : '';
       const dcls = sDiff < 0 ? 'neg' : sDiff > 0 ? 'pos' : 'zero';
       $('#tf').innerHTML = !rows.length ? '' : mobile
         ? `<tr><td colspan="3">합계 · ${fmt(rows.length)}건</td><td class="num diff ${dcls}">${sgn(sDiff)}</td></tr>`
-        : `<tr><td colspan="8">합계 · 항목 ${fmt(rows.length)}건</td><td class="num">${fmt(sQty)}</td><td class="num">${fmt(sSys)}</td><td class="num">${fmt(sSum)}</td><td class="num diff ${dcls}">${sgn(sDiff)}</td></tr>`;
+        : `<tr><td colspan="8">합계 · 항목 ${fmt(rows.length)}건</td><td class="num">${fmt(sQty)}</td><td class="num">${fmt(sSys)}</td><td class="num">${fmt(sMiss)}</td><td class="num">${fmt(sSum)}</td><td class="num diff ${dcls}">${sgn(sDiff)}</td></tr>`;
       const total = items.filter(excOk).length;
       $('#count').textContent = rows.length === total ? `전체 ${fmt(total)}건` : `${fmt(rows.length)}건 / 전체 ${fmt(total)}건`;
       $('#f-field-btn').classList.toggle('on', st.fields.size > 0);
@@ -872,7 +873,7 @@ table.m tbody.g tr:last-child td{border-bottom:1px solid var(--border);padding-b
       const m = modal(`<h3>📖 도서 상세${x.e ? ' <span class="tag ex">예외</span>' : ''}</h3>
         <div class="d-top"><div class="d-cover" id="d-cover"></div>
           <div class="d-meta"><div class="d-title">${esc(x.n || '(제목없음)')}</div><div class="d-sub">${esc(x.p)}${x.f ? ' · ' + esc(x.f) : ''}</div><div class="d-isbn">ISBN ${esc(x.i)}</div>
-            <div class="d-stock"><span>전산재고<b>${fmt(x.s)}</b></span><span>스캔합계<b>${fmt(x.ss)}</b></span><span class="${dc}">스캔차이<b>${sgn(x.sd)}</b></span></div></div></div>
+            <div class="d-stock"><span>전산재고<b>${fmt(x.s)}</b></span><span>누락재고<b>${fmt(x.m || 0)}</b></span><span>스캔합계<b>${fmt(x.ss)}</b></span><span class="${dc}">스캔차이<b>${sgn(x.sd)}</b></span></div></div></div>
         <div class="d-lbl">서가 (${MQ.matches ? '대-중-소' : '수불처-대-중-소'} · 스캔수량)</div>${chips}
         ${x.x ? `<div class="d-cross">🔀 <b>교차 스캔 의심</b> — 이 책이 <b>${x.sd > 0 ? '더' : '덜'} 찍혔고</b> 비슷한 아래 책은 <b>${x.sd > 0 ? '덜' : '더'} 찍혔어요</b>. 같은 자리에서 바꿔 찍었는지 확인하세요.${x.x.map((c) => { const o = byIsbn.get(c[0]); return o ? `<button type="button" class="xr" data-xo="${esc(o.i)}"><span class="g">${esc(c[2])}</span><span class="n">${esc(o.n)}<small>${esc(o.i)} · ${esc(c[3])}</small></span><span class="dv diff ${o.sd < 0 ? 'neg' : 'pos'}">${sgn(o.sd)}</span></button>` : ''; }).join('')}</div>` : ''}
         <div class="d-lbl">📷 사진 <span id="d-pn" style="color:var(--muted);font-weight:400"></span></div><div class="d-photos" id="d-photos"></div>
@@ -1021,7 +1022,7 @@ table.m tbody.g tr:last-child td{border-bottom:1px solid var(--border);padding-b
   const LS = String.fromCharCode(0x2028), PS = String.fromCharCode(0x2029);
   const safeJson = (obj) => JSON.stringify(obj).replace(/</g, '\\u003c').split(LS).join('\\u2028').split(PS).join('\\u2029');
 
-  // meta: { title, source, generatedAt, fileBase }, items: [{ f, i, n, p, s, ss, sd, e, sh:[[code,maj,mid,min,qty],…] }]
+  // meta: { title, source, generatedAt, fileBase }, items: [{ f, i, n, p, s, m(누락재고), ss, sd, e, sh:[[code,maj,mid,min,qty],…] }]
   // libs: { zxing, isbn } — 바코드 인식 모듈 소스(없으면 사진만 찍을 수 있고 바코드 찾기는 꺼짐)
   function build(meta, items, libs) {
     const rid = 'r' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);   // 이 보고서 식별자(브라우저 임시 저장 열쇠)
