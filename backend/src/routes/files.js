@@ -1542,6 +1542,24 @@ router.get('/shares', authenticate, wrap(async (req, res) => {
      WHERE s.created_by=$1 ORDER BY s.created_at DESC`, [req.user.id]);
   res.json({ shares: r.rows.map((x) => ({ id: x.id, token: x.token, kind: x.bundle_name ? 'zip' : 'file', name: x.file_name || x.bundle_name || '(원본 삭제됨)', hasPassword: x.has_pw, maxDownloads: x.max_downloads, downloadCount: x.download_count, expiresAt: x.expires_at, createdAt: x.created_at, reason: x.reason })) });
 }));
+// 바코드용 짧은 주소: 숫자 10자리(/d/1234567890). 1차원 바코드(Code128)에 담아 스캐너로 찍으면 공유 링크가 열린다.
+//  숫자만이라 키보드가 한글 상태 · Caps Lock 이어도 코드 부분은 그대로 들어간다. 무차별 대입은 /d 라우트의 횟수 제한으로 막는다.
+router.post('/shares/by-token/short', authenticate, wrap(async (req, res) => {
+  const token = String(req.body.token || '');
+  const r = await query('SELECT id, short_code, created_by, expires_at FROM share_links WHERE token=$1', [token]);
+  const s = r.rows[0];
+  if (!s || (s.created_by !== req.user.id && req.user.role !== 'admin')) return res.status(404).json({ error: '공유를 찾을 수 없습니다.' });
+  let code = s.short_code;
+  for (let tries = 0; !code && tries < 8; tries++) {
+    const cand = String(crypto.randomInt(1e9, 1e10));   // 10자리(0으로 시작 안 함)
+    const u = await query('UPDATE share_links SET short_code=$1 WHERE id=$2 AND short_code IS NULL AND NOT EXISTS (SELECT 1 FROM share_links WHERE short_code=$1) RETURNING short_code', [cand, s.id]).catch(() => ({ rowCount: 0 }));
+    if (u.rowCount) code = u.rows[0].short_code;
+    else { const again = await query('SELECT short_code FROM share_links WHERE id=$1', [s.id]); code = again.rows[0] && again.rows[0].short_code; }
+  }
+  if (!code) return res.status(500).json({ error: '짧은 주소를 만들지 못했습니다. 다시 시도하세요.' });
+  res.json({ code, url: `${shareWebBase(req)}/d/${code}`, expiresAt: s.expires_at });
+}));
+
 router.delete('/shares/:id(\\d+)', authenticate, wrap(async (req, res) => {
   const r = await query('DELETE FROM share_links WHERE id=$1 AND created_by=$2 RETURNING id', [req.params.id, req.user.id]);
   if (r.rowCount === 0) return res.status(404).json({ error: '공유를 찾을 수 없습니다.' });

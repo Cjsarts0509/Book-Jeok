@@ -3247,7 +3247,7 @@ const App = (() => {
         const fileRows = a.shares.map((s) => {
           const meta = [s.hasPassword ? '🔒' : '', s.maxDownloads != null ? `${s.downloadCount}/${s.maxDownloads}회` : `${s.downloadCount}회`, s.expiresAt ? UI.date(s.expiresAt) + '까지' : '무기한'].filter(Boolean).join(' · ');
           return `<div class="ur-row"><div style="flex:1;min-width:0">${kindIco[s.kind] || '📄'} <b>${UI.escapeHtml(s.name)}</b><br><span class="muted" style="font-size:11px">${meta}</span>${s.reason ? `<br><span class="muted" style="font-size:11px">💬 ${UI.escapeHtml(s.reason)}</span>` : ''}</div>
-            <button class="btn btn-sm btn-ghost" data-copy="${UI.escapeHtml(location.origin + '/share.html?t=' + s.token)}">📋</button><button class="btn btn-sm btn-danger" data-dels="${s.id}">폐기</button></div>`;
+            <button class="btn btn-sm btn-ghost" data-bar="${UI.escapeHtml(s.token)}" data-barname="${UI.escapeHtml(s.name)}" title="바코드로 받기(1차원 바코드 스캐너)">▮▯▮</button><button class="btn btn-sm btn-ghost" data-copy="${UI.escapeHtml(location.origin + '/share.html?t=' + s.token)}">📋</button><button class="btn btn-sm btn-danger" data-dels="${s.id}">폐기</button></div>`;
         }).join('') || '<p class="muted" style="font-size:13px">파일/압축 공유가 없습니다.</p>';
         const folderRows = b.shares.map((s) => {
           const meta = [s.hasPassword ? '🔒' : '', s.expiresAt ? UI.date(s.expiresAt) + '까지' : '무기한', '조회 ' + s.viewCount].filter(Boolean).join(' · ');
@@ -3264,6 +3264,7 @@ const App = (() => {
           <hr class="manual-hr" style="margin:14px 0 10px"><div class="muted" style="font-size:12px;margin-bottom:4px">폴더 공유(읽기 전용)</div>${folderRows}
           <hr class="manual-hr" style="margin:14px 0 10px"><div class="muted" style="font-size:12px;margin-bottom:4px">업로드 요청(외부 업로드)</div>${reqRows}`;
         m.el.querySelectorAll('[data-copy]').forEach((x) => x.addEventListener('click', () => { navigator.clipboard?.writeText(x.dataset.copy); UI.toast('링크 복사됨', 'success'); }));
+        m.el.querySelectorAll('[data-bar]').forEach((x) => x.addEventListener('click', () => shareBarcode(x.dataset.bar, x.dataset.barname)));
         m.el.querySelectorAll('[data-dels]').forEach((x) => x.addEventListener('click', async () => { try { await API.deleteShare(x.dataset.dels); UI.toast('폐기됨', 'success'); load(); } catch (e) { UI.toast(e.message, 'error'); } }));
         m.el.querySelectorAll('[data-delf]').forEach((x) => x.addEventListener('click', async () => { try { await API.deleteFolderShare(x.dataset.delf, state.ownerId); UI.toast('폐기됨', 'success'); load(); } catch (e) { UI.toast(e.message, 'error'); } }));
         m.el.querySelectorAll('[data-delu]').forEach((x) => x.addEventListener('click', async () => { try { await API.deleteUploadRequest(x.dataset.delu, state.ownerId); UI.toast('폐기됨', 'success'); load(); } catch (e) { UI.toast(e.message, 'error'); } }));
@@ -3290,11 +3291,40 @@ const App = (() => {
   }
   const shareOptionValues = (m) => ({ expiresInDays: parseInt(m.q('#exp').value, 10) || 0, password: m.q('#spw').value.trim(), maxDownloads: parseInt(m.q('#smax').value, 10) || 0, reason: reasonVal(m), ...notifyValues(m) });
   function shareResult(m, url) {
-    const qrBtn = state.qrEnabled ? `<button class="btn btn-secondary btn-sm" id="qrbtn">📱 QR 코드</button>` : '';
+    const qrBtn = (state.qrEnabled ? `<button class="btn btn-secondary btn-sm" id="qrbtn">📱 QR 코드</button>` : '') + `<button class="btn btn-secondary btn-sm" id="barbtn" title="QR 을 못 읽는 일반 바코드 스캐너로 여는 1차원 바코드">▮▯▮ 바코드</button>`;
     m.animate(() => { m.q('#result').innerHTML = `<div class="field" style="margin-top:14px"><label>공유 링크 (누구나 접근 가능)</label><input class="input" id="lnk" readonly value="${UI.escapeHtml(url)}"></div><div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn btn-secondary btn-sm" id="copy">📋 링크 복사</button>${qrBtn}</div><div id="qrbox" style="text-align:center;margin-top:12px"></div>`; });
     m.q('#lnk').select();
     m.q('#copy').addEventListener('click', () => { m.q('#lnk').select(); navigator.clipboard?.writeText(url); UI.toast('링크 복사됨', 'success'); });
     m.q('#qrbtn')?.addEventListener('click', () => showQr(m, url));
+    m.q('#barbtn')?.addEventListener('click', () => { const t = (String(url).match(/[?&]t=([^&#]+)/) || [])[1]; if (t) shareBarcode(decodeURIComponent(t)); });
+  }
+  // 공유 링크 → 바코드 화면. 짧은 숫자 주소(/d/숫자)를 Code128 로 크게 그린다.
+  //  노트북: 브라우저 주소창을 누르고 스캔 → 스캐너가 주소를 치고 Enter → 다운로드 화면. 화면에 띄우거나 인쇄해 여러 대가 차례로 찍는다.
+  async function shareBarcode(token, name) {
+    let r; try { r = await API.shareShort(token); } catch (e) { return UI.toast(e.message || '바코드 주소를 만들지 못했습니다', 'error'); }
+    // 바코드에는 'https://' 를 빼서 짧게(크롬 · 엣지 · 웨일은 주소만 쳐도 https 로 연다). 막대는 줄이지 않는다 — 1px 밑으로 줄면 스캐너가 못 읽는다.
+    const code = /^https:\/\//i.test(r.url) ? r.url.replace(/^https:\/\//i, '') : r.url;
+    const bars = UI.code128Svg(code, { module: 2, height: 110 });
+    const exp = r.expiresAt ? `${UI.date(r.expiresAt)}까지` : '무기한';
+    const m = UI.modal(`<h3>▮▯▮ 바코드로 받기${name ? ` <small class="muted" style="font-weight:400">${UI.escapeHtml(name)}</small>` : ''}</h3>
+      <div class="bc-card" id="bc-card"><div class="bc-svg">${bars}</div><div class="bc-url">${UI.escapeHtml(r.url)}</div></div>
+      <ol class="bc-how">
+        <li>노트북에서 브라우저(크롬 · 엣지 · 웨일)를 열고 <b>주소창을 한 번 누릅니다</b>.</li>
+        <li>키보드가 <b>영문 상태</b>인지 확인합니다 (한글이면 <b>한/영</b> 키). 한글 상태면 주소가 깨져 들어갑니다.</li>
+        <li>위 바코드를 스캔합니다 → 주소가 입력되고 Enter 가 눌려 다운로드 화면이 열립니다. (Enter 가 안 눌리면 직접 Enter)</li>
+      </ol>
+      <p class="muted" style="font-size:12px;margin:4px 0 0">공유 기간: ${UI.escapeHtml(exp)} · 바코드 대신 주소를 직접 입력해도 됩니다. 모니터에서 잘 안 찍히면 「크게 보기」를 누르거나 밝기를 올리거나 인쇄해서 찍으세요. 휴대폰 화면처럼 좁으면 바코드가 잘리니 옆으로 밀어 보거나 크게 보기를 쓰세요.</p>
+      <div class="modal-actions"><button class="btn btn-ghost" id="bc-copy">📋 주소 복사</button><button class="btn btn-ghost" id="bc-print">🖨️ 인쇄</button><button class="btn btn-secondary" id="bc-full">⛶ 크게 보기</button><button class="btn btn-primary" id="bc-close">닫기</button></div>`);
+    m.el.querySelector('.modal').classList.add('modal-wide', 'modal-barcode');
+    m.q('#bc-close').addEventListener('click', m.close);
+    m.q('#bc-copy').addEventListener('click', () => { navigator.clipboard?.writeText(r.url); UI.toast('주소 복사됨', 'success'); });
+    m.q('#bc-full').addEventListener('click', () => { const el = m.q('#bc-card'); (el.requestFullscreen ? el.requestFullscreen() : Promise.reject()).catch(() => UI.toast('이 브라우저는 전체 화면을 지원하지 않습니다', 'info')); });
+    m.q('#bc-print').addEventListener('click', () => {
+      const w = window.open('', '_blank'); if (!w) return UI.toast('팝업이 막혀 있습니다 — 팝업을 허용해 주세요', 'error');
+      const card = `<div style="margin:0 0 18mm;text-align:center">${UI.code128Svg(code, { module: 2, height: 110 }).replace('<svg ', '<svg style="width:150mm;height:auto" ')}<div style="font:14px monospace;margin-top:6px">${UI.escapeHtml(r.url)}</div></div>`;
+      w.document.write(`<!doctype html><meta charset="utf-8"><title>바코드</title><body style="margin:15mm;font-family:sans-serif"><h3 style="margin:0 0 10mm">${UI.escapeHtml(name || '공유 파일')} — 바코드로 받기</h3>${card.repeat(4)}<script>window.onload=()=>{window.print()}<\/script></body>`);
+      w.document.close();
+    });
   }
   // 공유 링크 QR 표시(토글). 관리자가 껐으면 버튼이 없으므로 호출되지 않음.
   async function showQr(m, url) {

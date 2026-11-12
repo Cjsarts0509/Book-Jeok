@@ -1286,3 +1286,14 @@ th { background: var(--bg); font-weight: 700; color: var(--text-muted); font-siz
 .sad-xdiff { font-weight: 700; white-space: nowrap; }
 .sad-xdiff.neg { color: var(--danger); }
 .sad-xdiff.pos { color: #1f6feb; }
+
+/* 바코드로 받기(공유 링크 → Code128) — 스캐너가 읽게 늘 흰 바탕 · 검은 막대 */
+.modal.modal-barcode { max-width: 880px; }   /* 바코드(막대 2px 기준 약 730px)가 줄지 않고 들어가게 */
+.bc-card { background: #fff; border: 1px solid var(--border); border-radius: 12px; padding: 18px 12px 12px; text-align: center; overflow-x: auto; }
+.bc-card .bc-svg { overflow-x: auto; }
+.bc-card .bc-svg svg { max-width: none; display: inline-block; }   /* 줄이지 않는다(막대가 1px 밑이면 못 읽음) */
+.bc-card .bc-url { font: 13px ui-monospace, SFMono-Regular, Menlo, monospace; color: #111; margin-top: 8px; word-break: break-all; }
+.bc-card:fullscreen { display: flex; flex-direction: column; align-items: center; justify-content: center; border: 0; border-radius: 0; padding: 4vw; }
+.bc-card:fullscreen .bc-svg svg { width: 92vw; height: auto; max-width: none; }
+.bc-card:fullscreen .bc-url { font-size: 22px; }
+.bc-how { margin: 12px 0 0 18px; padding: 0; font-size: 13px; line-height: 1.7; }

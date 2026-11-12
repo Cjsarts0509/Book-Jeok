@@ -177,6 +177,17 @@ app.use('/api/upload-link', require('./routes/uploadLink')); // 공개 업로드
 app.use('/api/sa-report', require('./routes/saReport').router); // 재고조사 HTML 보고서 자동 저장(열쇠)
 app.use('/api/folder-share', require('./routes/folderShare')); // 공개 폴더 공유(읽기 전용)
 app.use('/api/meta', require('./routes/meta')); // 영업점 목록·활성 공지 (로그인 사용자 공용)
+// 바코드용 짧은 주소: /d/<숫자> → 공유 페이지(share.html?t=…). 대소문자 무관(/D/ 도) · 없는 번호를 찔러 보는 것은 횟수 제한.
+const shortLimiter = rateLimit({ windowMs: 10 * 60 * 1000, max: 30, skipSuccessfulRequests: true, keyGenerator: rateKey, standardHeaders: false, legacyHeaders: false, message: '잠시 뒤 다시 시도하세요.' });
+app.get('/d/:code', shortLimiter, async (req, res) => {
+  const code = String(req.params.code || '').replace(/\D/g, '');
+  try {
+    const r = code.length >= 6 && code.length <= 12 ? await require('./db').query('SELECT token FROM share_links WHERE short_code=$1', [code]) : { rowCount: 0 };
+    if (!r.rowCount) return res.status(404).type('html').send('<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><body style="font-family:system-ui,sans-serif;padding:40px;text-align:center"><h2>링크를 찾을 수 없습니다</h2><p>바코드가 잘못 찍혔거나 공유가 폐기되었습니다. 다시 스캔해 보세요.</p></body>');
+    res.set('Cache-Control', 'no-store');
+    res.redirect(302, `/share.html?t=${encodeURIComponent(r.rows[0].token)}`);
+  } catch (e) { res.status(500).type('text').send('오류가 났습니다. 잠시 뒤 다시 시도하세요.'); }
+});
 
 // (선택) 프런트엔드를 같은 서버에서 서빙하려면 SERVE_FRONTEND=1
 if (process.env.SERVE_FRONTEND === '1') {

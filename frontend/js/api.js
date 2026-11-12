@@ -156,6 +156,7 @@ const API = (() => {
     deleteUploadRequest: (id, ownerId) => req('DELETE', `/files/upload-requests/${id}${ownerId ? '?ownerId=' + ownerId : ''}`),
     myShares: () => req('GET', '/files/shares'),
     deleteShare: (id) => req('DELETE', `/files/shares/${id}`),
+    shareShort: (token) => req('POST', '/files/shares/by-token/short', { token }),   // 바코드용 짧은 주소(/d/숫자)
     createFolderShare: (data) => req('POST', '/files/folder-shares', data),
     folderShares: (ownerId) => req('GET', `/files/folder-shares${ownerId ? '?ownerId=' + ownerId : ''}`),
     deleteFolderShare: (id, ownerId) => req('DELETE', `/files/folder-shares/${id}${ownerId ? '?ownerId=' + ownerId : ''}`),

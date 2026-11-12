@@ -396,6 +396,11 @@ const MIGRATIONS = [
       PRIMARY KEY (user_id, notice_id)
     );
   ` },
+  // 공유 링크의 바코드용 짧은 숫자 주소(/d/<숫자>) — QR 을 못 읽는 1차원 바코드 스캐너로 링크를 여는 데 쓴다
+  { id: '0014_share_short_code', sql: `
+    ALTER TABLE share_links ADD COLUMN IF NOT EXISTS short_code VARCHAR(12);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_share_short_code ON share_links(short_code) WHERE short_code IS NOT NULL;
+  ` },
 ];
 
 // ── S18 · 마이그레이션 드라이런 ────────────────────────
