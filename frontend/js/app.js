@@ -3299,7 +3299,7 @@ const App = (() => {
     m.q('#barbtn')?.addEventListener('click', () => { const t = (String(url).match(/[?&]t=([^&#]+)/) || [])[1]; if (t) shareBarcode(decodeURIComponent(t)); });
   }
   // 공유 링크 → 바코드 화면. 짧은 숫자 주소(/d/숫자)를 Code128 로 크게 그린다.
-  //  노트북: 브라우저 주소창을 누르고 스캔 → 스캐너가 주소를 치고 Enter → 다운로드 화면. 화면에 띄우거나 인쇄해 여러 대가 차례로 찍는다.
+  //  노트북: 브라우저 주소창을 누르고 스캔 → 스캐너가 주소를 치고 Enter → 바로 다운로드. 화면에 띄우거나 인쇄해 여러 대가 차례로 찍는다.
   async function shareBarcode(token, name) {
     let r; try { r = await API.shareShort(token); } catch (e) { return UI.toast(e.message || '바코드 주소를 만들지 못했습니다', 'error'); }
     // 바코드에는 'https://' 를 빼서 짧게(크롬 · 엣지 · 웨일은 주소만 쳐도 https 로 연다). 막대는 줄이지 않는다 — 1px 밑으로 줄면 스캐너가 못 읽는다.
@@ -3311,7 +3311,7 @@ const App = (() => {
       <ol class="bc-how">
         <li>노트북에서 브라우저(크롬 · 엣지 · 웨일)를 열고 <b>주소창을 한 번 누릅니다</b>.</li>
         <li>키보드가 <b>영문 상태</b>인지 확인합니다 (한글이면 <b>한/영</b> 키). 한글 상태면 주소가 깨져 들어갑니다.</li>
-        <li>위 바코드를 스캔합니다 → 주소가 입력되고 Enter 가 눌려 다운로드 화면이 열립니다. (Enter 가 안 눌리면 직접 Enter)</li>
+        <li>위 바코드를 스캔합니다 → 주소가 입력되고 Enter 가 눌려 <b>바로 다운로드</b>됩니다(다운로드 폴더). Enter 가 안 눌리면 직접 Enter. 비밀번호를 건 공유는 다운로드 화면이 먼저 열립니다.</li>
       </ol>
       <p class="muted" style="font-size:12px;margin:4px 0 0">공유 기간: ${UI.escapeHtml(exp)} · 바코드 대신 주소를 직접 입력해도 됩니다. 모니터에서 잘 안 찍히면 「크게 보기」를 누르거나 밝기를 올리거나 인쇄해서 찍으세요. 휴대폰 화면처럼 좁으면 바코드가 잘리니 옆으로 밀어 보거나 크게 보기를 쓰세요.</p>
       <div class="modal-actions"><button class="btn btn-ghost" id="bc-copy">📋 주소 복사</button><button class="btn btn-ghost" id="bc-print">🖨️ 인쇄</button><button class="btn btn-secondary" id="bc-full">⛶ 크게 보기</button><button class="btn btn-primary" id="bc-close">닫기</button></div>`);

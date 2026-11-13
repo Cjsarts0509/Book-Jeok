@@ -90,3 +90,4 @@ router.get('/:token/download', attemptLimiter, wrap(async (req, res) => {
 }));
 
 module.exports = router;
+module.exports.resolveShare = resolveShare;   // 바코드 짧은 주소(/d)에서 '바로 다운로드' 판단에 씀

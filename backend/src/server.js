@@ -177,15 +177,33 @@ app.use('/api/upload-link', require('./routes/uploadLink')); // 공개 업로드
 app.use('/api/sa-report', require('./routes/saReport').router); // 재고조사 HTML 보고서 자동 저장(열쇠)
 app.use('/api/folder-share', require('./routes/folderShare')); // 공개 폴더 공유(읽기 전용)
 app.use('/api/meta', require('./routes/meta')); // 영업점 목록·활성 공지 (로그인 사용자 공용)
-// 바코드용 짧은 주소: /d/<숫자> → 공유 페이지(share.html?t=…). 대소문자 무관(/D/ 도) · 없는 번호를 찔러 보는 것은 횟수 제한.
+// 바코드용 짧은 주소: /d/<숫자> → 바로 다운로드. 대소문자 무관(/D/ 도) · 없는 번호를 찔러 보는 것은 횟수 제한.
+//  비밀번호 · 만료 · 횟수 소진 · 원본 삭제면 공유 페이지(share.html)로 보내 거기서 안내한다.
+//  다운로드는 작은 안내 페이지가 곧바로 /api/share/<토큰>/download 로 넘겨 시작한다(새 탭이 빈 화면으로 남지 않게 파일 이름 · 안내를 보여 줌).
 const shortLimiter = rateLimit({ windowMs: 10 * 60 * 1000, max: 30, skipSuccessfulRequests: true, keyGenerator: rateKey, standardHeaders: false, legacyHeaders: false, message: '잠시 뒤 다시 시도하세요.' });
+const escHtml = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const fmtBytes = (n) => { n = Number(n) || 0; const u = ['B', 'KB', 'MB', 'GB']; let i = 0; while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; } return `${n.toFixed(i ? 1 : 0)} ${u[i]}`; };
 app.get('/d/:code', shortLimiter, async (req, res) => {
   const code = String(req.params.code || '').replace(/\D/g, '');
   try {
     const r = code.length >= 6 && code.length <= 12 ? await require('./db').query('SELECT token FROM share_links WHERE short_code=$1', [code]) : { rowCount: 0 };
     if (!r.rowCount) return res.status(404).type('html').send('<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><body style="font-family:system-ui,sans-serif;padding:40px;text-align:center"><h2>링크를 찾을 수 없습니다</h2><p>바코드가 잘못 찍혔거나 공유가 폐기되었습니다. 다시 스캔해 보세요.</p></body>');
+    const token = r.rows[0].token;
     res.set('Cache-Control', 'no-store');
-    res.redirect(302, `/share.html?t=${encodeURIComponent(r.rows[0].token)}`);
+    const s = await require('./routes/share').resolveShare(token);
+    const exhausted = s && !s.expired && s.maxDownloads != null && s.downloadCount >= s.maxDownloads;
+    if (!s || s.expired || s.passwordHash || exhausted) return res.redirect(302, `/share.html?t=${encodeURIComponent(token)}`);
+    const dl = `/api/share/${encodeURIComponent(token)}/download`;
+    res.type('html').send(`<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="refresh" content="0;url=${dl}"><title>다운로드 — ${escHtml(s.name)}</title>
+<style>body{margin:0;font-family:"Malgun Gothic","Apple SD Gothic Neo",system-ui,sans-serif;background:#f6f7f9;color:#1f2328;display:flex;min-height:100vh;align-items:center;justify-content:center}
+.c{background:#fff;border:1px solid #e5e7eb;border-radius:16px;padding:28px 30px;max-width:520px;width:calc(100% - 32px);text-align:center;box-shadow:0 10px 30px rgba(0,0,0,.08)}
+h1{font-size:20px;margin:0 0 6px}.n{font-weight:700;word-break:break-all;margin:14px 0 2px}.m{color:#6b7280;font-size:13px}
+a.b{display:inline-block;margin-top:18px;background:#f5b400;color:#1f2328;font-weight:800;text-decoration:none;padding:10px 18px;border-radius:10px}</style></head>
+<body><div class="c"><h1>⬇️ 다운로드를 시작했습니다</h1><div class="m">북적북적 웹하드</div>
+<div class="n">${escHtml(s.name)}</div><div class="m">${escHtml(fmtBytes(s.size))}</div>
+<p class="m" style="margin-top:16px">브라우저의 <b>다운로드</b> 폴더에 저장됩니다. 받은 뒤 이 창은 닫아도 됩니다.</p>
+<a class="b" href="${dl}">시작되지 않으면 여기를 누르세요</a></div></body></html>`);
   } catch (e) { res.status(500).type('text').send('오류가 났습니다. 잠시 뒤 다시 시도하세요.'); }
 });
 
